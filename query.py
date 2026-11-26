@@ -885,7 +885,12 @@ def _attach_sources(answer: str, sources: list[str]) -> str:
     """回答本文に出典一覧を添付する。"""
     if not sources:
         return answer
-    listing = "\n".join(f"[{index}] {source}" for index, source in enumerate(sources, start=1))
+    # 出典に含まれるローカル絶対パス等は公開され得るためマスクする。
+    # 評価指標用の生パスは evaluate.py の sources 側で別途保持される。
+    listing = "\n".join(
+        f"[{index}] {mask_secrets(source)}"
+        for index, source in enumerate(sources, start=1)
+    )
     return f"{answer}\n\n出典:\n{listing}"
 
 

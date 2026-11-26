@@ -3941,11 +3941,10 @@ class CheckEvalResultsDelegationTest(_RustSkipCounter, unittest.TestCase):
             (root / "other.json").write_text("{}", encoding="utf-8")
             found = bridge._discover_eval_results(root)
 
-        # パターンは eval-results-*.json（ハイフン区切り）のみ。
-        # eval-results.json は一致しないため列挙されない。
+        # eval-results.json（主成果物）も対象に含める。
         self.assertEqual(
             [path.name for path in found],
-            ["eval-results-cloud-full.json"],
+            ["eval-results-cloud-full.json", "eval-results.json"],
         )
 
     def test_cli_uses_discovery_when_paths_omitted(self):

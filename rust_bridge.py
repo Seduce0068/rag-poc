@@ -96,7 +96,9 @@ def rust_binary_path() -> Path:
 
     - RAG_RUST_BIN が設定されていれば最優先（絶対パスはそのまま、
       相対パスは config.REPO_ROOT 基準で解決）。REPO_ROOT 配下でなければ拒否。
-    - 未設定なら REPO_ROOT/rag_poc/ragcore/target/debug/ragcore（既定はそのまま）。
+    - 未設定なら、まず rag_poc リポジトリ直下の
+      ragcore/target/debug/ragcore（CI checkout 想定）、次に従来の
+      REPO_ROOT/rag_poc/ragcore/target/debug/ragcore（workspace 想定）を試す。
     """
     override = os.environ.get(ENV_BINARY)
     if override:
@@ -110,7 +112,17 @@ def rust_binary_path() -> Path:
                 f"{config.mask_secrets(str(resolved))}"
             )
         return resolved
-    return (config.REPO_ROOT / DEFAULT_BINARY).resolve()
+    # CI（checkout 直下に ragcore）と workspace（rag_poc/ 配下）の両レイアウトを許可。
+    candidates = (
+        Path(__file__).resolve().parent / "ragcore/target/debug/ragcore",
+        (config.REPO_ROOT / DEFAULT_BINARY).resolve(),
+    )
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved.is_file():
+            return resolved
+    # 未ビルド時は Diagnostics に分かりやすい方を返す（上書き推奨）。
+    return candidates[0].resolve()
 
 
 def _read_bounded(stream: BinaryIO) -> tuple[str, bool]:
@@ -235,8 +247,17 @@ def check_eval_results(paths: Sequence[str | Path]) -> dict:
 
 
 def _discover_eval_results(root: Path) -> list[Path]:
-    """指定ツリーの eval-results-*.json をファイル名順に列挙する。"""
-    return sorted(root.rglob("eval-results-*.json"))
+    """指定ツリーの公開対象 eval-results*.json をファイル名順に列挙する。
+
+    - eval-results.json（主成果物）も対象に含める。
+    - eval-results-cloud-answer.json はローカル検証用で answer を含むため除外。
+    """
+    excluded = {"eval-results-cloud-answer.json"}
+    return sorted(
+        path
+        for path in root.rglob("eval-results*.json")
+        if path.name not in excluded
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
