@@ -35,11 +35,24 @@ if "requests" not in sys.modules:
         _stub.post = lambda *a, **k: None  # type: ignore[attr-defined]
         sys.modules["requests"] = _stub
 
+import cloud_client
 import config
 import evaluate
 import ingest
 import ollama_client
 import query
+
+
+@contextlib.contextmanager
+def _temporary_env(**values):
+    """環境変数を一時的に差し替える（None は削除）。実通信・実書き込みなし。"""
+    with mock.patch.dict(os.environ, {}, clear=False):
+        for name, value in values.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = str(value)
+        yield
 
 
 class ConfigTest(unittest.TestCase):
@@ -1947,6 +1960,532 @@ class GeneratedAnswerErrorTest(unittest.TestCase):
         self.assertNotIn("ZZZTIMEOUTTOKENZZZ", json.dumps(record, ensure_ascii=False))
         self.assertIsNone(record["answer"])
         self.assertIsNotNone(record["answer_latency_sec"])
+
+
+class CloudClientTest(unittest.TestCase):
+    """cloud_client の v1 契約を requests.Session の fake で検証する（実 HTTP なし）。
+
+    v1-client は requests.Session().request() と _SESSION の遅延生成を使う。
+    _SESSION はモジュール共有なのでテストごとに fake へ作り直し、前のテストの
+    handler が呼ばれないようにする。_SESSION が非 None の間は HTTPAdapter /
+    Retry の import が走らないため、実通信も外部モジュールの準備も不要。
+    秘密情報はダミー文字列のみを使う。
+    """
+
+    GO_KEY = "OPENCODE_GO_API_KEY"
+    LEGACY_KEY = "OPENCODE_API_KEY"
+
+    class FakeRequestException(Exception):
+        """requests.RequestException の代わりに使うローカル例外。"""
+
+    class FakeHTTPError(FakeRequestException):
+        def __init__(self, status_code, message="http error"):
+            super().__init__(message)
+            self.response = types.SimpleNamespace(status_code=status_code)
+
+    def setUp(self):
+        self._old_session = getattr(cloud_client, "_SESSION", None)
+        self._old_usage = getattr(cloud_client, "_LAST_USAGE", None)
+        self._handler = None
+        self._session = self._make_fake_session()
+        cloud_client._SESSION = self._session
+        cloud_client._LAST_USAGE = None
+
+    def tearDown(self):
+        cloud_client._SESSION = self._old_session
+        cloud_client._LAST_USAGE = self._old_usage
+
+    def _make_fake_session(self):
+        """config.RETRY_* に従い status code をリトライする fake Session。"""
+        test = self
+
+        class FakeSession:
+            def __init__(self):
+                self.mounts = {}
+                self.calls = []
+
+            def mount(self, prefix, adapter):
+                self.mounts[prefix] = adapter
+
+            def request(self, method, url, **kwargs):
+                handler = test._handler
+                if handler is None:
+                    raise AssertionError("handler が未設定です")
+                total = int(config.RETRY_TOTAL)
+                forcelist = set(config.RETRY_STATUS_FORCELIST)
+                response = None
+                for attempt in range(total + 1):
+                    self.calls.append((method, url, kwargs))
+                    response = handler(url, **kwargs)
+                    if (getattr(response, "status_code", None) in forcelist
+                            and attempt < total):
+                        continue
+                    return response
+                return response
+
+        return FakeSession()
+
+    def _fake_requests(self, handler):
+        """cloud_client.requests を差し替え、handler を fake Session へ渡す。"""
+        self._handler = handler
+
+        class _FakeSession:
+            def request(self, method, url, **kwargs):
+                return handler(url, **kwargs)
+
+            def mount(self, prefix, adapter):
+                return None
+
+        return types.SimpleNamespace(
+            post=handler,
+            Session=_FakeSession,
+            RequestException=self.FakeRequestException,
+            HTTPError=self.FakeHTTPError,
+            Timeout=self.FakeRequestException,
+        )
+
+    @classmethod
+    def _response(cls, data, status_code=200, text=""):
+        def raise_for_status():
+            if status_code >= 400:
+                raise cls.FakeHTTPError(status_code, "http %d" % status_code)
+
+        return types.SimpleNamespace(
+            status_code=status_code,
+            text=text,
+            headers={},
+            json=lambda: data,
+            raise_for_status=raise_for_status,
+        )
+
+    @contextlib.contextmanager
+    def _cloud_env(self, **overrides):
+        values = {
+            cloud_client.ENV_ENABLED: "1",
+            self.GO_KEY: "key-value-for-test",
+        }
+        values.update(overrides)
+        with _temporary_env(**values):
+            yield
+
+    @staticmethod
+    def _read_usage():
+        """v1-client の last_usage() が返すコピーをそのまま読む。"""
+        return cloud_client.last_usage()
+
+    @staticmethod
+    def _usage_text(value):
+        if isinstance(value, (dict, list, tuple)):
+            return json.dumps(value, default=str, ensure_ascii=False)
+        data = getattr(value, "__dict__", None)
+        if isinstance(data, dict):
+            return json.dumps(data, default=str, ensure_ascii=False)
+        return str(value)
+
+    def test_enabled_only_true_for_exact_one(self):
+        for value in ("1", "true", "True", "yes", "01", "0", "", " 1 "):
+            with self.subTest(value=value):
+                with _temporary_env(**{cloud_client.ENV_ENABLED: value}):
+                    self.assertIs(cloud_client.enabled(), value == "1")
+
+    def test_enabled_false_when_unset(self):
+        with _temporary_env(**{cloud_client.ENV_ENABLED: None}):
+            self.assertIs(cloud_client.enabled(), False)
+
+    def test_api_key_name_skips_empty_string(self):
+        with _temporary_env(**{self.LEGACY_KEY: "", self.GO_KEY: "go-value"}):
+            self.assertEqual(cloud_client.api_key_name(), self.GO_KEY)
+
+    def test_api_key_name_prefers_go_key(self):
+        with _temporary_env(
+            **{self.LEGACY_KEY: "legacy-value", self.GO_KEY: "go-value"}
+        ):
+            self.assertEqual(cloud_client.api_key_name(), self.GO_KEY)
+
+    def test_api_key_name_returns_none_without_keys(self):
+        with _temporary_env(**{self.LEGACY_KEY: None, self.GO_KEY: None}):
+            self.assertIsNone(cloud_client.api_key_name())
+
+    def test_api_key_name_never_returns_the_value(self):
+        secret = "ZZZKEYVALUEZZZ"
+        with _temporary_env(**{self.GO_KEY: secret}):
+            name = cloud_client.api_key_name()
+        self.assertEqual(name, self.GO_KEY)
+        self.assertNotEqual(name, secret)
+
+    def test_embed_batches_and_preserves_input_order(self):
+        texts = ["text-%d" % index for index in range(7)]
+        lookup = {text: [float(index)] for index, text in enumerate(texts)}
+        seen = []
+
+        def handler(url, **kwargs):
+            raw = kwargs["json"]["input"]
+            batch = [raw] if isinstance(raw, str) else list(raw)
+            seen.append(batch)
+            return self._response(
+                {"data": [{"embedding": lookup[text]} for text in batch]}
+            )
+
+        with self._cloud_env(), \
+                mock.patch.object(
+                    cloud_client, "requests", self._fake_requests(handler)
+                ), \
+                mock.patch("time.sleep", lambda *_: None):
+            vectors = cloud_client.embed(texts, batch_size=3)
+
+        self.assertEqual(vectors, [[float(index)] for index in range(7)])
+        self.assertEqual(seen, [texts[0:3], texts[3:6], texts[6:7]])
+
+    def test_embed_batch_size_zero_is_rejected_without_http(self):
+        calls = []
+
+        def handler(url, **kwargs):
+            calls.append(kwargs)
+            return self._response({"data": [{"embedding": [0.0]}]})
+
+        with self._cloud_env(), \
+                mock.patch.object(
+                    cloud_client, "requests", self._fake_requests(handler)
+                ):
+            with self.assertRaisesRegex(Exception, "batch_size"):
+                cloud_client.embed(["a"], batch_size=0)
+
+        self.assertEqual(calls, [])
+
+    def test_embed_negative_batch_size_is_rejected(self):
+        calls = []
+
+        def handler(url, **kwargs):
+            calls.append(kwargs)
+            return self._response({"data": [{"embedding": [0.0]}]})
+
+        with self._cloud_env(), \
+                mock.patch.object(
+                    cloud_client, "requests", self._fake_requests(handler)
+                ):
+            with self.assertRaisesRegex(Exception, "batch_size"):
+                cloud_client.embed(["a"], batch_size=-1)
+
+        self.assertEqual(calls, [])
+
+    def test_embed_retries_429_then_succeeds(self):
+        state = {"count": 0}
+
+        def handler(url, **kwargs):
+            index = state["count"]
+            state["count"] += 1
+            if index == 0:
+                return self._response(
+                    {"error": "too many requests"}, status_code=429
+                )
+            return self._response({"data": [{"embedding": [0.25]}]})
+
+        with self._cloud_env(), \
+                mock.patch.object(
+                    cloud_client, "requests", self._fake_requests(handler)
+                ), \
+                mock.patch("time.sleep", lambda *_: None):
+            vectors = cloud_client.embed(["a"], batch_size=1)
+
+        self.assertEqual(vectors, [[0.25]])
+        self.assertEqual(state["count"], 2)
+
+    def test_embed_retries_5xx_then_succeeds(self):
+        statuses = (500, 503)
+        state = {"count": 0}
+
+        def handler(url, **kwargs):
+            index = state["count"]
+            state["count"] += 1
+            if index < len(statuses):
+                return self._response(
+                    {"error": "server error"}, status_code=statuses[index]
+                )
+            return self._response({"data": [{"embedding": [0.5]}]})
+
+        with self._cloud_env(), \
+                mock.patch.object(
+                    cloud_client, "requests", self._fake_requests(handler)
+                ), \
+                mock.patch("time.sleep", lambda *_: None):
+            vectors = cloud_client.embed(["a"], batch_size=1)
+
+        self.assertEqual(vectors, [[0.5]])
+        self.assertEqual(state["count"], 3)
+
+    def test_embed_fails_fast_on_4xx(self):
+        for status in (400, 401, 404):
+            with self.subTest(status=status):
+                state = {"count": 0}
+
+                def handler(url, _status=status, **kwargs):
+                    state["count"] += 1
+                    return self._response(
+                        {"error": "client error"}, status_code=_status
+                    )
+
+                with self._cloud_env(), \
+                        mock.patch.object(
+                            cloud_client, "requests", self._fake_requests(handler)
+                        ), \
+                        mock.patch("time.sleep", lambda *_: None):
+                    with self.assertRaises(Exception):
+                        cloud_client.embed(["a"], batch_size=1)
+
+                self.assertEqual(state["count"], 1)
+
+    def test_chat_attaches_session_header(self):
+        seen = []
+
+        def handler(url, **kwargs):
+            seen.append(dict(kwargs.get("headers") or {}))
+            return self._response(
+                {"choices": [{"message": {"content": "ok"}}]}
+            )
+
+        with self._cloud_env(), \
+                mock.patch.object(
+                    cloud_client, "requests", self._fake_requests(handler)
+                ):
+            answer = cloud_client.chat([{"role": "user", "content": "hi"}])
+
+        self.assertEqual(answer, "ok")
+        self.assertEqual(len(seen), 1)
+        values = [
+            value for key, value in seen[0].items()
+            if str(key).lower() == "x-opencode-session"
+        ]
+        self.assertTrue(values, seen[0])
+        self.assertTrue(all(isinstance(value, str) and value for value in values))
+
+    def test_embed_omits_session_header(self):
+        seen = []
+
+        def handler(url, **kwargs):
+            seen.append(dict(kwargs.get("headers") or {}))
+            return self._response({"data": [{"embedding": [0.1]}]})
+
+        with self._cloud_env(), \
+                mock.patch.object(
+                    cloud_client, "requests", self._fake_requests(handler)
+                ):
+            cloud_client.embed(["a"], batch_size=1)
+
+        self.assertEqual(len(seen), 1)
+        keys = {str(key).lower() for key in seen[0]}
+        self.assertNotIn("x-opencode-session", keys)
+
+    def test_usage_is_readable_after_chat(self):
+        usage = {"prompt_tokens": 111, "completion_tokens": 7, "total_tokens": 118}
+
+        def handler(url, **kwargs):
+            return self._response({
+                "choices": [{"message": {"content": "ok"}}],
+                "usage": usage,
+            })
+
+        with self._cloud_env(), \
+                mock.patch.object(
+                    cloud_client, "requests", self._fake_requests(handler)
+                ):
+            self.assertEqual(
+                cloud_client.chat([{"role": "user", "content": "hi"}]), "ok"
+            )
+
+        observed = self._read_usage()
+        self.assertIsNotNone(observed, "usage が last_usage() 等で参照できません")
+        text = self._usage_text(observed)
+        self.assertIn("111", text)
+        self.assertIn("118", text)
+
+    def test_usage_is_readable_after_embed(self):
+        usage = {"prompt_tokens": 222, "total_tokens": 229}
+
+        def handler(url, **kwargs):
+            return self._response({
+                "data": [{"embedding": [0.1]}],
+                "usage": usage,
+            })
+
+        with self._cloud_env(), \
+                mock.patch.object(
+                    cloud_client, "requests", self._fake_requests(handler)
+                ):
+            cloud_client.embed(["a"], batch_size=1)
+
+        observed = self._read_usage()
+        self.assertIsNotNone(observed, "usage が last_usage() 等で参照できません")
+        text = self._usage_text(observed)
+        self.assertIn("222", text)
+        self.assertIn("229", text)
+
+    def test_error_messages_mask_key_value_and_endpoint(self):
+        secret_value = "ZZZKEYVALUEZZZ"
+        secret_url = "https://cloud.example.test/v1?api_key=ZZZURLSECRETZZZ"
+
+        def handler(url, **kwargs):
+            raise self.FakeRequestException(
+                "failed for " + secret_url + " api_key=" + secret_value
+            )
+
+        with _temporary_env(**{
+            cloud_client.ENV_ENABLED: "1",
+            self.GO_KEY: secret_value,
+            cloud_client.ENV_BASE_URL: secret_url,
+        }), mock.patch.object(
+            cloud_client, "requests", self._fake_requests(handler)
+        ), mock.patch("time.sleep", lambda *_: None):
+            with self.assertRaises(Exception) as ctx:
+                cloud_client.embed(["a"], batch_size=1)
+
+        message = str(ctx.exception)
+        for needle in (secret_value, "cloud.example.test", "ZZZURLSECRETZZZ"):
+            with self.subTest(needle=needle):
+                self.assertNotIn(needle, message)
+        self.assertIn("<masked>", message)
+
+    def test_chat_error_masks_secret(self):
+        secret = "Bearer ZZZCHATSECRETZZZ"
+
+        def handler(url, **kwargs):
+            raise self.FakeRequestException("chat failed: " + secret)
+
+        with self._cloud_env(), \
+                mock.patch.object(
+                    cloud_client, "requests", self._fake_requests(handler)
+                ), \
+                mock.patch("time.sleep", lambda *_: None):
+            with self.assertRaises(Exception) as ctx:
+                cloud_client.chat([{"role": "user", "content": "hi"}])
+
+        message = str(ctx.exception)
+        self.assertNotIn("ZZZCHATSECRETZZZ", message)
+        self.assertIn("<masked>", message)
+
+    def test_shared_session_mounts_retry_with_config_values(self):
+        """_shared_session() が config.RETRY_* を Retry へ渡して mount すること。"""
+        captured = {}
+
+        class FakeRetry:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+
+        class FakeAdapter:
+            def __init__(self, max_retries=None):
+                self.max_retries = max_retries
+
+        class MountSession:
+            def __init__(self):
+                self.mounts = {}
+
+            def mount(self, prefix, adapter):
+                self.mounts[prefix] = adapter
+
+        adapters_module = types.ModuleType("requests.adapters")
+        adapters_module.HTTPAdapter = FakeAdapter
+        retry_module = types.ModuleType("urllib3.util.retry")
+        retry_module.Retry = FakeRetry
+        util_module = types.ModuleType("urllib3.util")
+        util_module.retry = retry_module
+        urllib3_module = types.ModuleType("urllib3")
+        urllib3_module.util = util_module
+
+        fake_requests = types.SimpleNamespace(
+            Session=MountSession,
+            RequestException=self.FakeRequestException,
+        )
+        with mock.patch.object(cloud_client, "requests", fake_requests), \
+                mock.patch.object(cloud_client, "_SESSION", None), \
+                mock.patch.dict(sys.modules, {
+                    "requests.adapters": adapters_module,
+                    "urllib3": urllib3_module,
+                    "urllib3.util": util_module,
+                    "urllib3.util.retry": retry_module,
+                }):
+            session = cloud_client._shared_session()
+
+        self.assertEqual(set(session.mounts), {"http://", "https://"})
+        self.assertIsInstance(session.mounts["https://"].max_retries, FakeRetry)
+        self.assertEqual(captured.get("total"), config.RETRY_TOTAL)
+        self.assertEqual(captured.get("backoff_factor"), config.RETRY_BACKOFF)
+        self.assertIn(429, captured.get("status_forcelist", ()))
+        self.assertEqual(
+            frozenset(captured.get("allowed_methods", ())),
+            config.RETRY_ALLOWED_METHODS,
+        )
+
+
+class CloudConfigGuardTest(unittest.TestCase):
+    """config.validate_settings() がクラウド設定を fail-closed で検証すること。
+
+    config.py は読み取り専用のため、mock.patch.dict で環境変数を差し替え、
+    mock.patch.object で定数を一時固定して validate_settings() を呼ぶ。
+    """
+
+    def _problems(self, **values):
+        with _temporary_env(**values), \
+                mock.patch.object(config, "EMBED_MODEL", "qwen2.5:3b"):
+            return config.validate_settings()
+
+    def test_cloud_enabled_without_embed_model_is_rejected(self):
+        problems = self._problems(
+            **{
+                config.ENV_CLOUD_ENABLED: "1",
+                config.ENV_CLOUD_CHAT_ENABLED: "0",
+                config.ENV_CLOUD_EMBED_MODEL: None,
+            }
+        )
+        self.assertTrue(
+            any(config.ENV_CLOUD_EMBED_MODEL in text for text in problems),
+            problems,
+        )
+
+    def test_cloud_vector_size_mismatch_is_rejected(self):
+        with mock.patch.object(config, "VECTOR_SIZE", 2048):
+            problems = self._problems(
+                **{
+                    config.ENV_CLOUD_ENABLED: "1",
+                    config.ENV_CLOUD_CHAT_ENABLED: "0",
+                    config.ENV_CLOUD_EMBED_MODEL: "text-embedding-3-small",
+                }
+            )
+        self.assertTrue(
+            any("RAG_VECTOR_SIZE" in text for text in problems), problems
+        )
+
+    def test_chat_enabled_without_cloud_is_rejected(self):
+        problems = self._problems(
+            **{
+                config.ENV_CLOUD_ENABLED: "0",
+                config.ENV_CLOUD_CHAT_ENABLED: "1",
+                config.ENV_CLOUD_EMBED_MODEL: None,
+            }
+        )
+        self.assertTrue(
+            any(config.ENV_CLOUD_CHAT_ENABLED in text for text in problems),
+            problems,
+        )
+
+    def test_cloud_disabled_has_no_cloud_problems(self):
+        problems = self._problems(
+            **{
+                config.ENV_CLOUD_ENABLED: "0",
+                config.ENV_CLOUD_CHAT_ENABLED: "0",
+                config.ENV_CLOUD_EMBED_MODEL: None,
+            }
+        )
+        self.assertFalse(any("RAG_CLOUD" in text for text in problems), problems)
+
+    def test_cloud_enabled_with_explicit_matching_model_is_accepted(self):
+        with mock.patch.object(config, "VECTOR_SIZE", 1536):
+            problems = self._problems(
+                **{
+                    config.ENV_CLOUD_ENABLED: "1",
+                    config.ENV_CLOUD_CHAT_ENABLED: "0",
+                    config.ENV_CLOUD_EMBED_MODEL: "text-embedding-3-small",
+                }
+            )
+        self.assertEqual(problems, [], problems)
 
 
 if __name__ == "__main__":

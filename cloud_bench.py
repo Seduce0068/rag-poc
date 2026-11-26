@@ -6,14 +6,20 @@
   set -a; source ~/.config/opencode/dsh.env; set +a
   RAG_CLOUD_ENABLED=1 python3 rag_poc/cloud_bench.py
   RAG_CLOUD_ENABLED=1 python3 rag_poc/cloud_bench.py --repeat 3 --with-generation
+  RAG_CLOUD_ENABLED=1 python3 rag_poc/cloud_bench.py --with-generation --generation-model deepseek-v4.1-flash
 
 結果は eval-results-cloud-subset.json へ保存する（退避対象）。
 秘密情報の値は出力・保存しない。
+
+チャンク分割は ingest.iter_chunks に委譲する。生成リクエストのセッション UUID は
+cloud_client.chat 側で付与し、ここでは生成しない。cloud_client.last_usage() が
+利用可能なら呼び出し回数とトークン使用量を payload.usage へ集計する。
 """
 
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import math
 import os
@@ -23,6 +29,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import cloud_client
+import ingest
 from config import mask_secrets
 
 HERE = Path(__file__).resolve().parent
@@ -42,10 +49,174 @@ RERANK_K = 5
 GENERATION_QUERY_LIMIT = 3
 
 
-def _chunk(text: str, size: int = 300, overlap: int = 50) -> list[str]:
-    words = text.split()
-    step = size - overlap
-    return [" ".join(words[i : i + size]) for i in range(0, len(words), step)]
+USAGE_KEYS: tuple[str, ...] = (
+    "calls",
+    "prompt_tokens",
+    "completion_tokens",
+    "total_tokens",
+)
+USAGE_ALIASES: dict[str, tuple[str, ...]] = {
+    "calls": ("calls", "call_count", "request_count", "requests", "num_calls"),
+    "prompt_tokens": ("prompt_tokens", "input_tokens", "promptTokens", "inputTokens"),
+    "completion_tokens": (
+        "completion_tokens",
+        "output_tokens",
+        "completionTokens",
+        "outputTokens",
+    ),
+    "total_tokens": ("total_tokens", "totalTokens"),
+}
+
+
+def _usage_int(value: object) -> int | None:
+    """使用量の数値を非負 int へ正規化する（bool と不正値は無効）。"""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number >= 0 else None
+
+
+def _normalize_usage(raw: object) -> dict[str, int] | None:
+    """last_usage() の戻り値を既知キーへ正規化する（解釈不能なら None）。"""
+    if raw is None:
+        return None
+    if isinstance(raw, (list, tuple)):
+        merged: dict[str, int] = {}
+        for item in raw:
+            part = _normalize_usage(item)
+            if not part:
+                continue
+            for key, value in part.items():
+                merged[key] = merged.get(key, 0) + value
+        if not merged:
+            return None
+    else:
+        if isinstance(raw, dict):
+            sources: list[dict[str, object]] = [raw]
+            nested = raw.get("usage")
+            if isinstance(nested, dict):
+                sources.append(nested)
+        else:
+            try:
+                attributes = vars(raw)
+            except TypeError:
+                return None
+            sources = [attributes] if isinstance(attributes, dict) else []
+        merged = {}
+        for source in sources:
+            for key, aliases in USAGE_ALIASES.items():
+                if key in merged:
+                    continue
+                for alias in aliases:
+                    number = _usage_int(source.get(alias))
+                    if number is not None:
+                        merged[key] = number
+                        break
+        if not merged:
+            # 入れ子辞書（例: {"embedding": {...}, "chat": {...}}）も合算する。
+            for value in (sources[0].values() if sources else ()):
+                part = _normalize_usage(value)
+                if not part:
+                    continue
+                for key, number in part.items():
+                    merged[key] = merged.get(key, 0) + number
+        if not merged:
+            return None
+    if "total_tokens" not in merged:
+        prompt = merged.get("prompt_tokens")
+        completion = merged.get("completion_tokens")
+        if prompt is not None or completion is not None:
+            merged["total_tokens"] = (prompt or 0) + (completion or 0)
+    return merged
+
+
+class _UsageCollector:
+    """cloud_client.last_usage() のスナップショットを任意で集約する。
+
+    last_usage() が無い／失敗／未知形式なら payload.usage を作らず notes に残す。
+    per-call 形式は合計、累積形式は最終値（最大値）を採用する。
+    """
+
+    def __init__(self) -> None:
+        getter = getattr(cloud_client, "last_usage", None)
+        self._getter = getter if callable(getter) else None
+        self._samples: list[dict[str, int]] = []
+        self._notes: list[str] = []
+        if self._getter is None:
+            self._note("cloud_client.last_usage() が未提供のため usage 集計をスキップ")
+
+    @property
+    def notes(self) -> list[str]:
+        return list(self._notes)
+
+    def _note(self, text: str) -> None:
+        message = mask_secrets("usage: " + text)
+        if message not in self._notes:
+            self._notes.append(message)
+
+    def sample(self) -> None:
+        """各クラウド呼び出し直後にスナップショットを記録する。"""
+        if self._getter is None:
+            return
+        try:
+            raw = self._getter()
+        except Exception as exc:  # 集計失敗で本体の計測は止めない
+            self._note("last_usage() の呼び出しに失敗: %s" % exc)
+            return
+        normalized = _normalize_usage(raw)
+        if normalized is None:
+            if raw is not None:
+                self._note("last_usage() の戻り値を解釈できず集計をスキップ")
+            return
+        if normalized:
+            self._samples.append(normalized)
+
+    def payload(self) -> dict[str, int] | None:
+        """集計結果を返す（可能なデータが無ければ None）。"""
+        if not self._samples:
+            return None
+        calls = [s["calls"] for s in self._samples if "calls" in s]
+        cumulative = (
+            len(calls) == len(self._samples)
+            and len(calls) > 1
+            and all(a <= b for a, b in zip(calls, calls[1:]))
+            and calls[-1] > calls[0]
+        )
+        result: dict[str, int] = {}
+        for key in USAGE_KEYS:
+            values = [s[key] for s in self._samples if key in s]
+            if values:
+                result[key] = max(values) if cumulative else sum(values)
+        if "calls" not in result:
+            result["calls"] = len(self._samples)
+        return result
+
+
+def _chat(messages: list[dict[str, str]], model: str | None = None) -> str:
+    """生成モデルを実効化して cloud_client.chat を呼ぶ（UUID は委譲）。"""
+    if not model:
+        return cloud_client.chat(messages)
+    try:
+        accepts_model = "model" in inspect.signature(cloud_client.chat).parameters
+    except (TypeError, ValueError):
+        accepts_model = False
+    if accepts_model:
+        return cloud_client.chat(messages, model=model)
+    # 現行 chat は cloud_client.model()（RAG_CLOUD_MODEL）を参照するため、
+    # 呼び出し中だけ実効モデルへ差し替え、finally で必ず復元する。
+    env_name = str(getattr(cloud_client, "ENV_MODEL", "RAG_CLOUD_MODEL"))
+    previous = os.environ.get(env_name)
+    os.environ[env_name] = model
+    try:
+        return cloud_client.chat(messages)
+    finally:
+        if previous is None:
+            os.environ.pop(env_name, None)
+        else:
+            os.environ[env_name] = previous
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
@@ -148,7 +319,14 @@ def _flatten_metrics(metrics: dict) -> dict[str, float]:
     return flat
 
 
-def _run_generation(record: dict, query: dict, candidates: list) -> float:
+def _run_generation(
+    record: dict,
+    query: dict,
+    candidates: list,
+    *,
+    generation_model: str | None = None,
+    usage: _UsageCollector | None = None,
+) -> float:
     """1 クエリ分の rerank + 回答生成を実行し、レイテンシ秒を返す。
 
     保存する reply / answer / error は必ず config.mask_secrets を通す。
@@ -166,10 +344,12 @@ def _run_generation(record: dict, query: dict, candidates: list) -> float:
     )
     started = time.perf_counter()
     try:
-        reply = cloud_client.chat([
+        reply = _chat([
             {"role": "system", "content": "あなたは検索結果の関連度を判定するアシスタントです。JSON のみを返してください。"},
             {"role": "user", "content": prompt},
-        ])
+        ], generation_model)
+        if usage is not None:
+            usage.sample()
         record["rerank_reply"] = mask_secrets(reply[:500])
         record["rerank_candidates"] = [src for _, src, _ in candidates]
         try:
@@ -200,12 +380,13 @@ def _run_generation(record: dict, query: dict, candidates: list) -> float:
             query["query"],
             "\n".join(chunk[:500] for _, _, chunk in candidates),
         )
-        record["answer"] = mask_secrets(
-            cloud_client.chat([
-                {"role": "system", "content": "あなたは日本語の質問に答えるアシスタントです。"},
-                {"role": "user", "content": answer_prompt},
-            ])[:1000]
-        )
+        answer = _chat([
+            {"role": "system", "content": "あなたは日本語の質問に答えるアシスタントです。"},
+            {"role": "user", "content": answer_prompt},
+        ], generation_model)
+        if usage is not None:
+            usage.sample()
+        record["answer"] = mask_secrets(answer[:1000])
     except Exception as exc:
         errors.append(mask_secrets(str(exc))[:300])
     if errors:
@@ -220,6 +401,11 @@ def main() -> int:
     parser.add_argument("--output", default=None, help="出力 JSON（既定 eval-results-cloud-subset.json）")
     parser.add_argument("--with-generation", action="store_true", help="生成モデルで rerank / 回答を計測")
     parser.add_argument("--repeat", type=int, default=1, help="埋め込み検索の計測回数（既定1、指標とレイテンシを平均）")
+    parser.add_argument(
+        "--generation-model",
+        default=None,
+        help="生成モデル ID（既定 cloud_client.model()）",
+    )
     args = parser.parse_args()
 
     if not cloud_client.enabled():
@@ -228,6 +414,12 @@ def main() -> int:
     if args.repeat < 1:
         print("--repeat は1以上を指定してください", file=sys.stderr)
         return 2
+    generation_model = (
+        args.generation_model.strip()
+        if args.generation_model and args.generation_model.strip()
+        else cloud_client.model()
+    )
+    usage = _UsageCollector()
     corpus_dir = Path(args.corpus).resolve() if args.corpus else CORPUS
     qrels_path = Path(args.qrels).resolve() if args.qrels else QRELS
     output_path = Path(args.output).resolve() if args.output else OUTPUT
@@ -235,11 +427,18 @@ def main() -> int:
     files = sorted(corpus_dir.glob("*.md"))
     passages: list[tuple[str, str]] = []
     for path in files:
-        text = path.read_text(encoding="utf-8")
-        for chunk in _chunk(text):
-            if chunk.strip():
-                passages.append((path.name, chunk))
-    print(f"[cloud] files={len(files)} chunks={len(passages)} model={cloud_client.embed_model()} repeat={args.repeat}")
+        # ingest.iter_chunks に委譲する。root に corpus_dir を渡すことで
+        # payload.source はファイル名になり、既存の qrels 正解ラベルと一致する。
+        for point in ingest.iter_chunks(path, corpus_dir):
+            payload_chunk = point.get("payload", {})
+            source = str(payload_chunk.get(ingest.PAYLOAD_SOURCE_KEY, path.name))
+            text = str(payload_chunk.get(ingest.PAYLOAD_TEXT_KEY, ""))
+            if text.strip():
+                passages.append((source, text))
+    print(
+        "[cloud] files=%d chunks=%d model=%s generation_model=%s repeat=%d"
+        % (len(files), len(passages), cloud_client.embed_model(), generation_model, args.repeat)
+    )
 
     queries = qrels["heldout_queries"]
     passage_texts = [p for _, p in passages]
@@ -250,7 +449,9 @@ def main() -> int:
     for i in range(args.repeat):
         started = time.perf_counter()
         p_vecs = cloud_client.embed(passage_texts)
+        usage.sample()
         q_vecs = cloud_client.embed(query_texts)
+        usage.sample()
         embedding_sec = time.perf_counter() - started
 
         started = time.perf_counter()
@@ -308,7 +509,15 @@ def main() -> int:
     if args.with_generation:
         for qi, record in enumerate(records[:GENERATION_QUERY_LIMIT]):
             candidates = runs[0]["scored"][qi][:RERANK_K]
-            generation_latencies.append(_run_generation(record, queries[qi], candidates))
+            generation_latencies.append(
+                _run_generation(
+                    record,
+                    queries[qi],
+                    candidates,
+                    generation_model=generation_model,
+                    usage=usage,
+                )
+            )
 
     denominator = len(records) or 1
     embed_avg = round(sum(r["embedding_sec"] for r in runs) / len(runs), 6)
@@ -344,17 +553,20 @@ def main() -> int:
     notes = [
         "埋め込みは opencodeGO の OpenAI 互換 /embeddings API を使用。",
         "スコアはコサイン類似度、ファイル単位の best score でランク付け。",
-        "nDCG@10 は上位10件のみ・ファイル単位1回で計上（evaluate.py と同一定義）。",
-        "hit_at は evaluate.py の query-level hit@k と同一定義。",
-        "set_recall_at は旧 recall_at（集合 recall）の別名で、互換のため recall_at にも同一値を残す。",
+        "チャンク分割は ingest.iter_chunks に委譲（chunk_size は ingest.CHUNK_SIZE の実効値）。",
+        "指標定義: set_recall_at は集合 recall、hit_at は evaluate.py と同じ query-level hit@k、ndcg_at_10 は上位10件ベース（ファイル単位1回で計上）。",
+        "互換のため recall_at には set_recall_at（集合 recall）と同一値を残す。",
+        "generation_model は --generation-model の指定値を記録し、未指定なら cloud_client.model() を実効値とする。",
         "レイテンシは time.perf_counter で計測し repeat 回の平均を summary に記録。",
         "秘密情報の値は出力・保存しない（生成テキストは mask_secrets を通過）。",
     ]
     if args.with_generation:
         notes.extend([
             "生成モデルは opencodeGO の OpenAI 互換 chat completions を使用（先頭3クエリのみ、rerank_query_count を参照）。",
+            "生成リクエストのセッション UUID は cloud_client.chat 側で付与し cloud_bench では生成しない。",
             "rerank は JSON の rank 整数配列のみを採用し、パース失敗時は generation_error に記録して nDCG を 0 としない。",
         ])
+    notes.extend(usage.notes)
     if not corpus_sha256:
         notes.append(
             "corpus_sha256 は設定（%s / %s）が無いため省略。"
@@ -364,12 +576,12 @@ def main() -> int:
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "model": cloud_client.embed_model(),
-        "generation_model": cloud_client.model(),
+        "generation_model": generation_model,
         "corpus": corpus_dir.name,
         "corpus_file_count": len(files),
         "chunk_count": len(passages),
         "qrels_label": qrels_path.name,
-        "chunk_size": 300,
+        "chunk_size": ingest.CHUNK_SIZE,
         "repeat": args.repeat,
         "latency_runs": [
             {
@@ -384,6 +596,9 @@ def main() -> int:
     }
     if corpus_sha256:
         payload["corpus_sha256"] = corpus_sha256
+    usage_payload = usage.payload()
+    if usage_payload is not None:
+        payload["usage"] = usage_payload
 
     output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     print("[cloud] summary:", summary)
