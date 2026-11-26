@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-26T12:35:27.627606+00:00",
+  "generated_at": "2026-11-26T00:00:00+00:00",
   "model": "qwen3-embedding-8b",
   "generation_model": "deepseek-v4.1-flash",
   "corpus": "corpus-subset",
