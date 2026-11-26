@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from pathlib import Path
 from typing import NamedTuple
 from urllib.parse import quote
@@ -36,15 +37,20 @@ ENV_CLOUD_ENABLED = "RAG_CLOUD_ENABLED"
 ENV_CLOUD_CHAT_ENABLED = "RAG_CLOUD_CHAT_ENABLED"
 ENV_CLOUD_EMBED_MODEL = "RAG_CLOUD_EMBED_MODEL"
 ENV_CLOUD_EMBED_DIMENSION = "RAG_CLOUD_EMBED_DIMENSION"
+# 移行期の互換名（複数形）。両方設定時は正規（単数形）を優先する。
+ENV_CLOUD_DIMENSIONS = "RAG_CLOUD_DIMENSIONS"
 RAG_CLOUD_ENABLED = os.environ.get(ENV_CLOUD_ENABLED, "0") == "1"
 RAG_CLOUD_CHAT_ENABLED = os.environ.get(ENV_CLOUD_CHAT_ENABLED, "0") == "1"
 RAG_CLOUD_EMBED_MODEL = os.environ.get(ENV_CLOUD_EMBED_MODEL, "")
 CLOUD_DEFAULT_EMBED_MODEL = "text-embedding-3-small"
 
-# cloud_client.EMBEDDING_MODELS のうち既定次元が確定しているものだけを保持する。
-# 未知のモデルは RAG_CLOUD_EMBED_DIMENSION による明示指定が無い限り fail-closed。
+# cloud_client.EMBEDDING_MODELS のうち既定次元が確定しているものだけを保持する
+# （次元テーブルの単一情報源）。未知モデルは RAG_CLOUD_EMBED_DIMENSION の
+# 明示指定が無い限り fail-closed。
 CLOUD_EMBED_DIMENSIONS: dict[str, int] = {
-    CLOUD_DEFAULT_EMBED_MODEL: 1536,
+    "text-embedding-3-small": 1536,
+    "qwen3-embedding-8b": 4096,
+    "gemini-embedding-2": 3072,
 }
 
 # 全 HTTP クライアント（ollama_client / query / ingest）で共有する Retry 設定。
@@ -150,6 +156,55 @@ def cloud_embed_model() -> str:
         return os.environ.get(ENV_CLOUD_EMBED_MODEL, "") or CLOUD_DEFAULT_EMBED_MODEL
 
 
+# ---------------------------------------------------------------------------
+# 埋め込み次元 環境変数の共通リゾルバ（R2-B）
+# ---------------------------------------------------------------------------
+
+
+def eprint(message: object) -> None:
+    """警告を stderr へ出す。呼び出し側は値ではなく環境変数名のみを渡す。"""
+    print(str(message), file=sys.stderr, flush=True)
+
+
+def resolve_cloud_embed_dimension() -> int | None:
+    """埋め込み次元の環境変数を 1 箇所で解決する。
+
+    正規 ``RAG_CLOUD_EMBED_DIMENSION`` を優先し、移行期互換の
+    ``RAG_CLOUD_DIMENSIONS`` は正規が未設定のときだけ読む。両方が非空なら
+    正規を採用し、値は出さずに環境変数名だけを ``eprint`` へ出す。
+
+    未設定なら None。不正値は ValueError を送出し、例外文には環境変数名
+    だけを含めて値は一切出さない。
+    """
+    primary = os.environ.get(ENV_CLOUD_EMBED_DIMENSION)
+    legacy = os.environ.get(ENV_CLOUD_DIMENSIONS)
+    primary_set = primary is not None and str(primary).strip() != ""
+    legacy_set = legacy is not None and str(legacy).strip() != ""
+    if primary_set and legacy_set:
+        eprint(
+            "%s と %s が両方設定されています。%s を優先します"
+            % (
+                ENV_CLOUD_EMBED_DIMENSION,
+                ENV_CLOUD_DIMENSIONS,
+                ENV_CLOUD_EMBED_DIMENSION,
+            )
+        )
+    raw = primary if primary_set else (legacy if legacy_set else None)
+    if raw is None:
+        return None
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        raise ValueError(
+            "%s は正の整数である必要があります" % ENV_CLOUD_EMBED_DIMENSION
+        ) from None
+    if value <= 0:
+        raise ValueError(
+            "%s は正の整数である必要があります" % ENV_CLOUD_EMBED_DIMENSION
+        )
+    return value
+
+
 def validate_cloud_settings() -> list[str]:
     """クラウド有効時の設定不整合を検出し、問題文の list を返す（空なら正常）。
 
@@ -160,8 +215,9 @@ def validate_cloud_settings() -> list[str]:
     3. RAG_CLOUD_CHAT_ENABLED=1 なのに RAG_CLOUD_ENABLED=0 の場合
 
     RAG_CLOUD_EMBED_MODEL はクラウド有効時に必須化する（暗黙の既定モデル使用を
-    禁じる）。期待次元が表に無いモデルは RAG_CLOUD_EMBED_DIMENSION の明示を要求し、
-    不明なままなら fail-closed とする。値は mask_secrets 済みで返す。
+    禁じる）。期待次元が表に無いモデルは RAG_CLOUD_EMBED_DIMENSION（互換:
+    RAG_CLOUD_DIMENSIONS）の明示を要求し、不明なままなら fail-closed とする。
+    値は mask_secrets 済みで返す。
     """
     problems: list[str] = []
     enabled = cloud_enabled()
@@ -190,21 +246,16 @@ def validate_cloud_settings() -> list[str]:
             )
 
     # 既知モデルは表を唯一の情報源とする（embed_query は dimensions を渡さないため
-    # 既定次元が確定）。未知モデルだけ RAG_CLOUD_EMBED_DIMENSION の明示を要求する。
+    # 既定次元が確定）。環境変数の解決は共通リゾルバへ委譲し、未知モデルだけ
+    # RAG_CLOUD_EMBED_DIMENSION の明示を要求する。
     expected_dim: int | None = CLOUD_EMBED_DIMENSIONS.get(model)
+    try:
+        configured_dim = resolve_cloud_embed_dimension()
+    except ValueError as exc:
+        problems.append(str(exc))
+        configured_dim = None
     if expected_dim is None:
-        raw_dim = os.environ.get(ENV_CLOUD_EMBED_DIMENSION, "")
-        if raw_dim.strip():
-            try:
-                expected_dim = int(raw_dim)
-            except (TypeError, ValueError):
-                expected_dim = None
-            if expected_dim is None or expected_dim <= 0:
-                problems.append(
-                    "RAG_CLOUD_EMBED_DIMENSION は正の整数である必要があります: %s"
-                    % mask_secrets(raw_dim)
-                )
-                expected_dim = None
+        expected_dim = configured_dim
     if expected_dim is None:
         problems.append(
             "クラウド埋め込みモデル %s の期待次元が不明です。"

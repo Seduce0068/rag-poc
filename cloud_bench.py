@@ -9,12 +9,19 @@
   RAG_CLOUD_ENABLED=1 python3 rag_poc/cloud_bench.py --with-generation --generation-model deepseek-v4.1-flash
    RAG_CLOUD_ENABLED=1 python3 rag_poc/cloud_bench.py --with-generation --generation-max-queries 3  # コスト制限時のみ先頭3件
 
+起動時に config.validate_settings() を呼ぶ。RAG_CLOUD_ENABLED=1 では
+RAG_CLOUD_EMBED_MODEL の明示指定が必要で、暗黙既定モデルは fail-closed とする
+（cloud_ingest.py と同じ経路）。上の例では RAG_CLOUD_EMBED_MODEL と整合する
+RAG_VECTOR_SIZE も合わせて指定してください。
+
 結果は eval-results-cloud-subset.json へ保存する（退避対象）。
 秘密情報の値は出力・保存しない。
 
 チャンク分割は ingest.iter_chunks に委譲する。生成リクエストのセッション UUID は
 cloud_client.chat 側で付与し、ここでは生成しない。cloud_client.last_usage() が
-利用可能なら呼び出し回数とトークン使用量を payload.usage へ集計する。
+利用可能なら呼び出し回数・トークン使用量・cost を payload.usage へ集計し、
+summary.estimated_cost_usd に課金見込みを記録する（--with-generation 指定時は
+生成対象件数と見込みを stderr へ警告する）。
 """
 
 from __future__ import annotations
@@ -30,6 +37,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import cloud_client
+import config
 import ingest
 from config import mask_secrets
 
@@ -49,12 +57,35 @@ NDCG_K = 10
 RERANK_K = 5
 # 生成対象クエリ数は --generation-max-queries で制御する（既定 0＝全件）。
 
+# 埋め込み単価（USD / 1M 入力トークン）。README の単価表を cloud_bench 内にも保持し、
+# API が cost を返さない場合の estimated_cost_usd 推定に使う。
+# 出典: README「クラウドモデル（opencodeGO）」の単価表
+#       （https://opencode.ai/docs/console/go/、2026-11-26 取得）。
+EMBED_PRICE_USD_PER_MILLION: dict[str, float] = {
+    "text-embedding-3-small": 0.02,
+    "qwen3-embedding-8b": 0.01,
+    "gemini-embedding-2": 0.20,
+}
+PRICE_SOURCE_NOTE = "README の単価表（opencode.ai/docs/console/go/）"
+PRICE_SOURCE_DATE = "2026-11-26"
+
+# 現行の指標定義。旧 ndcg_at_10=0.9034 は全順位ベースで算出した値であり、
+# 現行定義（上位10件・ファイル1回）とは直接比較できない。
+METRIC_DEFINITION: dict[str, object] = {
+    "ndcg_at_10": "上位10件のみを採用し、同一ファイルは最上位の1回だけ計上（gain=1 / discount=log2(rank+1)、IDCG は relevant_sources 数）。evaluate.py 準拠。",
+    "hit_at": "query-level hit@k（上位 k に正解が1件でもあれば1）。evaluate.py 準拠。",
+    "set_recall_at": "集合 recall（上位 k の正解数 / relevant_sources 数）。recall_at は互換キーとして同一値。",
+    "rerank_ndcg_at_5": "生成モデルが返した rank の上位5件、qrels の relevant_sources を母集団。",
+    "legacy_ndcg_full_ranking": True,
+    "legacy_ndcg_at_10": "旧値 0.9034 は全順位ベース（現行定義と直接比較不可）。",
+}
 
 USAGE_KEYS: tuple[str, ...] = (
     "calls",
     "prompt_tokens",
     "completion_tokens",
     "total_tokens",
+    "cost",
 )
 USAGE_ALIASES: dict[str, tuple[str, ...]] = {
     "calls": ("calls", "call_count", "request_count", "requests", "num_calls"),
@@ -66,6 +97,8 @@ USAGE_ALIASES: dict[str, tuple[str, ...]] = {
         "outputTokens",
     ),
     "total_tokens": ("total_tokens", "totalTokens"),
+    # cloud_client._accumulate_usage() は nested な cost を "cost.usd" へ平坦化する。
+    "cost": ("cost", "cost_usd", "cost.usd"),
 }
 
 
@@ -74,18 +107,32 @@ def _usage_int(value: object) -> int | None:
     if value is None or isinstance(value, bool):
         return None
     try:
+        # NaN / ±inf は int() で例外または不正値になるため先に弾く。
+        if isinstance(value, float) and not math.isfinite(value):
+            return None
         number = int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     return number if number >= 0 else None
 
 
-def _normalize_usage(raw: object) -> dict[str, int] | None:
+def _usage_cost(value: object) -> float | None:
+    """cost を非負の有限 float へ正規化する（bool・文字列・不正値は無効）。"""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) and number >= 0 else None
+
+
+def _normalize_usage(raw: object) -> dict[str, int | float] | None:
     """last_usage() の戻り値を既知キーへ正規化する（解釈不能なら None）。"""
     if raw is None:
         return None
     if isinstance(raw, (list, tuple)):
-        merged: dict[str, int] = {}
+        merged: dict[str, int | float] = {}
         for item in raw:
             part = _normalize_usage(item)
             if not part:
@@ -112,7 +159,16 @@ def _normalize_usage(raw: object) -> dict[str, int] | None:
                 if key in merged:
                     continue
                 for alias in aliases:
-                    number = _usage_int(source.get(alias))
+                    raw_value = source.get(alias)
+                    if key == "cost" and isinstance(raw_value, dict):
+                        # 入れ子の {"cost": {"usd": ...}} も解釈する。
+                        raw_value = raw_value.get("usd")
+                    # cost は小数（例 0.01）を保持するため int 正規化を使わない。
+                    number = (
+                        _usage_cost(raw_value)
+                        if key == "cost"
+                        else _usage_int(raw_value)
+                    )
                     if number is not None:
                         merged[key] = number
                         break
@@ -134,6 +190,67 @@ def _normalize_usage(raw: object) -> dict[str, int] | None:
     return merged
 
 
+def _warn(message: object) -> None:
+    """マスク済みの警告を stderr へ出す（cloud_ingest.py と同じ方針）。"""
+    print("[cloud] %s" % mask_secrets(message), file=sys.stderr, flush=True)
+
+
+def _estimated_cost_usd(
+    usage_payload: dict[str, int | float] | None, embed_model: str
+) -> float | None:
+    """API の cost を優先し、無ければ単価 × total_tokens で推定する。
+
+    単価は埋め込みモデルごとの 1M 入力トークン単価（README の単価表）。
+    API が cost を返す場合はその実値を採用する。キー値は扱わない。
+    """
+    if not usage_payload:
+        return None
+    api_cost = usage_payload.get("cost")
+    if api_cost is not None:
+        value = _usage_cost(api_cost)
+        if value is not None:
+            return round(value, 6)
+    price = EMBED_PRICE_USD_PER_MILLION.get(embed_model)
+    total_tokens = usage_payload.get("total_tokens")
+    if price is None or total_tokens is None:
+        return None
+    tokens = _usage_cost(total_tokens)
+    if tokens is None:
+        return None
+    return round(price * tokens / 1_000_000, 6)
+
+
+def _warn_generation_billing(
+    count: int,
+    total: int,
+    generation_model: str,
+    embed_model: str,
+    usage_payload: dict[str, int | float] | None,
+) -> None:
+    """生成対象件数と課金見込みをマスク済み stderr で警告する。
+
+    既定（--generation-max-queries=0）でも「全件＝N 件」を明示する。
+    """
+    price = EMBED_PRICE_USD_PER_MILLION.get(embed_model)
+    if price is not None:
+        price_note = "埋め込み単価 %s: $%.2f / 1M tokens（出典日 %s）" % (
+            embed_model, price, PRICE_SOURCE_DATE,
+        )
+    else:
+        price_note = "埋め込み単価: 未知モデルのため推定不可"
+    estimate = _estimated_cost_usd(usage_payload, embed_model)
+    if estimate is not None:
+        billing = "現在の推定コスト $%.6f（API cost があれば実値を優先）" % estimate
+    else:
+        billing = "usage が無いため推定コストは算出不可"
+    _warn(
+        "--with-generation: 生成対象 %d 件 / 全 %d 件（chat 呼び出し最大 %d 回、"
+        "generation_model=%s）。%s。外部送信＋トークン課金が発生します。"
+        "課金見込み: %s。最終値は summary.estimated_cost_usd に記録します。"
+        % (count, total, count * 2, generation_model, price_note, billing)
+    )
+
+
 class _UsageCollector:
     """cloud_client.last_usage() のスナップショットを任意で集約する。
 
@@ -144,7 +261,7 @@ class _UsageCollector:
     def __init__(self) -> None:
         getter = getattr(cloud_client, "last_usage", None)
         self._getter = getter if callable(getter) else None
-        self._samples: list[dict[str, int]] = []
+        self._samples: list[dict[str, int | float]] = []
         self._notes: list[str] = []
         if self._getter is None:
             self._note("cloud_client.last_usage() が未提供のため usage 集計をスキップ")
@@ -175,7 +292,7 @@ class _UsageCollector:
         if normalized:
             self._samples.append(normalized)
 
-    def payload(self) -> dict[str, int] | None:
+    def payload(self) -> dict[str, int | float] | None:
         """集計結果を返す（可能なデータが無ければ None）。"""
         if not self._samples:
             return None
@@ -186,7 +303,7 @@ class _UsageCollector:
             and all(a <= b for a, b in zip(calls, calls[1:]))
             and calls[-1] > calls[0]
         )
-        result: dict[str, int] = {}
+        result: dict[str, int | float] = {}
         for key in USAGE_KEYS:
             values = [s[key] for s in self._samples if key in s]
             if values:
@@ -416,6 +533,15 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    # 起動時検証（cloud_ingest.py と同じ経路）。RAG_CLOUD_EMBED_MODEL 未指定の
+    # 暗黙既定モデルは fail-closed で終了コード 2 とする。--help は argparse が
+    # 先に処理するため、ここには到達しない。
+    problems = config.validate_settings()
+    if problems:
+        for problem in problems:
+            _warn("設定検証: %s" % problem)
+        return 2
+
     if not cloud_client.enabled():
         print("RAG_CLOUD_ENABLED=1 を指定してください", file=sys.stderr)
         return 2
@@ -430,6 +556,7 @@ def main() -> int:
         if args.generation_model and args.generation_model.strip()
         else cloud_client.model()
     )
+    embed_model = cloud_client.embed_model()
     usage = _UsageCollector()
     corpus_dir = Path(args.corpus).resolve() if args.corpus else CORPUS
     qrels_path = Path(args.qrels).resolve() if args.qrels else QRELS
@@ -448,7 +575,7 @@ def main() -> int:
                 passages.append((source, text))
     print(
         "[cloud] files=%d chunks=%d model=%s generation_model=%s repeat=%d"
-        % (len(files), len(passages), cloud_client.embed_model(), generation_model, args.repeat)
+        % (len(files), len(passages), embed_model, generation_model, args.repeat)
     )
 
     queries = qrels["heldout_queries"]
@@ -525,6 +652,11 @@ def main() -> int:
     )
     generation_latencies: list[float] = []
     if args.with_generation:
+        # 既定（--generation-max-queries=0＝全件）でも件数を明示し、課金見込みを警告する。
+        _warn_generation_billing(
+            generation_query_count, len(queries), generation_model, embed_model,
+            usage.payload(),
+        )
         for qi, record in enumerate(records[:generation_query_count]):
             candidates = runs[0]["scored"][qi][:RERANK_K]
             generation_latencies.append(
@@ -537,6 +669,7 @@ def main() -> int:
                 )
             )
 
+    usage_payload = usage.payload()
     denominator = len(records) or 1
     embed_avg = round(sum(r["embedding_sec"] for r in runs) / len(runs), 6)
     search_avg = round(sum(r["search_sec"] for r in runs) / len(runs), 6)
@@ -560,6 +693,7 @@ def main() -> int:
         "search_latency_sec": search_avg,
         "total_search_latency_sec": round(embed_avg + search_avg, 6),
         "rerank_query_count": len(rerank_scores),  # 実効クエリ数（スコア換算できた件数）
+        "estimated_cost_usd": _estimated_cost_usd(usage_payload, embed_model),
     }
     if generation_latencies:
         summary["generation_latency_sec"] = round(
@@ -577,6 +711,10 @@ def main() -> int:
         "スコアはコサイン類似度、ファイル単位の best score でランク付け。",
         "チャンク分割は ingest.iter_chunks に委譲（chunk_size は ingest.CHUNK_SIZE の実効値）。",
         "指標定義: set_recall_at は集合 recall、hit_at は evaluate.py と同じ query-level hit@k、ndcg_at_10 は上位10件ベース（ファイル単位1回で計上）。",
+        "metric_definition は現行定義（ndcg_at_10 は上位10件・ファイル1回、hit_at は query-level、set_recall_at は集合 recall）を payload に記録する。",
+        "旧 ndcg_at_10=0.9034 は全順位ベースで算出した値です。現行の ndcg_at_10 は上位10件・ファイル1回の定義であり、evaluate.py の同名指標と直接比較できません（比較表では legacy_ndcg_full_ranking=true を参照）。",
+        "埋め込み単価は %s を採用（単価出典日: %s）。API が cost を返さない場合は単価 × total_tokens で summary.estimated_cost_usd を推定する。"
+        % (PRICE_SOURCE_NOTE, PRICE_SOURCE_DATE),
         "互換のため recall_at には set_recall_at（集合 recall）と同一値を残す。",
         "generation_model は --generation-model の指定値を記録し、未指定なら cloud_client.model() を実効値とする。",
         "レイテンシは time.perf_counter で計測し repeat 回の平均を summary に記録。",
@@ -586,6 +724,7 @@ def main() -> int:
         notes.extend([
             "生成モデルは opencodeGO の OpenAI 互換 chat completions を使用"
             "（生成対象 %d 件、rerank_query_count を参照）。" % generation_query_count,
+            "生成呼び出しは外部送信＋トークン課金を伴う。total_tokens には生成呼び出しのトークンも含まれるため estimated_cost_usd は概算（API cost があれば実値を優先）。",
             "生成リクエストのセッション UUID は cloud_client.chat 側で付与し cloud_bench では生成しない。",
             "rerank は JSON の rank 整数配列のみを採用し、パース失敗時は generation_error に記録して nDCG を 0 としない。",
         ])
@@ -598,7 +737,7 @@ def main() -> int:
 
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "model": cloud_client.embed_model(),
+        "model": embed_model,
         "generation_model": generation_model,
         "corpus": corpus_dir.name,
         "corpus_file_count": len(files),
@@ -615,11 +754,12 @@ def main() -> int:
         ],
         "summary": summary,
         "results": records,
+        "metric_definition": METRIC_DEFINITION,
+        "legacy_ndcg_full_ranking": True,
         "notes": notes,
     }
     if corpus_sha256:
         payload["corpus_sha256"] = corpus_sha256
-    usage_payload = usage.payload()
     if usage_payload is not None:
         payload["usage"] = usage_payload
 

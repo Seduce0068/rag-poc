@@ -42,10 +42,16 @@ def _row(name: str, definition: str, data: dict[str, Any]) -> dict[str, Any]:
     summary = data.get("summary") or {}
     heldout_summary = _pick(data, "heldout", "summary") or {}
     # evaluate.py 系は heldout.summary.<mode>、cloud_bench 系は top-level summary。
+    # hybrid を決め打ちせず、利用可能なモードから選ぶ（hybrid 優先）。
     eval_hybrid = heldout_summary.get("hybrid") or {}
+    if not eval_hybrid:
+        for mode_summary in heldout_summary.values():
+            if isinstance(mode_summary, dict) and mode_summary:
+                eval_hybrid = mode_summary
+                break
     recall_10 = _pick(eval_hybrid, "recall_at", "10")
     if recall_10 is None:
-        recall_10 = _pick(summary, "set_recall_at_10", "recall_at_10")
+        recall_10 = summary.get("set_recall_at_10", summary.get("recall_at_10"))
     ndcg_10 = _pick(eval_hybrid, "ndcg_at", "10")
     if ndcg_10 is None:
         ndcg_10 = summary.get("ndcg_at_10")

@@ -20,6 +20,7 @@ jobs:
       manifest-path: ragcore/Cargo.toml
       extra-gates: |
         python3 test_rag.py
+        cargo build --manifest-path ragcore/Cargo.toml
         RAG_REQUIRE_RUST=1 python3 test_rag.py
         python3 - <<'PY'
         import json

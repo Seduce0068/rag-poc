@@ -10,12 +10,14 @@ chat completions と OpenAI 互換 /embeddings の両方を提供する。埋め
 fetch_models() が /v1/models を取得する）。API レスポンスの usage
 （トークン数、あれば cost）は last_usage() から参照できる。
 
-埋め込み次元は明示の dimensions 引数 → RAG_CLOUD_DIMENSIONS → モデル既定
-（dimensions を送らない）の順で解決し、不正値は CloudUnavailable で拒否する。
+埋め込み次元は明示の dimensions 引数 → RAG_CLOUD_EMBED_DIMENSION（互換
+RAG_CLOUD_DIMENSIONS）→ モデル既定（dimensions を送らない）の順で解決し、
+不正値は CloudUnavailable で拒否する。
 """
 
 from __future__ import annotations
 
+import math
 import os
 import uuid
 import warnings
@@ -31,7 +33,9 @@ ENV_BASE_URL = "RAG_CLOUD_BASE_URL"
 ENV_MODEL = "RAG_CLOUD_MODEL"
 ENV_ENABLED = "RAG_CLOUD_ENABLED"
 ENV_TIMEOUT = "RAG_CLOUD_TIMEOUT"
-ENV_DIMENSIONS = "RAG_CLOUD_DIMENSIONS"
+# 正規は単数形。複数形は移行期の互換として config の共通リゾルバが読む。
+ENV_DIMENSIONS = config.ENV_CLOUD_DIMENSIONS  # 後方互換用の別名
+ENV_EMBED_DIMENSION = config.ENV_CLOUD_EMBED_DIMENSION
 
 # 正規（OPENCODE_GO_API_KEY）を優先し、OPENCODE_API_KEY は後方互換として残す。
 KEY_NAMES = ("OPENCODE_GO_API_KEY", "OPENCODE_API_KEY")
@@ -41,7 +45,17 @@ MODELS_PATH = "/models"
 
 
 class CloudUnavailable(Exception):
-    """クラウド API が使えない場合の例外（理由はマスク済み）。"""
+    """クラウド API が使えない場合の例外（理由はマスク済み）。
+
+    ``completed_batches`` は部分バッチ進捗の構造化情報（未発生なら None）。
+    メッセージ末尾の ``(completed_batches=N)`` は後方互換のため維持する。
+    """
+
+    completed_batches: int | None = None
+
+    def __init__(self, message: str, *, completed_batches: int | None = None) -> None:
+        super().__init__(message)
+        self.completed_batches = completed_batches
 
 
 def _fail(reason: object) -> CloudUnavailable:
@@ -109,16 +123,17 @@ def _normalize_dimensions(value: object, label: str = "dimensions") -> int:
 def resolve_dimensions(dimensions: int | None = None) -> int | None:
     """embed() が使う埋め込み次元を解決する。
 
-    優先順: 明示の dimensions 引数 > RAG_CLOUD_DIMENSIONS > None（モデル既定）。
-    環境変数が空文字の場合は未設定として扱う。設定値は正の int へ正規化し、
-    不正値は CloudUnavailable を送出する（値自体は例外文に出さない）。
+    優先順: 明示の dimensions 引数 > config.resolve_cloud_embed_dimension()
+    （RAG_CLOUD_EMBED_DIMENSION 正規、RAG_CLOUD_DIMENSIONS 互換）> None。
+    環境変数の読み出し・正規化は config の共通リゾルバに委譲する。不正値は
+    CloudUnavailable を送出する（値自体は例外文に出さない）。
     """
     if dimensions is not None:
         return _normalize_dimensions(dimensions, "dimensions")
-    raw = os.environ.get(ENV_DIMENSIONS)
-    if raw is None or not str(raw).strip():
-        return None
-    return _normalize_dimensions(raw, ENV_DIMENSIONS)
+    try:
+        return config.resolve_cloud_embed_dimension()
+    except ValueError as exc:
+        raise _fail(exc) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -183,9 +198,10 @@ def _accumulate_usage(usage: object) -> None:
                 flat = "%s.%s" % (key, sub_key)
                 if (isinstance(sub_key, str) and len(flat) <= 128
                         and isinstance(sub_value, (int, float))
-                        and not isinstance(sub_value, bool)):
+                        and not isinstance(sub_value, bool)
+                        and math.isfinite(sub_value)):
                     additions[flat] = sub_value
-        elif isinstance(value, (int, float)):
+        elif isinstance(value, (int, float)) and math.isfinite(value):
             additions[key] = value
     if not additions:
         return
@@ -296,6 +312,15 @@ def embedding_models() -> list[str]:
     return list(EMBEDDING_MODELS)
 
 
+def expected_dim(model: str) -> int | None:
+    """config.CLOUD_EMBED_DIMENSIONS からモデルの既定次元を返す（通信なし）。
+
+    次元テーブルは config が唯一の情報源。未知モデルは None を返し、
+    呼び出し側が RAG_CLOUD_EMBED_DIMENSION の明示を要求する。
+    """
+    return config.CLOUD_EMBED_DIMENSIONS.get(model)
+
+
 def fetch_models() -> list[str]:
     """任意: OpenAI 互換のモデル一覧から ID を取得する（実通信あり）。
 
@@ -358,9 +383,10 @@ def embed(
     埋め込みリクエストには x-opencode-session を付けない（公式仕様）。
     大量入力は batch_size（既定 MAX_BATCH_SIZE）で分割し、入力順序どおりに
     結合する。batch_size=0 は明示的に拒否する。
-    dimensions は明示引数 > RAG_CLOUD_DIMENSIONS > モデル既定（送らない）の順で
-    解決する。バッチ途中で失敗した場合は、成功済みバッチ数をマスク済みの
-    CloudUnavailable メッセージ末尾に (completed_batches=N) として付与する。
+    dimensions は明示引数 > RAG_CLOUD_EMBED_DIMENSION（互換
+    RAG_CLOUD_DIMENSIONS）> モデル既定（送らない）の順で解決する。バッチ途中で
+    失敗した場合は、成功済みバッチ数をマスク済みの CloudUnavailable メッセージ
+    末尾に (completed_batches=N) として付与し、構造化属性にも保持する。
     戻り値は従前どおり list[list[float]]。usage は全バッチの合計が last_usage()
     から参照できる（呼び出し直後に読み取ること）。認証情報の値は出さない。
     """
@@ -384,7 +410,8 @@ def embed(
             )
             raise CloudUnavailable(
                 "%s (completed_batches=%d)"
-                % (config.mask_secrets(reason), completed_batches)
+                % (config.mask_secrets(reason), completed_batches),
+                completed_batches=completed_batches,
             ) from exc
         completed_batches += 1
     return vectors

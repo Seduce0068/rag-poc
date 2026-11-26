@@ -35,7 +35,9 @@ if "requests" not in sys.modules:
         _stub.post = lambda *a, **k: None  # type: ignore[attr-defined]
         sys.modules["requests"] = _stub
 
+import cloud_bench
 import cloud_client
+import compare_cloud_local
 import config
 import evaluate
 import ingest
@@ -1204,6 +1206,25 @@ class _RustSkipCounter:
 
 class RustBridgeTest(_RustSkipCounter, unittest.TestCase):
     """Rust CLI ブリッジのパス解決と同等性。"""
+
+    SKIP_GATE_ENV = "RAG_REQUIRE_RUST"
+
+    @classmethod
+    def tearDownClass(cls):
+        """skip 理由を検査し、RAG_REQUIRE_RUST=1 なら unittest 経由でも fail にする。
+
+        ``__main__`` の後始末だけでは ``python3 -m unittest`` 等のローダー経由で
+        ゲートが発動しないため、クラス単位で skip 理由を集計する。
+        """
+        super().tearDownClass()
+        if os.environ.get(cls.SKIP_GATE_ENV, "") != "1":
+            return
+        reasons = list(_RUST_SKIP_REASONS)
+        if reasons:
+            raise AssertionError(
+                "Rust 同等性テストが skip されました: %d 件 (%s=1)"
+                % (len(reasons), cls.SKIP_GATE_ENV)
+            )
 
     def test_binary_path_default(self):
         import rust_bridge as bridge
@@ -2439,6 +2460,57 @@ class CloudClientTest(unittest.TestCase):
             config.RETRY_ALLOWED_METHODS,
         )
 
+    def test_embed_partial_failure_exposes_completed_batches_and_masks(self):
+        """途中バッチ失敗で完了済みバッチ数が機械可読かつマスク済みであること。"""
+        secret = "Bearer ZZZPARTIALSECRETZZZ"
+        state = {"count": 0}
+
+        def handler(url, **kwargs):
+            state["count"] += 1
+            if state["count"] == 1:
+                return self._response({
+                    "data": [
+                        {"embedding": [0.1]},
+                        {"embedding": [0.2]},
+                    ]
+                })
+            raise self.FakeRequestException("embed failed: " + secret)
+
+        with self._cloud_env(), \
+                mock.patch.object(
+                    cloud_client, "requests", self._fake_requests(handler)
+                ), \
+                mock.patch("time.sleep", lambda *_: None):
+            with self.assertRaises(cloud_client.CloudUnavailable) as ctx:
+                cloud_client.embed(["a", "b", "c"], batch_size=2)
+
+        exc = ctx.exception
+        self.assertEqual(getattr(exc, "completed_batches", None), 1)
+        message = str(exc)
+        self.assertIn("completed_batches=1", message)
+        self.assertNotIn("ZZZPARTIALSECRETZZZ", message)
+        self.assertIn("<masked>", message)
+
+    def test_accumulate_usage_ignores_non_finite_values(self):
+        """NaN / inf は使用量として加算せず、有限値だけを保持すること。"""
+        cloud_client._reset_usage()
+        cloud_client._accumulate_usage({
+            "prompt_tokens": 10,
+            "completion_tokens": float("nan"),
+            "total_tokens": float("inf"),
+            "cost": {"usd": float("-inf"), "eur": 0.25},
+        })
+
+        usage = self._read_usage() or {}
+        self.assertEqual(usage.get("prompt_tokens"), 10)
+        self.assertNotIn("completion_tokens", usage)
+        self.assertNotIn("total_tokens", usage)
+        self.assertNotIn("cost.usd", usage)
+        self.assertEqual(usage.get("cost.eur"), 0.25)
+        for value in usage.values():
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                self.assertTrue(math.isfinite(value))
+
 
 class CloudConfigGuardTest(unittest.TestCase):
     """config.validate_settings() がクラウド設定を fail-closed で検証すること。
@@ -2511,6 +2583,375 @@ class CloudConfigGuardTest(unittest.TestCase):
                 }
             )
         self.assertEqual(problems, [], problems)
+
+
+class ResolveDimensionsTest(unittest.TestCase):
+    """resolve_dimensions の優先順と不正値拒否（実通信なし）。"""
+
+    _UNSET = object()
+    SINGULAR = getattr(
+        config, "ENV_CLOUD_EMBED_DIMENSION", "RAG_CLOUD_EMBED_DIMENSION"
+    )
+    PLURAL = getattr(cloud_client, "ENV_DIMENSIONS", "RAG_CLOUD_DIMENSIONS")
+
+    def _resolve(self, explicit=_UNSET, **env):
+        values = {self.SINGULAR: None, self.PLURAL: None}
+        values.update(env)
+        with _temporary_env(**values):
+            if explicit is self._UNSET:
+                return cloud_client.resolve_dimensions()
+            return cloud_client.resolve_dimensions(explicit)
+
+    def test_explicit_dimension_overrides_both_envs(self):
+        value = self._resolve(
+            768, **{self.SINGULAR: "1024", self.PLURAL: "1536"}
+        )
+        self.assertEqual(value, 768)
+
+    def test_singular_env_overrides_plural_env(self):
+        value = self._resolve(**{self.SINGULAR: "1024", self.PLURAL: "1536"})
+        self.assertEqual(value, 1024)
+
+    def test_plural_env_used_when_singular_is_empty(self):
+        for empty in ("", "   ", None):
+            with self.subTest(empty=empty):
+                value = self._resolve(
+                    **{self.SINGULAR: empty, self.PLURAL: "1536"}
+                )
+                self.assertEqual(value, 1536)
+
+    def test_no_env_returns_none_for_model_default(self):
+        self.assertIsNone(self._resolve())
+
+    def test_empty_envs_return_none_for_model_default(self):
+        self.assertIsNone(
+            self._resolve(**{self.SINGULAR: "", self.PLURAL: "  "})
+        )
+
+    def test_explicit_invalid_values_are_rejected(self):
+        for value in (True, False, 0, -1, "abc", "0", "-3", 1.5):
+            with self.subTest(value=value):
+                with self.assertRaises(cloud_client.CloudUnavailable):
+                    self._resolve(value)
+
+    def test_env_invalid_values_are_rejected(self):
+        for name in (self.SINGULAR, self.PLURAL):
+            for value in ("0", "-1", "abc", "1.5"):
+                with self.subTest(name=name, value=value):
+                    with self.assertRaises(cloud_client.CloudUnavailable):
+                        self._resolve(**{name: value})
+
+    def test_invalid_value_is_not_leaked_in_message(self):
+        secret = "ZZZDIMSECRETZZZ"
+        with self.assertRaises(cloud_client.CloudUnavailable) as ctx:
+            self._resolve(secret)
+        message = str(ctx.exception)
+        self.assertNotIn(secret, message)
+        self.assertIn("positive integer", message)
+
+
+class GenerationMaxQueriesTest(unittest.TestCase):
+    """cloud_bench.main() の --generation-max-queries 境界を fake で検証する。"""
+
+    def _invoke(self, max_queries):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            corpus = root / "corpus"
+            corpus.mkdir()
+            for name in ("a.md", "b.md", "c.md"):
+                (corpus / name).write_text(
+                    "# %s\n本文 %s\n" % (name, name), encoding="utf-8"
+                )
+            qrels = {
+                "schema_version": 1,
+                "heldout_queries": [
+                    {
+                        "id": "q%d" % index,
+                        "query": "質問%d" % index,
+                        "relevant_sources": ["%s.md" % "abc"[index]],
+                    }
+                    for index in range(3)
+                ],
+            }
+            qrels_path = root / "qrels.json"
+            qrels_path.write_text(
+                json.dumps(qrels, ensure_ascii=False), encoding="utf-8"
+            )
+            output = root / "out.json"
+            argv = [
+                "cloud_bench.py",
+                "--corpus", str(corpus),
+                "--qrels", str(qrels_path),
+                "--output", str(output),
+                "--with-generation",
+                "--generation-max-queries", str(max_queries),
+            ]
+            calls = []
+
+            def fake_embed(texts, **kwargs):
+                return [[1.0, 0.0] for _ in texts]
+
+            def fake_generation(record, query, candidates, **kwargs):
+                calls.append(query["id"])
+                record["rerank_ndcg_at_5"] = 1.0
+                return 0.01
+
+            patchers = (
+                mock.patch.object(sys, "argv", argv),
+                mock.patch.object(cloud_client, "enabled", return_value=True),
+                mock.patch.object(cloud_client, "embed", fake_embed),
+                mock.patch.object(cloud_client, "last_usage", return_value=None),
+                mock.patch.object(cloud_bench, "_run_generation", fake_generation),
+                mock.patch("sys.stdout", new_callable=io.StringIO),
+                mock.patch("sys.stderr", new_callable=io.StringIO),
+            )
+            with contextlib.ExitStack() as stack:
+                for patcher in patchers:
+                    stack.enter_context(patcher)
+                code = cloud_bench.main()
+            payload = (
+                json.loads(output.read_text(encoding="utf-8"))
+                if output.is_file() else None
+            )
+            return code, calls, payload
+
+    def test_negative_value_is_rejected_before_cloud_calls(self):
+        code, calls, payload = self._invoke(-1)
+        self.assertEqual(code, 2)
+        self.assertEqual(calls, [])
+        self.assertIsNone(payload)
+
+    def test_zero_means_all_queries(self):
+        code, calls, payload = self._invoke(0)
+        self.assertEqual(code, 0)
+        self.assertEqual(calls, ["q0", "q1", "q2"])
+        self.assertEqual(payload["summary"]["queries"], 3)
+
+    def test_one_limits_to_first_query(self):
+        code, calls, _ = self._invoke(1)
+        self.assertEqual(code, 0)
+        self.assertEqual(calls, ["q0"])
+
+    def test_value_larger_than_query_count_is_clamped(self):
+        code, calls, _ = self._invoke(99)
+        self.assertEqual(code, 0)
+        self.assertEqual(calls, ["q0", "q1", "q2"])
+
+
+class CompareCloudLocalRowTest(unittest.TestCase):
+    """compare_cloud_local._row が evaluate 系と cloud_bench 系の両形式を読むこと。"""
+
+    def test_evaluate_style_uses_heldout_hybrid_metrics(self):
+        data = {
+            "generated_at": "2026-11-26T00:00:00Z",
+            "qrels_label": "qrels.json",
+            "corpus_file_count": 7,
+            "embed_model": "local-m",
+            "repeat": 2,
+            "heldout": {
+                "queries": [{"id": "h1"}],
+                "summary": {
+                    "hybrid": {
+                        "recall_at": {"1": 0.5, "10": 0.9},
+                        "ndcg_at": {"10": 0.8},
+                        "latency_stats": {"avg": 0.12},
+                    }
+                },
+            },
+            "summary": {"hybrid": {}},
+        }
+
+        row = compare_cloud_local._row("local", "def", data)
+
+        self.assertEqual(row["set_recall_at_10"], 0.9)
+        self.assertEqual(row["ndcg_at_10"], 0.8)
+        self.assertEqual(row["hit_at_1"], 0.5)
+        self.assertEqual(row["latency_sec"], 0.12)
+        self.assertEqual(row["source"], "qrels.json")
+        self.assertEqual(row["embed_model"], "local-m")
+        self.assertEqual(row["corpus_file_count"], 7)
+        self.assertEqual(row["queries"], [{"id": "h1"}])
+        self.assertEqual(row["repeat"], 2)
+
+    def test_cloud_bench_style_uses_top_level_summary(self):
+        data = {
+            "generated_at": "2026-11-26T00:00:00Z",
+            "corpus": "corpus-subset",
+            "chunk_count": 12,
+            "queries": [{"id": "q1"}],
+            "model": "cloud-m",
+            "summary": {
+                "set_recall_at_10": 0.7,
+                "ndcg_at_10": 0.6,
+                "hit_at_1": 0.4,
+                "total_search_latency_sec": 0.3,
+                "rerank_query_count": 3,
+            },
+        }
+
+        row = compare_cloud_local._row("cloud", "def", data)
+
+        self.assertEqual(row["source"], "corpus-subset")
+        self.assertEqual(row["chunk_count"], 12)
+        self.assertEqual(row["queries"], [{"id": "q1"}])
+        self.assertEqual(row["embed_model"], "cloud-m")
+        self.assertEqual(row["set_recall_at_10"], 0.7)
+        self.assertEqual(row["ndcg_at_10"], 0.6)
+        self.assertEqual(row["hit_at_1"], 0.4)
+        self.assertEqual(row["latency_sec"], 0.3)
+        self.assertEqual(row["rerank_query_count"], 3)
+
+    def test_evaluate_style_without_hybrid_mode_still_reads_metrics(self):
+        data = {
+            "heldout": {
+                "summary": {
+                    "dense": {
+                        "recall_at": {"10": 0.75, "1": 0.25},
+                        "ndcg_at": {"10": 0.5},
+                    }
+                }
+            },
+            "summary": {},
+        }
+
+        row = compare_cloud_local._row("dense-only", "def", data)
+
+        self.assertEqual(row["set_recall_at_10"], 0.75)
+        self.assertEqual(row["hit_at_1"], 0.25)
+        self.assertEqual(row["ndcg_at_10"], 0.5)
+
+
+class UsageCollectorTest(unittest.TestCase):
+    """cloud_bench の usage 集計（per-call / cumulative / 非有限値）を固定する。"""
+
+    @staticmethod
+    def _collector(samples):
+        iterator = iter(samples)
+        with mock.patch.object(
+            cloud_client, "last_usage",
+            side_effect=lambda: next(iterator, None),
+        ):
+            collector = cloud_bench._UsageCollector()
+            for _ in samples:
+                collector.sample()
+        return collector
+
+    def test_cumulative_usage_uses_final_values(self):
+        collector = self._collector([
+            {
+                "calls": 1,
+                "prompt_tokens": 10,
+                "completion_tokens": 2,
+                "total_tokens": 12,
+            },
+            {
+                "calls": 2,
+                "prompt_tokens": 25,
+                "completion_tokens": 5,
+                "total_tokens": 30,
+            },
+        ])
+
+        payload = collector.payload()
+
+        self.assertEqual(payload["calls"], 2)
+        self.assertEqual(payload["prompt_tokens"], 25)
+        self.assertEqual(payload["completion_tokens"], 5)
+        self.assertEqual(payload["total_tokens"], 30)
+
+    def test_per_call_usage_is_summed(self):
+        collector = self._collector([
+            {"calls": 1, "prompt_tokens": 10, "completion_tokens": 2},
+            {"calls": 1, "prompt_tokens": 12, "completion_tokens": 3},
+        ])
+
+        payload = collector.payload()
+
+        self.assertEqual(payload["calls"], 2)
+        self.assertEqual(payload["prompt_tokens"], 22)
+        self.assertEqual(payload["completion_tokens"], 5)
+        self.assertEqual(payload["total_tokens"], 27)
+
+    def test_non_finite_usage_is_ignored(self):
+        collector = self._collector([
+            {
+                "calls": 1,
+                "prompt_tokens": float("nan"),
+                "completion_tokens": 2,
+                "total_tokens": float("inf"),
+            },
+            {"calls": 2, "prompt_tokens": 4, "total_tokens": 6},
+        ])
+
+        payload = collector.payload()
+
+        self.assertIsNotNone(payload)
+        self.assertEqual(payload["calls"], 2)
+        self.assertEqual(payload["completion_tokens"], 2)
+        self.assertEqual(payload["prompt_tokens"], 4)
+        for key, value in payload.items():
+            self.assertTrue(math.isfinite(value), key)
+
+    def test_getter_failure_is_noted_and_does_not_stop(self):
+        def broken():
+            raise RuntimeError("usage unavailable")
+
+        with mock.patch.object(cloud_client, "last_usage", broken):
+            collector = cloud_bench._UsageCollector()
+            collector.sample()
+
+        self.assertIsNone(collector.payload())
+        self.assertTrue(any("last_usage()" in note for note in collector.notes))
+
+
+class ExtractRankIdsTest(unittest.TestCase):
+    """_extract_rank_ids と _run_generation の rank 境界処理。"""
+
+    @staticmethod
+    def _run_with_rank(reply):
+        candidates = [
+            (0.9, "a.md", "A"),
+            (0.8, "b.md", "B"),
+            (0.7, "c.md", "C"),
+        ]
+        record = {}
+        query = {"query": "q", "relevant_sources": ["b.md"]}
+        with mock.patch.object(cloud_bench, "_chat", return_value=reply):
+            cloud_bench._run_generation(record, query, candidates)
+        return record
+
+    def test_bool_rank_is_rejected(self):
+        for reply in ('{"rank": [true]}', '{"rank": [1, false]}'):
+            with self.subTest(reply=reply):
+                with self.assertRaises(ValueError):
+                    cloud_bench._extract_rank_ids(reply)
+
+    def test_non_integer_rank_is_rejected(self):
+        for reply in ('{"rank": [1.5]}', '{"rank": ["1"]}', '{"rank": 1}'):
+            with self.subTest(reply=reply):
+                with self.assertRaises(ValueError):
+                    cloud_bench._extract_rank_ids(reply)
+
+    def test_explanation_text_around_json_is_tolerated(self):
+        self.assertEqual(
+            cloud_bench._extract_rank_ids('結果: {"rank": [1, 3]} 以上'),
+            [1, 3],
+        )
+
+    def test_out_of_range_rank_is_ignored(self):
+        # relevant は b.md の1件。範囲外(0,99)が除かれ rank=2 → b.md が
+        # 最上位に来るため、ideal を qrels 全体(1件)に取ると nDCG=1.0。
+        record = self._run_with_rank('{"rank": [0, 99, 2]}')
+
+        self.assertNotIn("generation_error", record)
+        self.assertAlmostEqual(record["rerank_ndcg_at_5"], 1.0, places=4)
+
+    def test_duplicate_rank_does_not_double_count(self):
+        # rank=2 が3回あってもファイル単位で一意化され、b.md が rank1。
+        record = self._run_with_rank('{"rank": [2, 2, 2]}')
+
+        self.assertNotIn("generation_error", record)
+        self.assertAlmostEqual(record["rerank_ndcg_at_5"], 1.0, places=4)
 
 
 if __name__ == "__main__":

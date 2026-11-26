@@ -27,16 +27,9 @@ from config import PAYLOAD_TEXT_KEY
 
 HERE = Path(__file__).resolve().parent
 
-# cloud_client と共通の埋め込み次元上書き環境変数（明示値が最優先）。
-ENV_CLOUD_DIMENSIONS = "RAG_CLOUD_DIMENSIONS"
-
-# cloud_client.expected_dim(model) が無いときの最小テーブル。
-# 出典: cloud_client.EMBEDDING_MODELS のコメント（2026-11-26 取得）。
-_MODEL_DIMENSIONS: dict[str, int] = {
-    "text-embedding-3-small": 1536,
-    "qwen3-embedding-8b": 4096,
-    "gemini-embedding-2": 3072,
-}
+# 埋め込み次元の解決は config に集約する。正規は単数形、複数形は移行期互換。
+ENV_CLOUD_EMBED_DIMENSION = config.ENV_CLOUD_EMBED_DIMENSION
+ENV_CLOUD_DIMENSIONS = config.ENV_CLOUD_DIMENSIONS  # 後方互換用の別名
 
 # 終了コード。3 は「一部バッチのみ投入済み」を表す（チェックポイント代替）。
 EXIT_OK = 0
@@ -49,46 +42,43 @@ EXIT_PARTIAL = 3
 LAST_UPSERT_PROGRESS: dict[str, int] = {}
 
 
+def _last_progress() -> dict[str, int]:
+    """直近の投入進捗をコピーで返す公式アクセサ（R2-B）。
+
+    部分バッチ進捗は例外の ``completed_batches`` 属性または
+    ``upsert_points`` のコールバックから記録する。呼び出し側・テストは
+    モジュール状態ではなく本関数を通じて参照する。
+    """
+    return dict(LAST_UPSERT_PROGRESS)
+
+
 def _warn(message: object) -> None:
     """マスク済みのエラー／警告を stderr へ出す。"""
     print(f"[cloud-ingest] {config.mask_secrets(message)}", file=sys.stderr, flush=True)
 
 
 def _configured_dimensions() -> int | None:
-    """RAG_CLOUD_DIMENSIONS の明示値を返す（未設定なら None）。
+    """埋め込み次元の環境変数を config の共通リゾルバで読む（未設定なら None）。
 
-    正規化は cloud_client.resolve_dimensions() へ委譲する。不正値は
-    CloudUnavailable のまま送出する（値自体は例外文に出さない）。
-    cloud_client に resolver が無い場合の最小フォールバックも持つが、
-    通常は cloud_client 側の検証が唯一の情報源となる。
+    不正値は CloudUnavailable へ変換して送出する（値自体は例外文に出さない）。
     """
-    resolver = getattr(cloud_client, "resolve_dimensions", None)
-    if callable(resolver):
-        return resolver()
-    raw = os.environ.get(ENV_CLOUD_DIMENSIONS)
-    if raw is None or not str(raw).strip():
-        return None
     try:
-        value = int(raw)
-    except (TypeError, ValueError):
-        raise RuntimeError(
-            f"{ENV_CLOUD_DIMENSIONS} は正の整数である必要があります"
-        ) from None
-    if value <= 0:
-        raise RuntimeError(f"{ENV_CLOUD_DIMENSIONS} は正の整数である必要があります")
-    return value
+        return config.resolve_cloud_embed_dimension()
+    except ValueError as exc:
+        raise cloud_client.CloudUnavailable(str(exc)) from exc
 
 
 def _expected_dim(model: str) -> int | None:
-    """期待次元を解決する（RAG_CLOUD_DIMENSIONS > cloud_client > ローカル表）。"""
+    """期待次元を解決する（環境変数リゾルバ > config のモデル次元表）。
+
+    環境変数は config.resolve_cloud_embed_dimension()、モデル既定は
+    cloud_client.expected_dim()（config.CLOUD_EMBED_DIMENSIONS を参照）に
+    委譲する。ローカルな次元テーブルは持たない。
+    """
     configured = _configured_dimensions()
     if configured is not None:
         return configured
-    resolver = getattr(cloud_client, "expected_dim", None)
-    if callable(resolver):
-        resolved = resolver(model)
-        return int(resolved) if resolved is not None else None
-    return _MODEL_DIMENSIONS.get(model)
+    return cloud_client.expected_dim(model)
 
 
 def _resolve_dimensions(model: str) -> int:
@@ -147,7 +137,7 @@ def _record_progress(points: list[dict], completed_batches: int) -> dict[str, in
         inserted_points=_batches_to_points(len(points), completed_batches),
         total_points=len(points),
     )
-    return dict(LAST_UPSERT_PROGRESS)
+    return _last_progress()
 
 
 def _validate_inputs(points: list[dict], texts: list[str]) -> None:
@@ -184,8 +174,27 @@ def _validate_vectors(vectors: object, expected_count: int, size: int) -> None:
             )
 
 
+def _progress_line(progress: dict[str, int]) -> str:
+    """部分進捗の stdout 行（EXIT_PARTIAL では checkpoint 行の代わりに出す）。"""
+    return (
+        "[cloud-ingest] progress: completed_batches=%d/%d inserted=%d/%d"
+        % (
+            progress["completed_batches"],
+            progress["total_batches"],
+            progress["inserted_points"],
+            progress["total_points"],
+        )
+    )
+
+
 def _warn_partial(points: list[dict], completed_batches: int, exc: object) -> None:
-    """部分失敗時に「途中まで投入済み」をマスク済み stderr で案内する。"""
+    """部分失敗時に「途中まで投入済み」をマスク済み stderr で案内する。
+
+    例外が ``completed_batches`` 属性を持つ場合はその構造化値を優先する（R2-B）。
+    """
+    reported = getattr(exc, "completed_batches", None)
+    if isinstance(reported, int) and not isinstance(reported, bool):
+        completed_batches = reported
     progress = _record_progress(points, completed_batches)
     _warn(
         f"コレクション {ingest.COLLECTION} は途中まで投入済みです。"
@@ -221,7 +230,15 @@ def _run_ingest() -> int:
     texts = [point["payload"][PAYLOAD_TEXT_KEY] for point in points]
     _validate_inputs(points, texts)
 
-    vectors = cloud_client.embed(texts, dimensions=size)
+    try:
+        vectors = cloud_client.embed(texts, dimensions=size)
+    except cloud_client.CloudUnavailable as exc:
+        # 部分バッチ進捗は例外の構造化属性から読み、公式アクセサで参照可能にする。
+        reported = getattr(exc, "completed_batches", None)
+        if isinstance(reported, int) and not isinstance(reported, bool):
+            progress = _record_progress(points, reported)
+            print(_progress_line(progress), flush=True)
+        raise
     _validate_vectors(vectors, len(texts), size)
 
     for point, vector in zip(points, vectors):
@@ -242,10 +259,20 @@ def _run_ingest() -> int:
             session, points, completed_batches=0, on_batch_done=_on_batch_done
         )
     except Exception as exc:
+        # EXIT_PARTIAL では checkpoint 行を出さず、progress 行のみを出す。
         _warn_partial(points, progress["completed_batches"], exc)
+        print(_progress_line(_last_progress()), flush=True)
         return EXIT_PARTIAL
 
     recorded = _record_progress(points, progress["completed_batches"])
+    if count != len(points):
+        _warn_partial(
+            points,
+            progress["completed_batches"],
+            RuntimeError("upserted=%d/%d" % (count, len(points))),
+        )
+        print(_progress_line(_last_progress()), flush=True)
+        return EXIT_PARTIAL
     print(
         "[cloud-ingest] checkpoint: completed_batches=%d/%d inserted=%d/%d"
         % (
@@ -257,13 +284,6 @@ def _run_ingest() -> int:
         flush=True,
     )
     print("[cloud-ingest] upserted=%d/%d" % (count, len(points)), flush=True)
-    if count != len(points):
-        _warn_partial(
-            points,
-            progress["completed_batches"],
-            RuntimeError("upserted=%d/%d" % (count, len(points))),
-        )
-        return EXIT_PARTIAL
     return EXIT_OK
 
 
