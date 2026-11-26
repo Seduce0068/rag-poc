@@ -359,17 +359,22 @@ Ruri は 512 トークンcontextのため `CHUNK_SIZE=300` 前後で投入する
 | `hybrid` | 1.0 | 0.8624 |
 | `hybrid-rerank` | 1.0 | 0.7542 |
 
-opencodeGO の `text-embedding-3-small` を同一全量コーパス（87 ファイル/
-214 チャンク、`qrels.json` 9 クエリ）で計測すると、
-`recall@1=0.7222` / `recall@10=1.0` / `nDCG@10=0.9034` だった
+opencodeGO の `text-embedding-3-small` を全量コーパス（87 ファイル/
+214 チャンク、`qrels.json` 9 クエリ、repeat=2）で計測すると、
+`hit@1=0.7778`（query-level）/ `set_recall@1=0.7222`（集合 recall）/
+`hit@10=1.0` / `nDCG@10=0.9034` だった
 （`eval-results-cloud-full.json`）。ローカル qwen の dense（0.0 / 0.0）
 より大幅に良く、Ruri（0.7992）より nDCG が高い。ただし外部送信と
-token 課金が発生する。生成モデル `deepseek-v4.1-flash` による
-rerank / 回答生成も先頭 3 クエリで動作を確認した。rerank の
-`nDCG@5` は 0.3608 で、埋め込み検索（0.9034）より劣った
-（`eval-results-cloud-full.json` の `summary.rerank_ndcg_at_5`）。
+token 課金が発生する。埋め込みレイテンシ平均 14.0 秒。
+生成モデル `deepseek-v4.1-flash` による rerank / 回答生成も
+2 クエリで動作を確認した（`rerank_query_count=2`）。rerank の
+`nDCG@5=1.0` は旧 0.3608 が ideal のファイル重複カウントバグに
+よる過小評価だったため、修正後の値で置き換えた。
 Qdrant 投入後の正式パイプラインでは hybrid が `nDCG@10=0.8681`
 で最良だった（`eval-results-cloud-pipeline.json`）。
+`cloud_bench.py` の nDCG は上位10件・ファイル単位1回の定義へ
+揃えたため、旧 `ndcg_at_10=0.9034` は全順位ベースの値であり
+`evaluate.py` の同名指標と直接比較できない点に注意。
 
 qwen の全量ベースライン（`rag_poc_full`）では dense が recall@10 /
 nDCG@10 ともに 0.0 だったため、日本語特化埋め込みにより本番相当の

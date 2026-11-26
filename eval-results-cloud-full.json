@@ -1,16 +1,39 @@
 {
-  "generated_at": "2026-11-26T10:11:57.747009+00:00",
+  "generated_at": "2026-11-26T10:38:09.069219+00:00",
   "model": "text-embedding-3-small",
+  "generation_model": "deepseek-v4.1-flash",
   "corpus": "docs",
   "corpus_file_count": 87,
   "chunk_count": 214,
   "qrels_label": "qrels.json",
   "chunk_size": 300,
+  "repeat": 2,
+  "latency_runs": [
+    {
+      "embedding_sec": 14.516219,
+      "search_sec": 0.413466
+    },
+    {
+      "embedding_sec": 13.517141,
+      "search_sec": 0.423263
+    }
+  ],
   "summary": {
+    "queries": 9,
+    "repeat": 2,
+    "hit_at_1": 0.7778,
+    "hit_at_10": 1.0,
     "recall_at_1": 0.7222,
     "recall_at_10": 1.0,
+    "set_recall_at_1": 0.7222,
+    "set_recall_at_10": 1.0,
     "ndcg_at_10": 0.9034,
-    "rerank_ndcg_at_5": 0.3608
+    "embedding_latency_sec": 14.01668,
+    "search_latency_sec": 0.418364,
+    "total_search_latency_sec": 14.435044,
+    "rerank_query_count": 2,
+    "generation_latency_sec": 10.999122,
+    "rerank_ndcg_at_5": 1.0
   },
   "results": [
     {
@@ -19,6 +42,18 @@
       "relevant_sources": [
         "tooling-research-2026-11-09.md"
       ],
+      "hit_at": {
+        "1": 0.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "set_recall_at": {
+        "1": 0.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
       "recall_at": {
         "1": 0.0,
         "3": 1.0,
@@ -26,7 +61,7 @@
         "10": 1.0
       },
       "ndcg_at_10": 0.5,
-      "rerank_reply": "{\"rank\":[5,2,3,1,4]}",
+      "rerank_reply": "{\"rank\": [5, 2, 4, 3, 1]}",
       "rerank_candidates": [
         "zed-setup-2026-11-10.md",
         "dsh-opencode-gap-2026-11-11.md",
@@ -34,8 +69,7 @@
         "dsh-opencode-gap-2026-11-11.md",
         "dsh-opencode-gap-2026-11-11.md"
       ],
-      "rerank_ndcg_at_5": 0.0,
-      "answer": "参考文書には **2026-11-09 付の調査・比較記録は含まれていません**（関連記載は 2026-11-10 と 2026-11-11 付）。文書から言える範囲は以下です。\n\n- **Zed**: 1.27.0 を Kubuntu 2026.04 / KDE Plasma 6 / Wayland で設定。外観・フォント・保存/整形・パネル・Git・ターミナル・拡張・DSH ACP 連携を適用。DSH ACP は `initialize`→`session/new`→`session/prompt` まで実測成功（`OK` 応答、約5秒）。VSCode 風レイアウトも確認。\n- **DSH vs opencode**: DSH `0.2.2-rc.1` と opencode `v2.2.6`（最新 `v2.2.7`）を比較。結論は「プラグインで大体なんとかなるが、置き換え不要なものが多い」。opencode は Goal・Schedule・Skills・Plan・MCP resources・背景 subagent/shell・Artifacts・worktree・TUI/GUI プラグイン SDK を標準搭載。\n- **opencode プラグイン**: `open-artisan`、`flow-opencode`、`opencode-easy-workflow`、`opencode-cortex-mode` 等が挙がるが、v1/v2 互換性の実機確認が必要なものあり。\n- **VSCode**: 直接の調査・比較記述はなく、Zed の「VSCode 風レイアウト」への言及のみ。\n\nしたがって、**DSH・opencode・VSCode・Zed の4者比較は参考文書だけでは完結できません**。特に VSCode の一次情報と 2026-11-09 時点の記録が不足しています。"
+      "answer": "参考文書の範囲では、次のように整理できます。\n\n**Zed**\n- 2026-11-10 に Zed 1.27.0 を Kubuntu 2026.04 / KDE Plasma 6 / Wayland でセットアップ。\n- `~<masked>` に外観・フォント・保存/整形・パネル・Git・ターミナル・拡張・DSH ACP 連携を適用。\n- DSH ACP は `initialize` → `session/new` → `session/prompt` まで実測成功（`OK` 応答、約5秒、`stopReason: end_turn`）。\n- VSCode 風レイアウト（左 Project Panel など）を採用。GUI 表示も XDG Portal のスクリーンショットで確認済み。\n- 一次資料は `work<masked>`、`work<masked>`。\n\n**DSH と opencode の比較（2026-11-11 時点）**\n- 対象: DSH `0.2.2-rc.1`、opencode `v2.2.6`（最新 `v2.2.7` / 2026-11-10）。\n- 結論は「プラグインで大体なんとかなるが、置き換え不要なものが多い」。\n- opencode v2.2.6 は DSH の主要機能のうち Goal・Schedule・Skills・Plan・MCP resources・背景 subagent/shell・Artifacts・worktree・TUI/GUI プラグイン SDK を標準搭載。\n- 差分が残るのは限定的。\n\n**opencode プラグイン**\n- `open-artisan`: 8フェーズ状態機械＋独立 reviewer＋品質ゲート。2026-06 更新で v1 時代の可能性、v2 実機確認が必要。\n- `flow-opencode`: skills-first、durable state、検証/レビューゲート。2026-11 更新。\n- `opencode-easy-workflow`: Kanban 型。2026-04 更新で v1 の可能性。\n- `opencode-cortex-mode`: 単一ターンで TypeScript ワークフロー、「Deep"
     },
     {
       "id": "h02-plugin-markets",
@@ -43,6 +77,18 @@
       "relevant_sources": [
         "dsh-plugin-markets-research-2026-11-26.md"
       ],
+      "hit_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "set_recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
       "recall_at": {
         "1": 1.0,
         "3": 1.0,
@@ -50,7 +96,7 @@
         "10": 1.0
       },
       "ndcg_at_10": 1.0,
-      "rerank_reply": "{\"rank\":[1,2,3,4,5]}",
+      "rerank_reply": "{\"rank\":[1,2]}",
       "rerank_candidates": [
         "dsh-plugin-markets-research-2026-11-26.md",
         "dsh-plugin-markets-research-2026-11-26.md",
@@ -58,8 +104,8 @@
         "battery-drain-dsh-mobile-investigation-2026-11-21.md",
         "STATUS.md"
       ],
-      "rerank_ndcg_at_5": 0.6131,
-      "answer": "参考文書によると、DSH の Discover タブで追加できる `format 1` コミュニティ・プラグインインデックスの著名案件を、公式ドキュメント・GitHub API／リポジトリ・実 URL をもとに `swarm-research`（完全無制限プロファイル）で調査した結果です。\n\n判明している範囲では：\n\n- **awesome-dsh-plugin**：ライセンスは **CC0-1.0**。根拠は `awesome-dsh-plugin.com/index.json`、GitHub リポジトリ、`market-index.mjs`。\n- **その他の format 1 候補**\n  - `Alice39s/agent-stash`：収録数 11、**追加可（小規模・個人用）**\n  - `brokep/grok-bots`：記載が途切れており判定は不明\n\n調査範囲は Discover → Add index source で読める `format 1` インデックスのうちコミュニティで著名なもの。除外対象はプラグイン単体の紹介と、`format 1` でない独自カタログの詳細な中身です。"
+      "rerank_ndcg_at_5": 1.0,
+      "answer": "参考文書の該当レポートは途中で切れているため、確認できる範囲のみです。\n\n- 調査対象は DSH の Discover タブ（Plugins → Discover → Add index source）で読める `format 1` インデックスのうち、コミュニティで著名なもの。\n- 調査方法は `swarm-research`（web / local）を無制限プロファイルで実施。\n- 代表例として **awesome-dsh-plugin** を確認。ライセンスは **CC0-1.0** で、`index.json`、GitHub リポジトリ、`market-index.mjs` が根拠として挙げられている。\n- その他の format 1 候補として **Alice39s/agent-stash**（11件、追加可・小規模／個人用）が挙げられている。\n- `brokep/grok-bots` 以降の記載は文書が途切れており不明。\n\n除外範囲は「プラグイン単体の紹介」と「format 1 でない独自カタログの詳細な中身」です。"
     },
     {
       "id": "h03-okf-v03",
@@ -67,6 +113,18 @@
       "relevant_sources": [
         "okf-v03-upgrade-proposal-2026-11-25.md"
       ],
+      "hit_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "set_recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
       "recall_at": {
         "1": 1.0,
         "3": 1.0,
@@ -74,7 +132,7 @@
         "10": 1.0
       },
       "ndcg_at_10": 1.0,
-      "rerank_reply": "{\"rank\":[2,1,3,5,4]}",
+      "rerank_reply": "{\"rank\":[1,2,3]}",
       "rerank_candidates": [
         "okf-v03-upgrade-proposal-2026-11-25.md",
         "okf-v03-upgrade-proposal-2026-11-25.md",
@@ -82,8 +140,8 @@
         "rag-methods-selection-2026-11-26.md",
         "rag-methods-selection-2026-11-26.md"
       ],
-      "rerank_ndcg_at_5": 0.4693,
-      "answer": "参考文書に基づくメタデータ関連の提案は次の点です。\n\n- SKILL.md に「extension keys」節を追加し、`x-<producer>-<name>`（例: `x-dsh-owner`）を推奨。\n- validator は未知キーをエラーにせず、既存キーを保持する。\n- AGENTS.md §8 の frontmatter 説明にも同様の注記を追加する。\n- SPEC §8.1 では bundle-root の `index.md` に `okf_version`・`title`・`description`・`license` の frontmatter を許可する。\n- status は `draft/stable/deprecated` の3値とし、未知値は拒否せず警告してそのまま保持する。"
+      "rerank_ndcg_at_5": 1.0,
+      "answer": "参考文書のメタデータは以下のとおりです。\n\n- **type**: Reference\n- **title**: OKF v0.3 移行に向けた更新提案書\n- **description**: R1-spec の 10 件の指摘を反映した OKF v0.3 移行の更新提案。\n- **tags**: okf / migration / proposal\n- **generated**: by: lead/dsh、at: 2026-11-25T19:31:00+09:00\n- **status**: draft\n\n補足: 対象は OKF スキル、検証スクリプト、グローバル AGENTS.md §8 の 3 点です。"
     },
     {
       "id": "h04-home-consolidation",
@@ -91,6 +149,18 @@
       "relevant_sources": [
         "dsh-home-consolidation-prep-2026-11-25.md"
       ],
+      "hit_at": {
+        "1": 0.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "set_recall_at": {
+        "1": 0.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
       "recall_at": {
         "1": 0.0,
         "3": 1.0,
@@ -105,6 +175,18 @@
       "relevant_sources": [
         "fs-selection-ext4-report-20261123.md"
       ],
+      "hit_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "set_recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
       "recall_at": {
         "1": 1.0,
         "3": 1.0,
@@ -120,6 +202,18 @@
         "session-local-cache-adr-2026-11-20.md",
         "session-local-cache-adr-2026-11-22.md"
       ],
+      "hit_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "set_recall_at": {
+        "1": 0.5,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
       "recall_at": {
         "1": 0.5,
         "3": 1.0,
@@ -134,6 +228,18 @@
       "relevant_sources": [
         "network-investigation-2026-11-21.md"
       ],
+      "hit_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "set_recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
       "recall_at": {
         "1": 1.0,
         "3": 1.0,
@@ -148,6 +254,18 @@
       "relevant_sources": [
         "system-health-anomalies-2026-11-09.md"
       ],
+      "hit_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "set_recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
       "recall_at": {
         "1": 1.0,
         "3": 1.0,
@@ -162,6 +280,18 @@
       "relevant_sources": [
         "container-tools-setup-2026-11-21.md"
       ],
+      "hit_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "set_recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
       "recall_at": {
         "1": 1.0,
         "3": 1.0,
@@ -174,7 +304,13 @@
   "notes": [
     "埋め込みは opencodeGO の OpenAI 互換 /embeddings API を使用。",
     "スコアはコサイン類似度、ファイル単位の best score でランク付け。",
-    "秘密情報の値は出力・保存していない。",
-    "生成モデルは opencodeGO の OpenAI 互換 chat completions を使用（先頭3クエリのみ）。"
-  ]
+    "nDCG@10 は上位10件のみ・ファイル単位1回で計上（evaluate.py と同一定義）。",
+    "hit_at は evaluate.py の query-level hit@k と同一定義。",
+    "set_recall_at は旧 recall_at（集合 recall）の別名で、互換のため recall_at にも同一値を残す。",
+    "レイテンシは time.perf_counter で計測し repeat 回の平均を summary に記録。",
+    "秘密情報の値は出力・保存しない（生成テキストは mask_secrets を通過）。",
+    "生成モデルは opencodeGO の OpenAI 互換 chat completions を使用（先頭3クエリのみ、rerank_query_count を参照）。",
+    "rerank は JSON の rank 整数配列のみを採用し、パース失敗時は generation_error に記録して nDCG を 0 としない。"
+  ],
+  "corpus_sha256": "fd5b9f857eb1a98755b42ff44dc65dac0afbc37fc39585b6d80da1c04be8a811"
 }
