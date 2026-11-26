@@ -118,18 +118,10 @@ def embed_model() -> str:
     return "text-embedding-3-small"
 
 
-def embed(
-    texts: list[str],
-    *,
-    dimensions: int | None = None,
+def _embed_batch(
+    texts: list[str], *, dimensions: int | None = None
 ) -> list[list[float]]:
-    """OpenAI 互換 Embeddings API でベクトルを取得する。
-
-    埋め込みリクエストには x-opencode-session が不要（公式ドキュメント）。
-    入力順序どおりにベクトルを返す。認証情報の値はログへ出さない。
-    """
-    if not enabled():
-        raise _fail("cloud disabled (set %s=1)" % ENV_ENABLED)
+    """1 リクエスト分の埋め込み呼び出し（内部用）。"""
     key_name = api_key_name()
     if key_name is None:
         raise _fail("no API key environment variable set")
@@ -156,3 +148,32 @@ def embed(
         return vectors
     except (requests.RequestException, ValueError, KeyError, TypeError) as exc:
         raise _fail(exc) from exc
+
+
+# 1 リクエストあたりの入力上限（リクエストサイズとトークン制限を避ける）。
+MAX_BATCH_SIZE = 64
+
+
+def embed(
+    texts: list[str],
+    *,
+    dimensions: int | None = None,
+    batch_size: int | None = None,
+) -> list[list[float]]:
+    """OpenAI 互換 Embeddings API でベクトルを取得する。
+
+    埋め込みリクエストには x-opencode-session が不要（公式ドキュメント）。
+    大量入力は batch_size（既定 64）で分割し、入力順序どおりに結合する。
+    認証情報の値はログへ出さない。
+    """
+    if not enabled():
+        raise _fail("cloud disabled (set %s=1)" % ENV_ENABLED)
+    size = batch_size or MAX_BATCH_SIZE
+    if size < 1:
+        raise _fail("batch_size must be positive")
+    vectors: list[list[float]] = []
+    for start in range(0, len(texts), size):
+        vectors.extend(
+            _embed_batch(texts[start : start + size], dimensions=dimensions)
+        )
+    return vectors

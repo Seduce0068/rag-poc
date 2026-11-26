@@ -359,6 +359,14 @@ Ruri は 512 トークンcontextのため `CHUNK_SIZE=300` 前後で投入する
 | `hybrid` | 1.0 | 0.8624 |
 | `hybrid-rerank` | 1.0 | 0.7542 |
 
+opencodeGO の `text-embedding-3-small` を同一全量コーパス（87 ファイル/
+214 チャンク、`qrels.json` 9 クエリ）で計測すると、
+`recall@1=0.7222` / `recall@10=1.0` / `nDCG@10=0.9034` だった
+（`eval-results-cloud-full.json`）。ローカル qwen の dense（0.0 / 0.0）
+より大幅に良く、Ruri（0.7992）より nDCG が高い。ただし外部送信と
+token 課金が発生する。生成モデル `deepseek-v4.1-flash` による
+rerank / 回答生成も先頭 3 クエリで動作を確認した。
+
 qwen の全量ベースライン（`rag_poc_full`）では dense が recall@10 /
 nDCG@10 ともに 0.0 だったため、日本語特化埋め込みにより本番相当の
 コーパスでも正解を取得できるようになった。`hybrid` が最良で、
@@ -682,6 +690,7 @@ cp rag_poc/eval-results.json rag_poc/eval-results-other-domain.json
 | `eval-results-other-domain.json` | `python3 rag_poc/evaluate.py --qrels rag_poc/qrels-alt.json`（`RAG_CORPUS_DIR=rag_poc/corpus-alt` / `RAG_COLLECTION=rag_poc_other_domain`） | 退避済み。`evaluate.py` の直接出力先ではないため上書きされない |
 | `eval-results-ruri-subset.json` | `python3 rag_poc/evaluate.py --qrels rag_poc/qrels-subset.json`（`RAG_COLLECTION=rag_poc_ruri`） | 退避済み。再計測時は `eval-results.json` から `cp` で更新する |
 | `eval-results-ruri-full.json` | `python3 rag_poc/evaluate.py --qrels rag_poc/qrels.json`（`RAG_CORPUS_DIR=passkey-gateway/docs` / `RAG_COLLECTION=rag_poc_ruri_full`） | 退避済み。再計測時は `eval-results.json` から `cp` で更新する |
+| `eval-results-cloud-full.json` | `RAG_CLOUD_ENABLED=1 python3 rag_poc/cloud_bench.py --corpus ../passkey-gateway/docs --qrels rag_poc/qrels.json --output rag_poc/eval-results-cloud-full.json --with-generation` | 退避済み。外部送信と token 課金が発生する |
 | `embedding-comparison.json` | `python3 rag_poc/compare_embeddings.py` | 実行ごとに上書き。必要なら `cp` で退避する |
 | `qrels.json` / `qrels-subset.json` / `qrels-alt.json` | 人手で作成・管理（生成コマンドなし） | `evaluate.py` は読み取り専用で上書きしない。コーパス更新時に内容を見直す |
 

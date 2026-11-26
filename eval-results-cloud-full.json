@@ -1,0 +1,155 @@
+{
+  "generated_at": "2026-11-26T09:55:16.532879+00:00",
+  "model": "text-embedding-3-small",
+  "corpus": "docs",
+  "corpus_file_count": 87,
+  "chunk_count": 214,
+  "qrels_label": "qrels.json",
+  "chunk_size": 300,
+  "summary": {
+    "recall_at_1": 0.7222,
+    "recall_at_10": 1.0,
+    "ndcg_at_10": 0.9034
+  },
+  "results": [
+    {
+      "id": "h01-tooling-research",
+      "top_source": "zed-setup-2026-11-10.md",
+      "relevant_sources": [
+        "tooling-research-2026-11-09.md"
+      ],
+      "recall_at": {
+        "1": 0.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "ndcg_at_10": 0.5,
+      "rerank_reply": "{\"rank\":[5,2,3,1,4]}",
+      "answer": "参考文書には **2026-11-09 時点**の比較資料は含まれていません（文書は 2026-11-10〜11-11 付）。読み取れる範囲は以下です。\n\n- **Zed**: 1.27.0 を Kubuntu 2026.04 / KDE Plasma 6 / Wayland に設定。`settings.json`（外観・フォント・保存/整形・パネル・Git・ターミナル・拡張・DSH ACP 連携）、keymap/tasks を適用。ACP は `initialize`→`session/new`→`session/prompt` まで実測成功（約5秒、`stopReason: end_turn`）。\n- **DSH**: `0.2.2-rc.1`。Zed から ACP（`~/.local/bin/dsh-acp`）で接続可能。OpenCode 側には DSH の主要機能（Goal・Schedule・Skills・Plan・MCP resources・背景 subagent/shell・Artifacts・worktree・TUI/GUI プラグイン SDK）が標準搭載済みで「置き換え不要なものが多い」。\n- **opencode**: `v2.2.6` インストール済み（最新 `v2.2.7` / 2026-11-10）。比較対象のプラグイン（open-artisan、flow-opencode、opencode-easy-workflow、opencode-cortex-mode 等）は v1/v2 の実機確認が必要なものあり。plugin API 2.2.x、Node 22.6+ 要件。\n- **VSCode**: 具体的な調査記述は参考文書内には見当たらず、「Zed の VSCode 風レイアウト（左 Project Panel / 右…）」という言及のみ。\n\n正確な 11-09 比較には、その日付の一次資料が必要です。"
+    },
+    {
+      "id": "h02-plugin-markets",
+      "top_source": "dsh-plugin-markets-research-2026-11-26.md",
+      "relevant_sources": [
+        "dsh-plugin-markets-research-2026-11-26.md"
+      ],
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "ndcg_at_10": 1.0,
+      "rerank_reply": "{\"rank\":[1,2]}",
+      "answer": "## DSH プラグインインデックス調査（要旨）\n\n**範囲**: Discover タブ（Plugins → Discover → Add index source）で読める **format 1** インデックスのうち、コミュニティで著名なもの。プラグイン単体の紹介や format 1 でないカタログの中身は除外。情報源は公式ドキュメント・GitHub API/リポジトリ・各インデックスの実 URL。手法は `swarm-research`（web/local）を無制限プロファイルで実施、R1 で 3 件…（以降は文書が途切れています）。\n\n**主な確認結果**:\n- `awesome-dsh-plugin.com/index.json`（リポジトリ: `awesome-dsh-plugin/awesome-dsh-plugin`）を確認。**ライセンスは CC0-1.0**（根拠: index.json、GitHub リポジトリ、`scripts/lib/market-index.mjs`）。\n- その他の format 1 候補として、`Alice39s/agent-stash`（収録 11 件、追加可・小規模/個人用）を挙げ、`brokep/grok-bots` 以降は文書が途中で切れているため不明。\n\n※参照文書が途中で途切れているため、調査件数の全体や他の候補の判定は確認できません。"
+    },
+    {
+      "id": "h03-okf-v03",
+      "top_source": "okf-v03-upgrade-proposal-2026-11-25.md",
+      "relevant_sources": [
+        "okf-v03-upgrade-proposal-2026-11-25.md"
+      ],
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "ndcg_at_10": 1.0,
+      "rerank_reply": "{\"rank\":[1,2,3,5,4]}",
+      "answer": "参考文書に基づくメタデータ関連の提案は以下のとおりです。\n\n- **拡張キー**: SKILL.md に「extension keys」節を追加し、`x-<producer>-<name>`（例: `x-dsh-owner`）を推奨。validator は未知キーをエラーにせず、既存キーを保持する。AGENTS.md §8 の frontmatter 説明にも同様の注記を提案。\n- **bundle-root `index.md` の frontmatter**: SPEC §8.1 は `okf_version`, `title`, `description`, `license` を許可。\n- **status 語彙**: `draft/stable/deprecated` の3値のみ（欠如時は `stable`）。未知値は `stable` にせずそのまま保持し、current knowledge の絞り込みから除外する（§11.2）。validator 側も `[\"draft\", \"stable\", \"deprecated\"]` に変更し、未知値は拒否せず警告する提案。\n- **未知 type**: 拒否を削除し情報表示に留め、SKILL.md のチェック項目も「未知 type も許可」へ変更（§11.2 の MUST accept に対応）。\n\nなお、本文の行長は MD013 の 80 字準拠とし、SKILL.md:116 の 120 字とのしきい値整合は実装時に検討するとされています。"
+    },
+    {
+      "id": "h04-home-consolidation",
+      "top_source": "backup-restore.md",
+      "relevant_sources": [
+        "dsh-home-consolidation-prep-2026-11-25.md"
+      ],
+      "recall_at": {
+        "1": 0.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "ndcg_at_10": 0.6309
+    },
+    {
+      "id": "h05-fs-ext4",
+      "top_source": "fs-selection-ext4-report-20261123.md",
+      "relevant_sources": [
+        "fs-selection-ext4-report-20261123.md"
+      ],
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "ndcg_at_10": 1.0
+    },
+    {
+      "id": "h06-session-cache-adr",
+      "top_source": "session-local-cache-adr-2026-11-22.md",
+      "relevant_sources": [
+        "session-local-cache-adr-2026-11-20.md",
+        "session-local-cache-adr-2026-11-22.md"
+      ],
+      "recall_at": {
+        "1": 0.5,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "ndcg_at_10": 1.0
+    },
+    {
+      "id": "h07-network-investigation",
+      "top_source": "network-investigation-2026-11-21.md",
+      "relevant_sources": [
+        "network-investigation-2026-11-21.md"
+      ],
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "ndcg_at_10": 1.0
+    },
+    {
+      "id": "h08-health-report",
+      "top_source": "system-health-anomalies-2026-11-09.md",
+      "relevant_sources": [
+        "system-health-anomalies-2026-11-09.md"
+      ],
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "ndcg_at_10": 1.0
+    },
+    {
+      "id": "h09-container-tools",
+      "top_source": "container-tools-setup-2026-11-21.md",
+      "relevant_sources": [
+        "container-tools-setup-2026-11-21.md"
+      ],
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "ndcg_at_10": 1.0
+    }
+  ],
+  "notes": [
+    "埋め込みは opencodeGO の OpenAI 互換 /embeddings API を使用。",
+    "スコアはコサイン類似度、ファイル単位の best score でランク付け。",
+    "秘密情報の値は出力・保存していない。",
+    "生成モデルは opencodeGO の OpenAI 互換 chat completions を使用（先頭3クエリのみ）。"
+  ]
+}
