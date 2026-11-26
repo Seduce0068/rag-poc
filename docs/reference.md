@@ -15,6 +15,7 @@ verified:
   - by: "dsh-subagent/eg-reference"
     at: "2026-11-26T21:41:25+09:00"
 status: "stable"
+stale_after: "2026-12-26"
 ---
 
 > 出典は分割前 README スナップショット（`/tmp/README-full-backup.md`）の

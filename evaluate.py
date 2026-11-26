@@ -1060,6 +1060,63 @@ def _summarize_heldout(records: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# 保存境界のマスキング（R2-C）
+# ---------------------------------------------------------------------------
+
+# 保存されて可視化される source 系フィールドだけをマスク対象にする。
+# matched_sources は検索指標照合（recall / nDCG）用の内部値なので対象外。
+_SAVE_SOURCE_FIELDS: tuple[str, ...] = ("sources", "answer_sources")
+
+
+def _masked_payload_for_save(payload: dict[str, Any]) -> dict[str, Any]:
+    """保存直前に payload のコピーを作り、公開用 source 系フィールドをマスクする。
+
+    マスク対象は ``sources`` / ``answer_sources`` と ``unit_uniqueness.top3_sources``
+    （いずれも eval-results.json に保存されて可視化されるフィールド）だけ。
+    ``matched_sources`` や recall / nDCG の算出値は検索指標照合用の内部値として
+    変更しない（照合ロジックを壊さない）。
+
+    元の payload / records は書き換えず、ディープコピーした保存用データに対して
+    のみ ``config.mask_secrets`` を適用する（呼び出し側の算出済み指標を守る）。
+    """
+    def mask_list(values: Any) -> Any:
+        if not isinstance(values, list):
+            return values
+        mask = _import_config().mask_secrets
+        return [str(mask(item)) for item in values]
+
+    def mask_record(record: Any) -> Any:
+        if not isinstance(record, dict):
+            return record
+        copied = dict(record)
+        for field in _SAVE_SOURCE_FIELDS:
+            if field in copied:
+                copied[field] = mask_list(copied[field])
+        uniqueness = copied.get("unit_uniqueness")
+        if isinstance(uniqueness, dict):
+            new_uniqueness = dict(uniqueness)
+            if "top3_sources" in new_uniqueness:
+                new_uniqueness["top3_sources"] = mask_list(
+                    new_uniqueness["top3_sources"]
+                )
+            copied["unit_uniqueness"] = new_uniqueness
+        return copied
+
+    result = dict(payload)
+    simple = result.get("results")
+    if isinstance(simple, list):
+        result["results"] = [mask_record(row) for row in simple]
+    heldout = result.get("heldout")
+    if isinstance(heldout, dict):
+        new_heldout = dict(heldout)
+        rows = new_heldout.get("results")
+        if isinstance(rows, list):
+            new_heldout["results"] = [mask_record(row) for row in rows]
+        result["heldout"] = new_heldout
+    return result
+
+
+# ---------------------------------------------------------------------------
 # CLI / オーケストレーション
 # ---------------------------------------------------------------------------
 
@@ -1788,9 +1845,12 @@ def _evaluate_once(
     if args.with_answer:
         payload["with_answer"] = True
 
+    # 保存直前のコピーにだけマスクを適用する。算出済みの matched_sources /
+    # recall / nDCG は元 payload に残るため照合ロジックは壊れない。
+    save_payload = _masked_payload_for_save(payload)
     try:
         with open(output_path, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, ensure_ascii=False, indent=2)
+            json.dump(save_payload, handle, ensure_ascii=False, indent=2)
             handle.write("\n")
     except OSError as exc:
         print("%s の書き込みに失敗: %s" % (output_path, exc), file=sys.stderr)

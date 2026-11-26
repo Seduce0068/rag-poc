@@ -17,6 +17,7 @@ verified:
   - by: "human:lead"
     at: "2026-11-26T21:41:00+09:00"
 status: "stable"
+stale_after: "2026-12-26"
 ---
 
 ## この文書の目的と位置づけ
@@ -156,7 +157,9 @@ top_source が `jarvis-muse-dsh-roles.md` だった（正解は
 全量 Ruri では `hybrid` の nDCG@10=0.8624 に対し
 `hybrid-rerank` は 0.7542 と下がった。README では
 `hybrid-rerank` は `RAG_RERANK_MAX_DOCS=5` により再ランク前の
-約 11 秒から約 5.4 秒へ短縮したと記録する。
+約 11 秒から約 5.4 秒へ短縮したと記録されていた（出典: 分割前 README の
+スナップショット。現行 README には実測値を置かず
+[docs/reference.md](reference.md#代表的な実測値) を単一情報源とする）。
 レイテンシと精度の調整ノブとして残す判断である。
 
 ## モデル比較の設計判断

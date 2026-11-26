@@ -301,6 +301,38 @@ const CLOUD_BENCH_KEYS: &[&str] = &[
     "notes",
 ];
 const FORBIDDEN_KEYS: &[&str] = &["answer", "rerank_candidates", "rerank_reply"];
+/// 再帰走査の深さ上限（ルートを 0 とし、この値に達した階層は走査しない）。
+const MAX_SCAN_DEPTH: u32 = 8;
+/// 1 つの配列あたりの走査要素数上限。
+const MAX_SCAN_ARRAY_ITEMS: usize = 1000;
+
+/// `serde_json::Value` を再帰走査し、見つかった禁止キー名だけを `present` に追加する。
+///
+/// 値は一切収集しない（diagnostics へ漏らさないため）。深さ・配列要素数の
+/// 上限により、過大な入力でも走査量が抑えられる。
+fn collect_forbidden_keys(value: &serde_json::Value, depth: u32, present: &mut Vec<&'static str>) {
+    if depth >= MAX_SCAN_DEPTH {
+        return;
+    }
+    match value {
+        serde_json::Value::Object(map) => {
+            for &forbidden in FORBIDDEN_KEYS {
+                if map.contains_key(forbidden) && !present.contains(&forbidden) {
+                    present.push(forbidden);
+                }
+            }
+            for child in map.values() {
+                collect_forbidden_keys(child, depth + 1, present);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items.iter().take(MAX_SCAN_ARRAY_ITEMS) {
+                collect_forbidden_keys(item, depth + 1, present);
+            }
+        }
+        _ => {}
+    }
+}
 
 /// 成果物名ごとの必須キー集合（ci.yml の heredoc と同じ対応表）。
 fn required_keys(name: &str) -> &'static [&'static str] {
@@ -390,7 +422,8 @@ fn is_rfc3339_utc(value: &str) -> bool {
 /// (ファイル名, JSON 文字列) の組を検証する。
 ///
 /// 検査内容はci.yml の heredoc と同一: 必須キー、禁止キー不在、
-/// cloud-* の `generated_at` UTC。値は diagnostics に一切含めない。
+/// 全成果物の `generated_at` UTC。禁止キーは JSON 全体を再帰走査して検出し、
+/// 値は diagnostics に一切含めない。
 pub fn check_eval_results(files: &[(String, String)]) -> GateReport {
     let mut diagnostics = Vec::new();
     let mut failed = 0usize;
@@ -424,7 +457,8 @@ pub fn check_eval_results(files: &[(String, String)]) -> GateReport {
             file_failed = true;
         }
 
-        if name.starts_with("eval-results-cloud-") {
+        // generated_at は全成果物の必須キー。cloud-* に限らず UTC オフセットを要求する。
+        if required_keys(name).contains(&"generated_at") {
             let valid = object
                 .get("generated_at")
                 .and_then(serde_json::Value::as_str)
@@ -436,22 +470,9 @@ pub fn check_eval_results(files: &[(String, String)]) -> GateReport {
             }
         }
 
-        let mut present: Vec<&str> = FORBIDDEN_KEYS
-            .iter()
-            .copied()
-            .filter(|key| object.contains_key(*key))
-            .collect();
-        if let Some(results) = object.get("results").and_then(serde_json::Value::as_array) {
-            for entry in results {
-                if let Some(entry_object) = entry.as_object() {
-                    for key in FORBIDDEN_KEYS {
-                        if entry_object.contains_key(*key) && !present.contains(key) {
-                            present.push(key);
-                        }
-                    }
-                }
-            }
-        }
+        // トップレベルと results 直下に限らず、JSON 全体を再帰走査する。
+        let mut present: Vec<&'static str> = Vec::new();
+        collect_forbidden_keys(&data, 0, &mut present);
         present.sort_unstable();
         if !present.is_empty() {
             diagnostics.push(format!(
@@ -640,5 +661,116 @@ mod tests {
         assert!(joined.contains("eval-results-custom.json"));
         assert!(joined.contains("rerank_candidates"));
         assert!(!joined.contains("SECRET_VALUE"));
+    }
+
+    /// `summary` 配下に `wrappers` 段の入れ子を置き、最内側に `answer` を持つ成果物。
+    fn artifact_with_nested_answer(wrappers: usize) -> String {
+        let mut nested = r#"{"answer":"SECRET_VALUE"}"#.to_string();
+        for _ in 0..wrappers {
+            nested = format!("{{\"n\":{nested}}}");
+        }
+        format!(
+            r#"{{"generated_at":"2026-11-26T00:00:00Z","schema_version":1,"qrels_schema_version":1,"qrels_label":"q","collection":"c","embed_model":"m","summary":{nested},"results":[]}}"#
+        )
+    }
+
+    /// `results` の `at_index` 番目（0-based）だけに `answer` を持つ成果物。
+    fn artifact_with_results_answer(at_index: usize) -> String {
+        let entries: Vec<String> = (0..=1001)
+            .map(|index| {
+                if index == at_index {
+                    r#"{"id":"q","answer":"SECRET_VALUE"}"#.to_string()
+                } else {
+                    r#"{"id":"q"}"#.to_string()
+                }
+            })
+            .collect();
+        format!(
+            r#"{{"generated_at":"2026-11-26T00:00:00Z","schema_version":1,"qrels_schema_version":1,"qrels_label":"q","collection":"c","embed_model":"m","summary":{{}},"results":[{}]}}"#,
+            entries.join(",")
+        )
+    }
+
+    #[test]
+    fn eval_results_gate_requires_offset_on_non_cloud_generated_at() {
+        let json = r#"{
+            "generated_at":"2026-11-26T00:00:00",
+            "schema_version":1,"qrels_schema_version":1,"qrels_label":"q",
+            "collection":"c","embed_model":"m","summary":{},"results":[]
+        }"#;
+        let files = vec![("eval-results-baseline.json".to_string(), json.to_string())];
+        let report = check_eval_results(&files);
+        assert!(!report.ok);
+        assert!(report
+            .diagnostics
+            .iter()
+            .any(|line| { line.contains("generated_at requires RFC3339 UTC") }));
+    }
+
+    #[test]
+    fn eval_results_gate_accepts_utc_offset_on_non_cloud_generated_at() {
+        let json = r#"{
+            "generated_at":"2026-11-26T00:00:00+00:00",
+            "schema_version":1,"qrels_schema_version":1,"qrels_label":"q",
+            "collection":"c","embed_model":"m","summary":{},"results":[]
+        }"#;
+        let files = vec![(
+            "eval-results-ruri-subset.json".to_string(),
+            json.to_string(),
+        )];
+        let report = check_eval_results(&files);
+        assert!(report.ok);
+        assert!(report.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn eval_results_gate_detects_nested_forbidden_key() {
+        let files = vec![(
+            "eval-results.json".to_string(),
+            artifact_with_nested_answer(1),
+        )];
+        let report = check_eval_results(&files);
+        assert!(!report.ok);
+        let joined = report.diagnostics.join("\n");
+        assert!(joined.contains("answer"));
+        assert!(!joined.contains("SECRET_VALUE"));
+    }
+
+    #[test]
+    fn eval_results_gate_depth_limit_stops_recursion() {
+        // summary(深さ1) + 6 段 = 禁止キーのあるオブジェクトが深さ7 → 検出される。
+        let within = vec![(
+            "eval-results-baseline.json".to_string(),
+            artifact_with_nested_answer(6),
+        )];
+        assert!(!check_eval_results(&within).ok);
+
+        // 7 段では深さ8 となり上限に達するため走査されない。
+        let beyond = vec![(
+            "eval-results-baseline.json".to_string(),
+            artifact_with_nested_answer(7),
+        )];
+        let report = check_eval_results(&beyond);
+        assert!(report.ok);
+        assert!(report.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn eval_results_gate_array_item_limit_stops_recursion() {
+        // 先頭 1000 要素（index 0..=999）は走査される。
+        let within = vec![(
+            "eval-results.json".to_string(),
+            artifact_with_results_answer(999),
+        )];
+        assert!(!check_eval_results(&within).ok);
+
+        // 1001 要素目（index 1000）は上限を超えるため走査されない。
+        let beyond = vec![(
+            "eval-results.json".to_string(),
+            artifact_with_results_answer(1000),
+        )];
+        let report = check_eval_results(&beyond);
+        assert!(report.ok);
+        assert!(report.diagnostics.is_empty());
     }
 }

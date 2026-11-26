@@ -808,6 +808,61 @@ class MaskSecretsTest(unittest.TestCase):
                 self.assertNotIn(needle, masked)
         self.assertIn("<masked>", masked)
 
+    def test_carrier_names_require_context(self):
+        # 単独のキャリア名・正規の略語はマスクしない（誤検出の防止）。
+        for text in ("docomo", "au", "softbank", "1 AU (astronomical unit)", "SIMD 命令"):
+            with self.subTest(text=text):
+                self.assertEqual(config.mask_secrets(text), text)
+        # 回線 / SIM / プラン / HOME 5G の文脈が隣接するときだけマスクする。
+        for text in ("docomo の回線", "softbank SIM 契約", "au プラン", "HOME 5G の docomo"):
+            with self.subTest(text=text):
+                self.assertIn("<masked>", config.mask_secrets(text))
+
+    def test_uid_gid_require_real_range_and_delimiter(self):
+        # 一般的な小さい uid/gid（root 等）はマスクしない。
+        generic = "uid=0 gid=1 uid=42 gid 99"
+        self.assertEqual(config.mask_secrets(generic), generic)
+        # 3 桁以上で : / = / 空白区切りの場合だけマスクする。
+        masked = config.mask_secrets("uid=1000 gid=1000 uid:1001 gid 1002")
+        self.assertIn("<masked>", masked)
+        for needle in ("1000", "1001", "1002"):
+            with self.subTest(needle=needle):
+                self.assertNotIn(needle, masked)
+
+    def test_device_model_requires_context(self):
+        # 汎用デバイス名や文脈の無い型番らしき文字列はマスクしない。
+        for text in ("SSD GPU CPU NVMe", "sdcard は汎用名", "MODEL ABCDEFG 512G"):
+            with self.subTest(text=text):
+                self.assertEqual(config.mask_secrets(text), text)
+        # ディスク / 容量 / sdX の文脈が隣接する型番はマスクする。
+        self.assertIn("<masked>", config.mask_secrets("SAMSUNG MZVLB1T0HALR 1024G のディスク"))
+        # sdX の実デバイス識別子はマスクする（汎用名は数字が無いた対象外）。
+        self.assertIn("<masked>", config.mask_secrets("sda1 のディスクを確認"))
+
+    def test_username_case_and_symbol_variations(self):
+        # 固有值は分割構築し、テストソース自体を Betterleaks 検出対象にしない。
+        name_a = "kop" + "pe"
+        name_b = "onoder" + "akeita"
+        for text in (
+            name_a.upper(),
+            "-" + name_a + "-",
+            "[" + name_a + "]",
+            name_b.capitalize(),
+            name_b.upper(),
+            "-" + name_b + "-",
+            "<" + name_b + ">",
+        ):
+            with self.subTest(text=text):
+                self.assertIn("<masked>", config.mask_secrets(text))
+
+    def test_narrowed_patterns_keep_legitimate_text_unchanged(self):
+        # 正規の略語・一般的な uid・汎用デバイス名が混在してもマスクされない。
+        text = (
+            "AU は天文単位、uid=0 は root、SIMD は命令セット、"
+            "GPU と SSD は汎用デバイス名です。"
+        )
+        self.assertEqual(config.mask_secrets(text), text)
+
 
 class QdrantCollectionPathTest(unittest.TestCase):
     """qdrant_collection_path が URL 予約文字をエンコードすること。"""
@@ -2126,6 +2181,69 @@ class GeneratedAnswerErrorTest(unittest.TestCase):
         self.assertNotIn("ZZZTIMEOUTTOKENZZZ", json.dumps(record, ensure_ascii=False))
         self.assertIsNone(record["answer"])
         self.assertIsNotNone(record["answer_latency_sec"])
+
+
+class EvaluateSaveBoundaryMaskTest(unittest.TestCase):
+    """保存境界で source 系フィールドだけがマスクされること。"""
+
+    @staticmethod
+    def _secret_source():
+        # 固有值は分割構築してソース自体を Betterleaks 検出対象にしない。
+        return "notes-" + "onoder" + "akeita" + ".md"
+
+    def test_masks_only_save_fields_and_keeps_matching_values(self):
+        source = self._secret_source()
+        simple = {
+            "query": "q", "mode": "hybrid", "recall": True,
+            "matched_keywords": ["キーワード"],
+            "unit_uniqueness": {"top3_sources": [source], "unique_source_count": 1},
+        }
+        heldout = {
+            "query": "q", "mode": "hybrid",
+            "sources": [source], "answer_sources": [source],
+            "matched_sources": [source],
+            "recall_at": {"10": True}, "ndcg_at": {"10": 1.0},
+        }
+        payload = {
+            "collection": "docs",
+            "results": [simple],
+            "heldout": {"results": [heldout], "summary": {"hybrid": {}}},
+        }
+        saved = evaluate._masked_payload_for_save(payload)
+
+        saved_simple = saved["results"][0]
+        self.assertIn("<masked>", saved_simple["unit_uniqueness"]["top3_sources"][0])
+        self.assertNotIn(source, saved_simple["unit_uniqueness"]["top3_sources"][0])
+
+        saved_heldout = saved["heldout"]["results"][0]
+        for field in ("sources", "answer_sources"):
+            with self.subTest(field=field):
+                self.assertIn("<masked>", saved_heldout[field][0])
+                self.assertNotIn(source, saved_heldout[field][0])
+        # 照合用の内部値と指標はそのまま残る（照合ロジックを壊さない）。
+        self.assertEqual(saved_heldout["matched_sources"], [source])
+        self.assertEqual(saved_heldout["recall_at"], {"10": True})
+        self.assertEqual(saved_heldout["ndcg_at"], {"10": 1.0})
+        self.assertEqual(saved_simple["matched_keywords"], ["キーワード"])
+        self.assertTrue(saved_simple["recall"])
+        # 元 payload は変更されない（保存直前のコピーだけをマスク）。
+        self.assertEqual(payload["results"][0]["unit_uniqueness"]["top3_sources"], [source])
+        self.assertEqual(payload["heldout"]["results"][0]["sources"], [source])
+        self.assertEqual(payload["collection"], "docs")
+
+    def test_missing_fields_and_non_list_values_are_tolerated(self):
+        payload = {
+            "results": [
+                {"query": "q", "unit_uniqueness": {"unique_ratio": 0.0}},
+                {"sources": "not-a-list"},
+            ],
+            "heldout": {"summary": {}},
+        }
+        saved = evaluate._masked_payload_for_save(payload)
+        self.assertEqual(saved["results"][0]["unit_uniqueness"], {"unique_ratio": 0.0})
+        self.assertEqual(saved["results"][1]["sources"], "not-a-list")
+        self.assertEqual(saved["heldout"], {"summary": {}})
+        self.assertEqual(payload["results"][1]["sources"], "not-a-list")
 
 
 class CloudClientTest(unittest.TestCase):
@@ -4007,6 +4125,116 @@ class CheckEvalResultsDelegationTest(_RustSkipCounter, unittest.TestCase):
         self.assertTrue(report["ok"])
         self.assertEqual(report["checked"], 1)
         self.assertEqual(report["failed"], 0)
+
+
+class RunOpReservedKeyTest(unittest.TestCase):
+    """run_op が payload 側の op キーで予約キーを上書きされないこと（R2-B）。"""
+
+    @staticmethod
+    def _invoke(op, payload, response=b'"ok"'):
+        """subprocess.run を fake にし、Rust CLI へ渡した生リクエストを返す。"""
+        import rust_bridge as bridge
+
+        captured = {}
+
+        def fake_run(argv, input=None, stdout=None, stderr=None, timeout=None):
+            captured["argv"] = list(argv)
+            captured["input"] = input
+            stdout.write(response)
+            return types.SimpleNamespace(returncode=0)
+
+        with mock.patch.object(
+            bridge, "rust_binary_path", return_value=Path("fake-ragcore")
+        ), mock.patch.object(bridge, "_ensure_usable"), mock.patch.object(
+            bridge.subprocess, "run", side_effect=fake_run
+        ):
+            value = bridge.run_op(op, payload)
+        return captured, value
+
+    def test_payload_cannot_override_reserved_op(self):
+        captured, value = self._invoke(
+            "cosine", {"op": "malicious-op", "a": [1.0]}
+        )
+        request = json.loads(captured["input"].decode("utf-8"))
+
+        self.assertEqual(value, "ok")
+        self.assertEqual(request["op"], "cosine")
+        self.assertEqual(request["a"], [1.0])
+
+    def test_payload_op_value_is_not_forwarded_at_all(self):
+        captured, _ = self._invoke("chunk", {"op": "override-me", "text": "x"})
+        raw = captured["input"].decode("utf-8")
+
+        self.assertNotIn("override-me", raw)
+
+    def test_other_payload_keys_are_preserved(self):
+        captured, _ = self._invoke("recall", {"relevant": ["a.md"], "k": 3})
+        request = json.loads(captured["input"].decode("utf-8"))
+
+        self.assertEqual(
+            request, {"relevant": ["a.md"], "k": 3, "op": "recall"}
+        )
+
+    def test_empty_payload_sends_only_reserved_op(self):
+        captured, _ = self._invoke("cosine", {})
+
+        self.assertEqual(
+            json.loads(captured["input"].decode("utf-8")), {"op": "cosine"}
+        )
+
+    def test_reserved_op_is_serialized_last(self):
+        # {**payload, "op": op} であることを構造的に固定する回帰ガード。
+        captured, _ = self._invoke("cosine_batch", {"pairs": [], "op": "override"})
+        raw = captured["input"].decode("utf-8")
+
+        self.assertTrue(raw.rstrip().endswith('"op": "cosine_batch"}'), raw)
+
+
+class CompareCloudLocalGateTest(unittest.TestCase):
+    """compare_cloud_local --run-ab 成果物の必須キーを薄く検証する（R2-B）。"""
+
+    REQUIRED_KEYS = ("rows", "notes", "generated_at")
+
+    def _run_ab_payload(self):
+        """一時 fixture で --run-ab を実行し、出力 JSON を返す（実データ非依存）。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = root / "eval-results-cloud-fixture.json"
+            fixture.write_text(
+                json.dumps({
+                    "generated_at": "2026-11-26T00:00:00Z",
+                    "summary": {"ndcg_at_10": 0.5, "set_recall_at_10": 0.5},
+                }),
+                encoding="utf-8",
+            )
+            output = root / "cloud-local-comparison.json"
+            argv = [
+                "compare_cloud_local.py", "--run-ab", "--output", str(output)
+            ]
+            with mock.patch.object(
+                compare_cloud_local, "_discover_result_files",
+                return_value=[fixture],
+            ), mock.patch.object(sys, "argv", argv), \
+                    mock.patch("sys.stdout", new_callable=io.StringIO), \
+                    mock.patch("sys.stderr", new_callable=io.StringIO):
+                code = compare_cloud_local.main()
+            return code, json.loads(output.read_text(encoding="utf-8"))
+
+    def test_run_ab_output_has_all_required_keys(self):
+        code, payload = self._run_ab_payload()
+
+        self.assertEqual(code, 0)
+        for key in self.REQUIRED_KEYS:
+            with self.subTest(key=key):
+                self.assertIn(key, payload)
+
+    def test_required_keys_have_usable_shapes(self):
+        _, payload = self._run_ab_payload()
+
+        self.assertIsInstance(payload["rows"], list)
+        self.assertTrue(payload["rows"])
+        self.assertTrue(payload["notes"])
+        self.assertTrue(payload["generated_at"])
 
 
 if __name__ == "__main__":

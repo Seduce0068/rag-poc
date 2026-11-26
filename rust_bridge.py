@@ -151,7 +151,9 @@ def run_op(op: str, payload: dict) -> Any:
     """
     binary = rust_binary_path()
     _ensure_usable(binary)
-    request = json.dumps({"op": op, **payload})
+    # op は予約キー。payload を先に展開して op を最後に置くことで、
+    # payload 側に op が混入しても予約キーを上書きできないようにする。
+    request = json.dumps({**payload, "op": op})
 
     # capture_output を外し、巨大出力を一時ファイルへ退避する。
     with tempfile.TemporaryFile(mode="w+b") as stdout_file, \

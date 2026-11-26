@@ -13,6 +13,7 @@ verified:
   - by: "lead/r6-aggregation"
     at: "2026-11-26T21:25:00+09:00"
 status: "stable"
+stale_after: "2026-12-26"
 ---
 
 ## 目的

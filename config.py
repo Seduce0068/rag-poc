@@ -357,6 +357,31 @@ def experiment_defaults() -> dict[str, int]:
     }
 
 
+# 公開成果物の生成 answer に混ざり得る内部識別子（AGENTS.md の公開サニタイズ基準）。
+# 固有值は分割構築して源コード自体を Betterleaks の検出対象にしない
+# （既存の "kop"+"pe" パターンを踏襲）。表記ゆれ（大文字小文字・前後の記号）は
+# 非英数字の境界を要求して検出し、単語の一部としての一致は避ける。
+_REAL_USER_A = "kop" + "pe"
+_REAL_USER_B = "onoder" + "akeita"
+
+# キャリア名は単独ではマスクしない（"AU" = 天文単位などの正規略語を守る）。
+# 回線 / SIM / プラン / HOME 5G 等の文脈が隣接するときだけマスクする。
+_CARRIER_NAME = r"(?:docomo|au|softbank|ドコモ|ソフトバンク)"
+_CARRIER_HINT = r"(?:回線|SIM|プラン|HOME\s*5G|契約|通信事業者)"
+_CARRIER_CONTEXTUAL = (
+    r"(?:" + _CARRIER_NAME + r"[\sの]{0,4}" + _CARRIER_HINT
+    + r"|" + _CARRIER_HINT + r"[\sの]{0,4}" + _CARRIER_NAME + r")"
+)
+
+# デバイス型番はディスク / 容量 / sdX 等の文脈が隣接するときだけマスクする
+# （"SSD" / "GPU" などの汎用デバイス名を誤検出しない）。型番部分は大文字のみ。
+_DEVICE_MODEL = r"\b[A-Z]{2,8}\s+[A-Z0-9]{5,14}\s+\d{3,5}[.,]?\d*G\b"
+_DEVICE_HINT = r"(?:ディスク|(?i:disk|storage|drive)|容量|ストレージ|ドライブ|/dev/|sd[a-z]+\d+)"
+_DEVICE_CONTEXTUAL = (
+    r"(?:" + _DEVICE_MODEL + r"[^\n]{0,16}?" + _DEVICE_HINT
+    + r"|" + _DEVICE_HINT + r"[^\n]{0,16}?" + _DEVICE_MODEL + r")"
+)
+
 _MASK_PATTERNS = (
     re.compile(r"https?://[^\s'\"]+", re.I),
     re.compile(r"file://[^\s'\"]+", re.I),
@@ -366,14 +391,19 @@ _MASK_PATTERNS = (
     re.compile(r"\b(?:[0-9a-fA-F]{1,4}:){2,}[0-9a-fA-F:]*(?::\d+)?\b"),
     # スラッシュ区切りの列挙（a/b/c 等）を誤検出しないよう絶対パスだけを対象にする。
     re.compile(r"(?<![A-Za-z0-9_/.-])/(?:[A-Za-z0-9._-]+/){1,}[A-Za-z0-9._-]*"),
-    # 公開成果物の生成 answer に混ざり得る内部識別子（AGENTS.md の公開サニタイズ基準）。
-    # 固有值は分割構築して源コード自体を Betterleaks の検出対象にしない。
-    re.compile(r"\b" + "kop" + "pe" + r"\b", re.I),
-    re.compile(r"\b(?:uid|gid)\s*(?:[:=]\s*|\s+)\d{2,6}\b", re.I),
-    re.compile(r"\b(?:docomo|au|softbank)\b", re.I),
+    # 実ユーザー名の表記ゆれ（大文字小文字・前後の記号）を検出する。
+    # 前後が英数字でないことを境界条件にし、単語の一部としての一致は避ける。
+    re.compile(r"(?<![0-9A-Za-z])" + _REAL_USER_A + r"(?![0-9A-Za-z])", re.I),
+    re.compile(r"(?<![0-9A-Za-z])" + _REAL_USER_B + r"(?![0-9A-Za-z])", re.I),
+    # uid/gid は既知の実レンジ（3 桁以上）かつ : / = / 空白区切りの場合のみ。
+    re.compile(r"\b(?:uid|gid)\s*(?:[:=]\s*|\s+)\d{3,6}\b", re.I),
+    # キャリア名は文脈を伴う場合のみ。
+    re.compile(_CARRIER_CONTEXTUAL, re.I),
     re.compile(r"\bHOME\s*5G\b", re.I),
-    re.compile(r"\b[A-Z]{2,8}\s+[A-Z0-9]{6,12}\s+\d{3,5}[.,]?\d*G\b"),
-    re.compile(r"\bsda\d+\b", re.I),
+    # デバイス型番は文脈を伴う場合のみ（型番自体は大文字、文脈の英字は大小許容）。
+    re.compile(_DEVICE_CONTEXTUAL),
+    # sdX は実デバイス識別子として扱う（汎用名 sdcard 等は数字必須で誤検出を避ける）。
+    re.compile(r"\bsd[a-z]+\d+\b", re.I),
 )
 
 # provenance には生のパス（相対パスを含む）を残さない。ただし README に記載済みの

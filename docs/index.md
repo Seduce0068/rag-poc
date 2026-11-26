@@ -13,6 +13,7 @@ verified:
   - by: "human:lead"
     at: "2026-11-26T21:56:00+09:00"
 status: "stable"
+stale_after: "2026-12-26"
 ---
 
 ## この索引の目的
@@ -34,5 +35,5 @@ status: "stable"
 
 ## 入口へのリンク
 
-- [rag_poc/README.md](../README.md) — セットアップ・使い方・検索モードの入口。README の「詳細ドキュメント」節から本文書へのリンク追加は担当外のため未実施。
+- [rag_poc/README.md](../README.md) — セットアップ・使い方・検索モードの入口。「詳細ドキュメント」節から本文書へのリンクを配置済み。
 - README のリンク先 [Ruri での再現手順](explanation.md#ruri-での再現手順) — explanation.md の該当見出しへ接続している。

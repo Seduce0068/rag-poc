@@ -421,6 +421,7 @@ Rust 未ビルドを green で通さないためのゲートである。なお
 
 ## 詳細ドキュメント
 
+- [docs/index.md](docs/index.md) — 詳細ドキュメントの索引（用途別の入口）
 - [docs/reference.md](docs/reference.md) — 検索モード、全設定項目（35変数）、実測値の単一情報源、成果物一覧
 - [docs/explanation.md](docs/explanation.md) — 構成図、設計判断（なぜハイブリッド／Ruri／クラウドか）、既知の制限、モデル比較実験、別ドメインベンチマーク、入力と設定の検証
 - [ragcore/README.md](ragcore/README.md) — Rust 純粋計算クレートの CLI 仕様
