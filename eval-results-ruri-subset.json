@@ -1,0 +1,2449 @@
+{
+  "generated_at": "2026-11-26T04:06:07.381496+00:00",
+  "schema_version": 2,
+  "qrels_schema_version": 1,
+  "qrels_label": "qrels-subset.json",
+  "script": "rag_poc/evaluate.py",
+  "search_function": {
+    "module": "query",
+    "name": "search",
+    "preferred_name": "search"
+  },
+  "collection": "rag_poc_ruri",
+  "embed_model": "kun432/cl-nagoya-ruri-base",
+  "chat_model": "qwen2.5:3b",
+  "vector_size": 768,
+  "corpus_file_count": 6,
+  "corpus_sha256": "e8318951039e1d3e2e5a4fafca756b4248d7fe8a19f3b592f0ecee6743f50f20",
+  "repeat": 1,
+  "modes": [
+    "dense",
+    "keyword",
+    "hybrid",
+    "hybrid-rerank"
+  ],
+  "top_k": 10,
+  "heldout_retrieval_k": 10,
+  "metric_definitions": {
+    "source_keyword_hit_at3": "上位3件の source に expected 語が1つ以上含まれるか（any-match の真偽値。真の recall@k ではない）",
+    "content_keyword_hit_all_hits": "全ヒットの text に expected 語が1つ以上含まれるか。source 側と取得深度が異なる",
+    "avg_distinct_source_ratio_at3": "上位3件 source のUnit一意性。検索品質ではなく多様性の指標",
+    "avg_hits": "モード別の実返却件数（hybrid-rerank も全 top_k を返すよう修正済み）",
+    "latency": "RAG_EVAL_REPEAT 回（既定1＝ウォームアップなし1回、2以上でwarmup1回＋N回）の実測。コーパス規模とLLM呼び出しに強く依存",
+    "latency_stats": "record / summary の avg / median / min / max / stdev（秒）。avg_latency_sec は後方互換のため avg と同値。",
+    "heldout": {
+      "recall_at_k": "各クエリについて、検索結果上位 k 件の source に relevant_sources のいずれかが含まれれば 1・否則 0 とし、全 held-out クエリで平均（query-level hit@k）。正解ファイル全体のうち何件回収したかという集合 recall ではない。",
+      "ndcg_at_k": "gain=1 / discount=log2(rank+1) の DCG を上位 k 件で計算し、IDCG=sum_{r=1..min(|relevant|,k)} 1/log2(r+1) で割ってクエリ平均。同一ファイルの複数チャンクは最上位の1回だけ計上する。",
+      "label_matching": "正解は passkey-gateway/docs 内の実在ファイル名。ingest.py の source はリポジトリルート相対パスなので、完全一致・相対パス suffix・basename で照合する。",
+      "failure_policy": "検索失敗ケースは 0 として分母に残す（生存者バイアス回避）。",
+      "k_scope": "上位 k 件は source 非空の結果に対して適用する（query.py の hits は常に source を持つため実害なし）。",
+      "preflight": "実行前に全 relevant_sources が config.CORPUS_DIR に実在するか確認し、欠落は notes に記録する。",
+      "reuse_policy": "--heldout-only は既存 JSON の collection / corpus_sha256 / embed_model / chat_model が現行と一致するときのみ簡易結果を再利用する（欠落キーは警告のみで再利用）。"
+    }
+  },
+  "notes": [
+    "設定の出所: config.current_settings() + 環境変数（値はマスク済み）: RAG_TOP_K=10, RAG_VECTOR_SIZE=768, RAG_COLLECTION=rag_poc_ruri, RAG_CORPUS_DIR=rag_poc/corpus-subset, OLLAMA_URL=<masked>, QDRANT_URL=<masked>, EMBED_MODEL=kun432/cl-nagoya-ruri-base, CHAT_MODEL=qwen2.5:3b, RAG_EVAL_REPEAT=1",
+    "held-out で hits=0 が 1 件（検索障害またはコーパス不一致の可能性）",
+    "評価クエリは qrels.json（schema_version=1）から読み込み",
+    "簡易指標は 6 クエリの any-match、held-out は 6 クエリの正解ラベル付き",
+    "コーパスは config.COLLECTION（環境変数 RAG_COLLECTION で上書き）に依存",
+    "レイテンシはウォームアップ1回＋1回計測（RAG_EVAL_REPEAT で変更、1ならウォームアップなし1回）",
+    "再現メタ情報: embed_model=kun432/cl-nagoya-ruri-base chat_model=qwen2.5:3b vector_size=768 corpus_files=6 corpus_sha256=e8318951039e1d3e2e5a4fafca756b4248d7fe8a19f3b592f0ecee6743f50f20"
+  ],
+  "summary": {
+    "dense": {
+      "cases": 6,
+      "successes": 6,
+      "source_keyword_hit_at3": 1.0,
+      "content_keyword_hit_all_hits": 0.6667,
+      "avg_distinct_source_ratio_at3": 0.5,
+      "avg_latency_sec": 0.477362,
+      "latency_stats": {
+        "count": 6,
+        "avg": 0.477362,
+        "median": 0.047808,
+        "min": 0.029284,
+        "max": 2.650187,
+        "stdev": 0.971766
+      },
+      "avg_hits": 10.0,
+      "errors": 0
+    },
+    "keyword": {
+      "cases": 6,
+      "successes": 6,
+      "source_keyword_hit_at3": 0.6667,
+      "content_keyword_hit_all_hits": 0.6667,
+      "avg_distinct_source_ratio_at3": 0.2778,
+      "avg_latency_sec": 0.005058,
+      "latency_stats": {
+        "count": 6,
+        "avg": 0.005058,
+        "median": 0.005005,
+        "min": 0.004344,
+        "max": 0.005861,
+        "stdev": 0.000512
+      },
+      "avg_hits": 6.0,
+      "errors": 0
+    },
+    "hybrid": {
+      "cases": 6,
+      "successes": 6,
+      "source_keyword_hit_at3": 1.0,
+      "content_keyword_hit_all_hits": 0.6667,
+      "avg_distinct_source_ratio_at3": 0.5555,
+      "avg_latency_sec": 0.043048,
+      "latency_stats": {
+        "count": 6,
+        "avg": 0.043048,
+        "median": 0.039057,
+        "min": 0.034683,
+        "max": 0.060466,
+        "stdev": 0.00942
+      },
+      "avg_hits": 10.0,
+      "errors": 0
+    },
+    "hybrid-rerank": {
+      "cases": 6,
+      "successes": 6,
+      "source_keyword_hit_at3": 1.0,
+      "content_keyword_hit_all_hits": 0.6667,
+      "avg_distinct_source_ratio_at3": 0.6111,
+      "avg_latency_sec": 5.120322,
+      "latency_stats": {
+        "count": 6,
+        "avg": 5.120322,
+        "median": 5.130541,
+        "min": 4.829161,
+        "max": 5.454004,
+        "stdev": 0.211055
+      },
+      "avg_hits": 10.0,
+      "errors": 0
+    }
+  },
+  "results": [
+    {
+      "query": "パスキー sudo の使い方",
+      "expected": [
+        "sudo",
+        "passkey"
+      ],
+      "mode": "dense",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "sudo",
+        "passkey"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "sudo",
+        "passkey"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md"
+        ],
+        "unique_source_count": 1,
+        "unique_ratio": 0.3333
+      },
+      "latency_sec": 0.057441,
+      "latency_stats": {
+        "count": 1,
+        "avg": 0.057441,
+        "median": 0.057441,
+        "min": 0.057441,
+        "max": 0.057441,
+        "stdev": 0.0,
+        "samples": [
+          0.057441
+        ],
+        "cold_latency_sec": 0.057441
+      },
+      "call": "search(query=..., mode='dense', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "パスキー sudo の使い方",
+      "expected": [
+        "sudo",
+        "passkey"
+      ],
+      "mode": "keyword",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "sudo",
+        "passkey"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "sudo",
+        "passkey"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md"
+        ],
+        "unique_source_count": 1,
+        "unique_ratio": 0.3333
+      },
+      "latency_sec": 0.005861,
+      "latency_stats": {
+        "count": 1,
+        "avg": 0.005861,
+        "median": 0.005861,
+        "min": 0.005861,
+        "max": 0.005861,
+        "stdev": 0.0,
+        "samples": [
+          0.005861
+        ],
+        "cold_latency_sec": 0.005861
+      },
+      "call": "search(query=..., mode='keyword', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "パスキー sudo の使い方",
+      "expected": [
+        "sudo",
+        "passkey"
+      ],
+      "mode": "hybrid",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "sudo",
+        "passkey"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "sudo",
+        "passkey"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md"
+        ],
+        "unique_source_count": 1,
+        "unique_ratio": 0.3333
+      },
+      "latency_sec": 0.034986,
+      "latency_stats": {
+        "count": 1,
+        "avg": 0.034986,
+        "median": 0.034986,
+        "min": 0.034986,
+        "max": 0.034986,
+        "stdev": 0.0,
+        "samples": [
+          0.034986
+        ],
+        "cold_latency_sec": 0.034986
+      },
+      "call": "search(query=..., mode='hybrid', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "パスキー sudo の使い方",
+      "expected": [
+        "sudo",
+        "passkey"
+      ],
+      "mode": "hybrid-rerank",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "sudo",
+        "passkey"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "sudo",
+        "passkey"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md"
+        ],
+        "unique_source_count": 1,
+        "unique_ratio": 0.3333
+      },
+      "latency_sec": 5.08969,
+      "latency_stats": {
+        "count": 1,
+        "avg": 5.08969,
+        "median": 5.08969,
+        "min": 5.08969,
+        "max": 5.08969,
+        "stdev": 0.0,
+        "samples": [
+          5.08969
+        ],
+        "cold_latency_sec": 5.08969
+      },
+      "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "DSH 起動トークンの取得方法",
+      "expected": [
+        "token",
+        "journalctl"
+      ],
+      "mode": "dense",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "token"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "token"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md",
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md",
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md"
+        ],
+        "unique_source_count": 1,
+        "unique_ratio": 0.3333
+      },
+      "latency_sec": 0.029284,
+      "latency_stats": {
+        "count": 1,
+        "avg": 0.029284,
+        "median": 0.029284,
+        "min": 0.029284,
+        "max": 0.029284,
+        "stdev": 0.0,
+        "samples": [
+          0.029284
+        ],
+        "cold_latency_sec": 0.029284
+      },
+      "call": "search(query=..., mode='dense', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "DSH 起動トークンの取得方法",
+      "expected": [
+        "token",
+        "journalctl"
+      ],
+      "mode": "keyword",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "token"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "token"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md",
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md",
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md"
+        ],
+        "unique_source_count": 2,
+        "unique_ratio": 0.6667
+      },
+      "latency_sec": 0.004618,
+      "latency_stats": {
+        "count": 1,
+        "avg": 0.004618,
+        "median": 0.004618,
+        "min": 0.004618,
+        "max": 0.004618,
+        "stdev": 0.0,
+        "samples": [
+          0.004618
+        ],
+        "cold_latency_sec": 0.004618
+      },
+      "call": "search(query=..., mode='keyword', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "DSH 起動トークンの取得方法",
+      "expected": [
+        "token",
+        "journalctl"
+      ],
+      "mode": "hybrid",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "token"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "token"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md",
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md"
+        ],
+        "unique_source_count": 2,
+        "unique_ratio": 0.6667
+      },
+      "latency_sec": 0.034683,
+      "latency_stats": {
+        "count": 1,
+        "avg": 0.034683,
+        "median": 0.034683,
+        "min": 0.034683,
+        "max": 0.034683,
+        "stdev": 0.0,
+        "samples": [
+          0.034683
+        ],
+        "cold_latency_sec": 0.034683
+      },
+      "call": "search(query=..., mode='hybrid', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "DSH 起動トークンの取得方法",
+      "expected": [
+        "token",
+        "journalctl"
+      ],
+      "mode": "hybrid-rerank",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "token"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "token"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md",
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md",
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md"
+        ],
+        "unique_source_count": 2,
+        "unique_ratio": 0.6667
+      },
+      "latency_sec": 5.269977,
+      "latency_stats": {
+        "count": 1,
+        "avg": 5.269977,
+        "median": 5.269977,
+        "min": 5.269977,
+        "max": 5.269977,
+        "stdev": 0.0,
+        "samples": [
+          5.269977
+        ],
+        "cold_latency_sec": 5.269977
+      },
+      "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "RAG の検索モードを比較する方法",
+      "expected": [
+        "rag",
+        "hybrid"
+      ],
+      "mode": "dense",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "rag"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "rag",
+        "hybrid"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md"
+        ],
+        "unique_source_count": 1,
+        "unique_ratio": 0.3333
+      },
+      "latency_sec": 0.046175,
+      "latency_stats": {
+        "count": 1,
+        "avg": 0.046175,
+        "median": 0.046175,
+        "min": 0.046175,
+        "max": 0.046175,
+        "stdev": 0.0,
+        "samples": [
+          0.046175
+        ],
+        "cold_latency_sec": 0.046175
+      },
+      "call": "search(query=..., mode='dense', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "RAG の検索モードを比較する方法",
+      "expected": [
+        "rag",
+        "hybrid"
+      ],
+      "mode": "keyword",
+      "hits": 6,
+      "recall": true,
+      "matched_keywords": [
+        "rag"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "rag",
+        "hybrid"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md"
+        ],
+        "unique_source_count": 1,
+        "unique_ratio": 0.3333
+      },
+      "latency_sec": 0.004344,
+      "latency_stats": {
+        "count": 1,
+        "avg": 0.004344,
+        "median": 0.004344,
+        "min": 0.004344,
+        "max": 0.004344,
+        "stdev": 0.0,
+        "samples": [
+          0.004344
+        ],
+        "cold_latency_sec": 0.004344
+      },
+      "call": "search(query=..., mode='keyword', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "RAG の検索モードを比較する方法",
+      "expected": [
+        "rag",
+        "hybrid"
+      ],
+      "mode": "hybrid",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "rag"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "rag",
+        "hybrid"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md"
+        ],
+        "unique_source_count": 1,
+        "unique_ratio": 0.3333
+      },
+      "latency_sec": 0.050041,
+      "latency_stats": {
+        "count": 1,
+        "avg": 0.050041,
+        "median": 0.050041,
+        "min": 0.050041,
+        "max": 0.050041,
+        "stdev": 0.0,
+        "samples": [
+          0.050041
+        ],
+        "cold_latency_sec": 0.050041
+      },
+      "call": "search(query=..., mode='hybrid', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "RAG の検索モードを比較する方法",
+      "expected": [
+        "rag",
+        "hybrid"
+      ],
+      "mode": "hybrid-rerank",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "rag"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "rag",
+        "hybrid"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md"
+        ],
+        "unique_source_count": 1,
+        "unique_ratio": 0.3333
+      },
+      "latency_sec": 5.454004,
+      "latency_stats": {
+        "count": 1,
+        "avg": 5.454004,
+        "median": 5.454004,
+        "min": 5.454004,
+        "max": 5.454004,
+        "stdev": 0.0,
+        "samples": [
+          5.454004
+        ],
+        "cold_latency_sec": 5.454004
+      },
+      "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "セキュリティ設計の基本方針",
+      "expected": [
+        "security",
+        "posture"
+      ],
+      "mode": "dense",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "security",
+        "posture"
+      ],
+      "content_recall": false,
+      "matched_content_keywords": [],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-subset/security-posture.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md"
+        ],
+        "unique_source_count": 3,
+        "unique_ratio": 1.0
+      },
+      "latency_sec": 2.650187,
+      "latency_stats": {
+        "count": 1,
+        "avg": 2.650187,
+        "median": 2.650187,
+        "min": 2.650187,
+        "max": 2.650187,
+        "stdev": 0.0,
+        "samples": [
+          2.650187
+        ],
+        "cold_latency_sec": 2.650187
+      },
+      "call": "search(query=..., mode='dense', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "セキュリティ設計の基本方針",
+      "expected": [
+        "security",
+        "posture"
+      ],
+      "mode": "keyword",
+      "hits": 0,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": false,
+      "matched_content_keywords": [],
+      "unit_uniqueness": {
+        "top3_sources": [],
+        "unique_source_count": 0,
+        "unique_ratio": 0.0
+      },
+      "latency_sec": 0.004932,
+      "latency_stats": {
+        "count": 1,
+        "avg": 0.004932,
+        "median": 0.004932,
+        "min": 0.004932,
+        "max": 0.004932,
+        "stdev": 0.0,
+        "samples": [
+          0.004932
+        ],
+        "cold_latency_sec": 0.004932
+      },
+      "call": "search(query=..., mode='keyword', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "セキュリティ設計の基本方針",
+      "expected": [
+        "security",
+        "posture"
+      ],
+      "mode": "hybrid",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "security",
+        "posture"
+      ],
+      "content_recall": false,
+      "matched_content_keywords": [],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-subset/security-posture.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md"
+        ],
+        "unique_source_count": 3,
+        "unique_ratio": 1.0
+      },
+      "latency_sec": 0.036483,
+      "latency_stats": {
+        "count": 1,
+        "avg": 0.036483,
+        "median": 0.036483,
+        "min": 0.036483,
+        "max": 0.036483,
+        "stdev": 0.0,
+        "samples": [
+          0.036483
+        ],
+        "cold_latency_sec": 0.036483
+      },
+      "call": "search(query=..., mode='hybrid', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "セキュリティ設計の基本方針",
+      "expected": [
+        "security",
+        "posture"
+      ],
+      "mode": "hybrid-rerank",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "security",
+        "posture"
+      ],
+      "content_recall": false,
+      "matched_content_keywords": [],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/security-posture.md"
+        ],
+        "unique_source_count": 3,
+        "unique_ratio": 1.0
+      },
+      "latency_sec": 4.90771,
+      "latency_stats": {
+        "count": 1,
+        "avg": 4.90771,
+        "median": 4.90771,
+        "min": 4.90771,
+        "max": 4.90771,
+        "stdev": 0.0,
+        "samples": [
+          4.90771
+        ],
+        "cold_latency_sec": 4.90771
+      },
+      "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "環境全体の最終サマリー",
+      "expected": [
+        "FINAL",
+        "SUMMARY"
+      ],
+      "mode": "dense",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "FINAL",
+        "SUMMARY"
+      ],
+      "content_recall": false,
+      "matched_content_keywords": [],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md"
+        ],
+        "unique_source_count": 2,
+        "unique_ratio": 0.6667
+      },
+      "latency_sec": 0.031644,
+      "latency_stats": {
+        "count": 1,
+        "avg": 0.031644,
+        "median": 0.031644,
+        "min": 0.031644,
+        "max": 0.031644,
+        "stdev": 0.0,
+        "samples": [
+          0.031644
+        ],
+        "cold_latency_sec": 0.031644
+      },
+      "call": "search(query=..., mode='dense', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "環境全体の最終サマリー",
+      "expected": [
+        "FINAL",
+        "SUMMARY"
+      ],
+      "mode": "keyword",
+      "hits": 0,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": false,
+      "matched_content_keywords": [],
+      "unit_uniqueness": {
+        "top3_sources": [],
+        "unique_source_count": 0,
+        "unique_ratio": 0.0
+      },
+      "latency_sec": 0.005516,
+      "latency_stats": {
+        "count": 1,
+        "avg": 0.005516,
+        "median": 0.005516,
+        "min": 0.005516,
+        "max": 0.005516,
+        "stdev": 0.0,
+        "samples": [
+          0.005516
+        ],
+        "cold_latency_sec": 0.005516
+      },
+      "call": "search(query=..., mode='keyword', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "環境全体の最終サマリー",
+      "expected": [
+        "FINAL",
+        "SUMMARY"
+      ],
+      "mode": "hybrid",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "FINAL",
+        "SUMMARY"
+      ],
+      "content_recall": false,
+      "matched_content_keywords": [],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md"
+        ],
+        "unique_source_count": 2,
+        "unique_ratio": 0.6667
+      },
+      "latency_sec": 0.04163,
+      "latency_stats": {
+        "count": 1,
+        "avg": 0.04163,
+        "median": 0.04163,
+        "min": 0.04163,
+        "max": 0.04163,
+        "stdev": 0.0,
+        "samples": [
+          0.04163
+        ],
+        "cold_latency_sec": 0.04163
+      },
+      "call": "search(query=..., mode='hybrid', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "環境全体の最終サマリー",
+      "expected": [
+        "FINAL",
+        "SUMMARY"
+      ],
+      "mode": "hybrid-rerank",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "FINAL",
+        "SUMMARY"
+      ],
+      "content_recall": false,
+      "matched_content_keywords": [],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md"
+        ],
+        "unique_source_count": 3,
+        "unique_ratio": 1.0
+      },
+      "latency_sec": 4.829161,
+      "latency_stats": {
+        "count": 1,
+        "avg": 4.829161,
+        "median": 4.829161,
+        "min": 4.829161,
+        "max": 4.829161,
+        "stdev": 0.0,
+        "samples": [
+          4.829161
+        ],
+        "cold_latency_sec": 4.829161
+      },
+      "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "jarvis と muse と DSH の役割分担",
+      "expected": [
+        "jarvis",
+        "muse"
+      ],
+      "mode": "dense",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "jarvis",
+        "muse"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "jarvis",
+        "muse"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md"
+        ],
+        "unique_source_count": 1,
+        "unique_ratio": 0.3333
+      },
+      "latency_sec": 0.04944,
+      "latency_stats": {
+        "count": 1,
+        "avg": 0.04944,
+        "median": 0.04944,
+        "min": 0.04944,
+        "max": 0.04944,
+        "stdev": 0.0,
+        "samples": [
+          0.04944
+        ],
+        "cold_latency_sec": 0.04944
+      },
+      "call": "search(query=..., mode='dense', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "jarvis と muse と DSH の役割分担",
+      "expected": [
+        "jarvis",
+        "muse"
+      ],
+      "mode": "keyword",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "jarvis",
+        "muse"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "jarvis",
+        "muse"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md"
+        ],
+        "unique_source_count": 1,
+        "unique_ratio": 0.3333
+      },
+      "latency_sec": 0.005077,
+      "latency_stats": {
+        "count": 1,
+        "avg": 0.005077,
+        "median": 0.005077,
+        "min": 0.005077,
+        "max": 0.005077,
+        "stdev": 0.0,
+        "samples": [
+          0.005077
+        ],
+        "cold_latency_sec": 0.005077
+      },
+      "call": "search(query=..., mode='keyword', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "jarvis と muse と DSH の役割分担",
+      "expected": [
+        "jarvis",
+        "muse"
+      ],
+      "mode": "hybrid",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "jarvis",
+        "muse"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "jarvis",
+        "muse"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md"
+        ],
+        "unique_source_count": 1,
+        "unique_ratio": 0.3333
+      },
+      "latency_sec": 0.060466,
+      "latency_stats": {
+        "count": 1,
+        "avg": 0.060466,
+        "median": 0.060466,
+        "min": 0.060466,
+        "max": 0.060466,
+        "stdev": 0.0,
+        "samples": [
+          0.060466
+        ],
+        "cold_latency_sec": 0.060466
+      },
+      "call": "search(query=..., mode='hybrid', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "jarvis と muse と DSH の役割分担",
+      "expected": [
+        "jarvis",
+        "muse"
+      ],
+      "mode": "hybrid-rerank",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "jarvis",
+        "muse"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "jarvis",
+        "muse"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md"
+        ],
+        "unique_source_count": 1,
+        "unique_ratio": 0.3333
+      },
+      "latency_sec": 5.171391,
+      "latency_stats": {
+        "count": 1,
+        "avg": 5.171391,
+        "median": 5.171391,
+        "min": 5.171391,
+        "max": 5.171391,
+        "stdev": 0.0,
+        "samples": [
+          5.171391
+        ],
+        "cold_latency_sec": 5.171391
+      },
+      "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+      "error": null
+    }
+  ],
+  "heldout": {
+    "definitions": {
+      "recall_at_k": "各クエリについて、検索結果上位 k 件の source に relevant_sources のいずれかが含まれれば 1・否則 0 とし、全 held-out クエリで平均（query-level hit@k）。正解ファイル全体のうち何件回収したかという集合 recall ではない。",
+      "ndcg_at_k": "gain=1 / discount=log2(rank+1) の DCG を上位 k 件で計算し、IDCG=sum_{r=1..min(|relevant|,k)} 1/log2(r+1) で割ってクエリ平均。同一ファイルの複数チャンクは最上位の1回だけ計上する。",
+      "label_matching": "正解は passkey-gateway/docs 内の実在ファイル名。ingest.py の source はリポジトリルート相対パスなので、完全一致・相対パス suffix・basename で照合する。",
+      "failure_policy": "検索失敗ケースは 0 として分母に残す（生存者バイアス回避）。",
+      "k_scope": "上位 k 件は source 非空の結果に対して適用する（query.py の hits は常に source を持つため実害なし）。",
+      "preflight": "実行前に全 relevant_sources が config.CORPUS_DIR に実在するか確認し、欠落は notes に記録する。",
+      "reuse_policy": "--heldout-only は既存 JSON の collection / corpus_sha256 / embed_model / chat_model が現行と一致するときのみ簡易結果を再利用する（欠落キーは警告のみで再利用）。"
+    },
+    "recall_k": [
+      1,
+      3,
+      5,
+      10
+    ],
+    "ndcg_k": [
+      3,
+      10
+    ],
+    "queries": [
+      {
+        "id": "h-s01",
+        "query": "パスキー認証で sudo を使う手順",
+        "relevant_sources": [
+          "passkey-sudo-design.md"
+        ]
+      },
+      {
+        "id": "h-s02",
+        "query": "DSH 起動トークンを journalctl から取得する",
+        "relevant_sources": [
+          "dsh-token-rd-fix-2026-11-25.md"
+        ]
+      },
+      {
+        "id": "h-s03",
+        "query": "RAG のベクトル検索とハイブリッド検索の選定",
+        "relevant_sources": [
+          "rag-methods-selection-2026-11-26.md"
+        ]
+      },
+      {
+        "id": "h-s04",
+        "query": "セキュリティ posture の監査方針",
+        "relevant_sources": [
+          "security-posture.md"
+        ]
+      },
+      {
+        "id": "h-s05",
+        "query": "環境全体の構成と最終状態",
+        "relevant_sources": [
+          "FINAL-SUMMARY.md"
+        ]
+      },
+      {
+        "id": "h-s06",
+        "query": "jarvis muse DSH の役割分担",
+        "relevant_sources": [
+          "jarvis-muse-dsh-roles.md"
+        ]
+      }
+    ],
+    "summary": {
+      "dense": {
+        "queries": 6,
+        "successes": 6,
+        "errors": 0,
+        "recall_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_stats": {
+          "count": 6,
+          "avg": 0.055023,
+          "median": 0.051374,
+          "min": 0.040331,
+          "max": 0.086347,
+          "stdev": 0.014719
+        }
+      },
+      "keyword": {
+        "queries": 6,
+        "successes": 6,
+        "errors": 0,
+        "recall_at": {
+          "1": 0.8333,
+          "3": 0.8333,
+          "5": 0.8333,
+          "10": 0.8333
+        },
+        "ndcg_at": {
+          "3": 0.8333,
+          "10": 0.8333
+        },
+        "latency_stats": {
+          "count": 6,
+          "avg": 0.005969,
+          "median": 0.005413,
+          "min": 0.004022,
+          "max": 0.009357,
+          "stdev": 0.001894
+        }
+      },
+      "hybrid": {
+        "queries": 6,
+        "successes": 6,
+        "errors": 0,
+        "recall_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_stats": {
+          "count": 6,
+          "avg": 0.05183,
+          "median": 0.053759,
+          "min": 0.034202,
+          "max": 0.06078,
+          "stdev": 0.008778
+        }
+      },
+      "hybrid-rerank": {
+        "queries": 6,
+        "successes": 6,
+        "errors": 0,
+        "recall_at": {
+          "1": 0.6667,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "ndcg_at": {
+          "3": 0.8552,
+          "10": 0.8552
+        },
+        "latency_stats": {
+          "count": 6,
+          "avg": 5.531047,
+          "median": 5.593582,
+          "min": 4.837809,
+          "max": 6.180027,
+          "stdev": 0.471158
+        }
+      }
+    },
+    "results": [
+      {
+        "id": "h-s01",
+        "query": "パスキー認証で sudo を使う手順",
+        "relevant_sources": [
+          "passkey-sudo-design.md"
+        ],
+        "mode": "dense",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-subset/passkey-sudo-design.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.086347,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.086347,
+          "median": 0.086347,
+          "min": 0.086347,
+          "max": 0.086347,
+          "stdev": 0.0,
+          "samples": [
+            0.086347
+          ],
+          "cold_latency_sec": 0.086347
+        },
+        "call": "search(query=..., mode='dense', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h-s01",
+        "query": "パスキー認証で sudo を使う手順",
+        "relevant_sources": [
+          "passkey-sudo-design.md"
+        ],
+        "mode": "keyword",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/security-posture.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/security-posture.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-subset/passkey-sudo-design.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.006313,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.006313,
+          "median": 0.006313,
+          "min": 0.006313,
+          "max": 0.006313,
+          "stdev": 0.0,
+          "samples": [
+            0.006313
+          ],
+          "cold_latency_sec": 0.006313
+        },
+        "call": "search(query=..., mode='keyword', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h-s01",
+        "query": "パスキー認証で sudo を使う手順",
+        "relevant_sources": [
+          "passkey-sudo-design.md"
+        ],
+        "mode": "hybrid",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/security-posture.md",
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-subset/passkey-sudo-design.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.06078,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.06078,
+          "median": 0.06078,
+          "min": 0.06078,
+          "max": 0.06078,
+          "stdev": 0.0,
+          "samples": [
+            0.06078
+          ],
+          "cold_latency_sec": 0.06078
+        },
+        "call": "search(query=..., mode='hybrid', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h-s01",
+        "query": "パスキー認証で sudo を使う手順",
+        "relevant_sources": [
+          "passkey-sudo-design.md"
+        ],
+        "mode": "hybrid-rerank",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/security-posture.md",
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-subset/passkey-sudo-design.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 6.180027,
+        "latency_stats": {
+          "count": 1,
+          "avg": 6.180027,
+          "median": 6.180027,
+          "min": 6.180027,
+          "max": 6.180027,
+          "stdev": 0.0,
+          "samples": [
+            6.180027
+          ],
+          "cold_latency_sec": 6.180027
+        },
+        "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h-s02",
+        "query": "DSH 起動トークンを journalctl から取得する",
+        "relevant_sources": [
+          "dsh-token-rd-fix-2026-11-25.md"
+        ],
+        "mode": "dense",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md",
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md",
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md",
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md",
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md",
+          "rag_poc/corpus-subset/security-posture.md",
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md",
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.051655,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.051655,
+          "median": 0.051655,
+          "min": 0.051655,
+          "max": 0.051655,
+          "stdev": 0.0,
+          "samples": [
+            0.051655
+          ],
+          "cold_latency_sec": 0.051655
+        },
+        "call": "search(query=..., mode='dense', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h-s02",
+        "query": "DSH 起動トークンを journalctl から取得する",
+        "relevant_sources": [
+          "dsh-token-rd-fix-2026-11-25.md"
+        ],
+        "mode": "keyword",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md",
+          "rag_poc/corpus-subset/security-posture.md",
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md",
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md",
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md",
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md",
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md",
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/security-posture.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.004513,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.004513,
+          "median": 0.004513,
+          "min": 0.004513,
+          "max": 0.004513,
+          "stdev": 0.0,
+          "samples": [
+            0.004513
+          ],
+          "cold_latency_sec": 0.004513
+        },
+        "call": "search(query=..., mode='keyword', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h-s02",
+        "query": "DSH 起動トークンを journalctl から取得する",
+        "relevant_sources": [
+          "dsh-token-rd-fix-2026-11-25.md"
+        ],
+        "mode": "hybrid",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md",
+          "rag_poc/corpus-subset/security-posture.md",
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md",
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md",
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md",
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md",
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md",
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md",
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.058709,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.058709,
+          "median": 0.058709,
+          "min": 0.058709,
+          "max": 0.058709,
+          "stdev": 0.0,
+          "samples": [
+            0.058709
+          ],
+          "cold_latency_sec": 0.058709
+        },
+        "call": "search(query=..., mode='hybrid', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h-s02",
+        "query": "DSH 起動トークンを journalctl から取得する",
+        "relevant_sources": [
+          "dsh-token-rd-fix-2026-11-25.md"
+        ],
+        "mode": "hybrid-rerank",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md",
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md",
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md",
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md",
+          "rag_poc/corpus-subset/security-posture.md",
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md",
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md",
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md",
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-subset/dsh-token-rd-fix-2026-11-25.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 5.831392,
+        "latency_stats": {
+          "count": 1,
+          "avg": 5.831392,
+          "median": 5.831392,
+          "min": 5.831392,
+          "max": 5.831392,
+          "stdev": 0.0,
+          "samples": [
+            5.831392
+          ],
+          "cold_latency_sec": 5.831392
+        },
+        "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h-s03",
+        "query": "RAG のベクトル検索とハイブリッド検索の選定",
+        "relevant_sources": [
+          "rag-methods-selection-2026-11-26.md"
+        ],
+        "mode": "dense",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.051092,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.051092,
+          "median": 0.051092,
+          "min": 0.051092,
+          "max": 0.051092,
+          "stdev": 0.0,
+          "samples": [
+            0.051092
+          ],
+          "cold_latency_sec": 0.051092
+        },
+        "call": "search(query=..., mode='dense', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h-s03",
+        "query": "RAG のベクトル検索とハイブリッド検索の選定",
+        "relevant_sources": [
+          "rag-methods-selection-2026-11-26.md"
+        ],
+        "mode": "keyword",
+        "retrieval_k": 10,
+        "hits": 6,
+        "sources": [
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.004022,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.004022,
+          "median": 0.004022,
+          "min": 0.004022,
+          "max": 0.004022,
+          "stdev": 0.0,
+          "samples": [
+            0.004022
+          ],
+          "cold_latency_sec": 0.004022
+        },
+        "call": "search(query=..., mode='keyword', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h-s03",
+        "query": "RAG のベクトル検索とハイブリッド検索の選定",
+        "relevant_sources": [
+          "rag-methods-selection-2026-11-26.md"
+        ],
+        "mode": "hybrid",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.049771,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.049771,
+          "median": 0.049771,
+          "min": 0.049771,
+          "max": 0.049771,
+          "stdev": 0.0,
+          "samples": [
+            0.049771
+          ],
+          "cold_latency_sec": 0.049771
+        },
+        "call": "search(query=..., mode='hybrid', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h-s03",
+        "query": "RAG のベクトル検索とハイブリッド検索の選定",
+        "relevant_sources": [
+          "rag-methods-selection-2026-11-26.md"
+        ],
+        "mode": "hybrid-rerank",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 5.881787,
+        "latency_stats": {
+          "count": 1,
+          "avg": 5.881787,
+          "median": 5.881787,
+          "min": 5.881787,
+          "max": 5.881787,
+          "stdev": 0.0,
+          "samples": [
+            5.881787
+          ],
+          "cold_latency_sec": 5.881787
+        },
+        "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h-s04",
+        "query": "セキュリティ posture の監査方針",
+        "relevant_sources": [
+          "security-posture.md"
+        ],
+        "mode": "dense",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-subset/security-posture.md",
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md",
+          "rag_poc/corpus-subset/security-posture.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/security-posture.md",
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md",
+          "rag_poc/corpus-subset/security-posture.md",
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-subset/security-posture.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.040331,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.040331,
+          "median": 0.040331,
+          "min": 0.040331,
+          "max": 0.040331,
+          "stdev": 0.0,
+          "samples": [
+            0.040331
+          ],
+          "cold_latency_sec": 0.040331
+        },
+        "call": "search(query=..., mode='dense', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h-s04",
+        "query": "セキュリティ posture の監査方針",
+        "relevant_sources": [
+          "security-posture.md"
+        ],
+        "mode": "keyword",
+        "retrieval_k": 10,
+        "hits": 4,
+        "sources": [
+          "rag_poc/corpus-subset/security-posture.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md",
+          "rag_poc/corpus-subset/security-posture.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-subset/security-posture.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.009357,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.009357,
+          "median": 0.009357,
+          "min": 0.009357,
+          "max": 0.009357,
+          "stdev": 0.0,
+          "samples": [
+            0.009357
+          ],
+          "cold_latency_sec": 0.009357
+        },
+        "call": "search(query=..., mode='keyword', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h-s04",
+        "query": "セキュリティ posture の監査方針",
+        "relevant_sources": [
+          "security-posture.md"
+        ],
+        "mode": "hybrid",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-subset/security-posture.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md",
+          "rag_poc/corpus-subset/security-posture.md",
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/security-posture.md",
+          "rag_poc/corpus-subset/security-posture.md",
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md",
+          "rag_poc/corpus-subset/security-posture.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-subset/security-posture.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.034202,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.034202,
+          "median": 0.034202,
+          "min": 0.034202,
+          "max": 0.034202,
+          "stdev": 0.0,
+          "samples": [
+            0.034202
+          ],
+          "cold_latency_sec": 0.034202
+        },
+        "call": "search(query=..., mode='hybrid', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h-s04",
+        "query": "セキュリティ posture の監査方針",
+        "relevant_sources": [
+          "security-posture.md"
+        ],
+        "mode": "hybrid-rerank",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/security-posture.md",
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md",
+          "rag_poc/corpus-subset/security-posture.md",
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md",
+          "rag_poc/corpus-subset/passkey-sudo-design.md",
+          "rag_poc/corpus-subset/security-posture.md",
+          "rag_poc/corpus-subset/security-posture.md",
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md",
+          "rag_poc/corpus-subset/security-posture.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-subset/security-posture.md"
+        ],
+        "recall_at": {
+          "1": false,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 0.63093,
+          "10": 0.63093
+        },
+        "latency_sec": 5.355772,
+        "latency_stats": {
+          "count": 1,
+          "avg": 5.355772,
+          "median": 5.355772,
+          "min": 5.355772,
+          "max": 5.355772,
+          "stdev": 0.0,
+          "samples": [
+            5.355772
+          ],
+          "cold_latency_sec": 5.355772
+        },
+        "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h-s05",
+        "query": "環境全体の構成と最終状態",
+        "relevant_sources": [
+          "FINAL-SUMMARY.md"
+        ],
+        "mode": "dense",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.04633,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.04633,
+          "median": 0.04633,
+          "min": 0.04633,
+          "max": 0.04633,
+          "stdev": 0.0,
+          "samples": [
+            0.04633
+          ],
+          "cold_latency_sec": 0.04633
+        },
+        "call": "search(query=..., mode='dense', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h-s05",
+        "query": "環境全体の構成と最終状態",
+        "relevant_sources": [
+          "FINAL-SUMMARY.md"
+        ],
+        "mode": "keyword",
+        "retrieval_k": 10,
+        "hits": 0,
+        "sources": [],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 0.004396,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.004396,
+          "median": 0.004396,
+          "min": 0.004396,
+          "max": 0.004396,
+          "stdev": 0.0,
+          "samples": [
+            0.004396
+          ],
+          "cold_latency_sec": 0.004396
+        },
+        "call": "search(query=..., mode='keyword', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h-s05",
+        "query": "環境全体の構成と最終状態",
+        "relevant_sources": [
+          "FINAL-SUMMARY.md"
+        ],
+        "mode": "hybrid",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.051261,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.051261,
+          "median": 0.051261,
+          "min": 0.051261,
+          "max": 0.051261,
+          "stdev": 0.0,
+          "samples": [
+            0.051261
+          ],
+          "cold_latency_sec": 0.051261
+        },
+        "call": "search(query=..., mode='hybrid', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h-s05",
+        "query": "環境全体の構成と最終状態",
+        "relevant_sources": [
+          "FINAL-SUMMARY.md"
+        ],
+        "mode": "hybrid-rerank",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md"
+        ],
+        "recall_at": {
+          "1": false,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 0.5,
+          "10": 0.5
+        },
+        "latency_sec": 4.837809,
+        "latency_stats": {
+          "count": 1,
+          "avg": 4.837809,
+          "median": 4.837809,
+          "min": 4.837809,
+          "max": 4.837809,
+          "stdev": 0.0,
+          "samples": [
+            4.837809
+          ],
+          "cold_latency_sec": 4.837809
+        },
+        "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h-s06",
+        "query": "jarvis muse DSH の役割分担",
+        "relevant_sources": [
+          "jarvis-muse-dsh-roles.md"
+        ],
+        "mode": "dense",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.054383,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.054383,
+          "median": 0.054383,
+          "min": 0.054383,
+          "max": 0.054383,
+          "stdev": 0.0,
+          "samples": [
+            0.054383
+          ],
+          "cold_latency_sec": 0.054383
+        },
+        "call": "search(query=..., mode='dense', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h-s06",
+        "query": "jarvis muse DSH の役割分担",
+        "relevant_sources": [
+          "jarvis-muse-dsh-roles.md"
+        ],
+        "mode": "keyword",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/FINAL-SUMMARY.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.007211,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.007211,
+          "median": 0.007211,
+          "min": 0.007211,
+          "max": 0.007211,
+          "stdev": 0.0,
+          "samples": [
+            0.007211
+          ],
+          "cold_latency_sec": 0.007211
+        },
+        "call": "search(query=..., mode='keyword', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h-s06",
+        "query": "jarvis muse DSH の役割分担",
+        "relevant_sources": [
+          "jarvis-muse-dsh-roles.md"
+        ],
+        "mode": "hybrid",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.056256,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.056256,
+          "median": 0.056256,
+          "min": 0.056256,
+          "max": 0.056256,
+          "stdev": 0.0,
+          "samples": [
+            0.056256
+          ],
+          "cold_latency_sec": 0.056256
+        },
+        "call": "search(query=..., mode='hybrid', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h-s06",
+        "query": "jarvis muse DSH の役割分担",
+        "relevant_sources": [
+          "jarvis-muse-dsh-roles.md"
+        ],
+        "mode": "hybrid-rerank",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md",
+          "rag_poc/corpus-subset/rag-methods-selection-2026-11-26.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-subset/jarvis-muse-dsh-roles.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 5.099497,
+        "latency_stats": {
+          "count": 1,
+          "avg": 5.099497,
+          "median": 5.099497,
+          "min": 5.099497,
+          "max": 5.099497,
+          "stdev": 0.0,
+          "samples": [
+            5.099497
+          ],
+          "cold_latency_sec": 5.099497
+        },
+        "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+        "error": null
+      }
+    ]
+  }
+}

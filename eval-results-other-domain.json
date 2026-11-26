@@ -1,0 +1,2451 @@
+{
+  "generated_at": "2026-11-26T02:34:15.349113+00:00",
+  "schema_version": 2,
+  "qrels_schema_version": 1,
+  "qrels_label": "qrels-alt.json",
+  "script": "rag_poc/evaluate.py",
+  "search_function": {
+    "module": "query",
+    "name": "search",
+    "preferred_name": "search"
+  },
+  "collection": "rag_poc_other_domain",
+  "embed_model": "qwen2.5:3b",
+  "chat_model": "qwen2.5:3b",
+  "vector_size": 2048,
+  "corpus_file_count": 6,
+  "corpus_sha256": "27b7581ba0b29c8b31449968fba1d0e4cb3bf7d01e28cff3df7f9b7fdd12de4f",
+  "repeat": 1,
+  "modes": [
+    "dense",
+    "keyword",
+    "hybrid",
+    "hybrid-rerank"
+  ],
+  "top_k": 10,
+  "heldout_retrieval_k": 10,
+  "metric_definitions": {
+    "source_keyword_hit_at3": "上位3件の source に expected 語が1つ以上含まれるか（any-match の真偽値。真の recall@k ではない）",
+    "content_keyword_hit_all_hits": "全ヒットの text に expected 語が1つ以上含まれるか。source 側と取得深度が異なる",
+    "avg_distinct_source_ratio_at3": "上位3件 source のUnit一意性。検索品質ではなく多様性の指標",
+    "avg_hits": "モード別の実返却件数（hybrid-rerank も全 top_k を返すよう修正済み）",
+    "latency": "RAG_EVAL_REPEAT 回（既定1＝ウォームアップなし1回、2以上でwarmup1回＋N回）の実測。コーパス規模とLLM呼び出しに強く依存",
+    "latency_stats": "record / summary の avg / median / min / max / stdev（秒）。avg_latency_sec は後方互換のため avg と同値。",
+    "heldout": {
+      "recall_at_k": "各クエリについて、検索結果上位 k 件の source に relevant_sources のいずれかが含まれれば 1・否則 0 とし、全 held-out クエリで平均（query-level hit@k）。正解ファイル全体のうち何件回収したかという集合 recall ではない。",
+      "ndcg_at_k": "gain=1 / discount=log2(rank+1) の DCG を上位 k 件で計算し、IDCG=sum_{r=1..min(|relevant|,k)} 1/log2(r+1) で割ってクエリ平均。同一ファイルの複数チャンクは最上位の1回だけ計上する。",
+      "label_matching": "正解は passkey-gateway/docs 内の実在ファイル名。ingest.py の source はリポジトリルート相対パスなので、完全一致・相対パス suffix・basename で照合する。",
+      "failure_policy": "検索失敗ケースは 0 として分母に残す（生存者バイアス回避）。",
+      "k_scope": "上位 k 件は source 非空の結果に対して適用する（query.py の hits は常に source を持つため実害なし）。",
+      "preflight": "実行前に全 relevant_sources が config.CORPUS_DIR に実在するか確認し、欠落は notes に記録する。",
+      "reuse_policy": "--heldout-only は既存 JSON の collection / corpus_sha256 / embed_model / chat_model が現行と一致するときのみ簡易結果を再利用する（欠落キーは警告のみで再利用）。"
+    }
+  },
+  "notes": [
+    "設定の出所: config.current_settings() + 環境変数（値はマスク済み）: RAG_TOP_K=10, RAG_VECTOR_SIZE=2048, RAG_COLLECTION=rag_poc_other_domain, RAG_CORPUS_DIR=rag_poc/corpus-alt, OLLAMA_URL=<masked>, QDRANT_URL=<masked>, EMBED_MODEL=qwen2.5:3b, CHAT_MODEL=qwen2.5:3b, RAG_EVAL_REPEAT=1",
+    "評価クエリは qrels.json（schema_version=1）から読み込み",
+    "簡易指標は 6 クエリの any-match、held-out は 6 クエリの正解ラベル付き",
+    "コーパスは config.COLLECTION（環境変数 RAG_COLLECTION で上書き）に依存",
+    "レイテンシはウォームアップ1回＋1回計測（RAG_EVAL_REPEAT で変更、1ならウォームアップなし1回）",
+    "再現メタ情報: embed_model=qwen2.5:3b chat_model=qwen2.5:3b vector_size=2048 corpus_files=6 corpus_sha256=27b7581ba0b29c8b31449968fba1d0e4cb3bf7d01e28cff3df7f9b7fdd12de4f"
+  ],
+  "summary": {
+    "dense": {
+      "cases": 6,
+      "successes": 6,
+      "source_keyword_hit_at3": 0.1667,
+      "content_keyword_hit_all_hits": 0.8333,
+      "avg_distinct_source_ratio_at3": 0.5,
+      "avg_latency_sec": 0.177779,
+      "latency_stats": {
+        "count": 6,
+        "avg": 0.177779,
+        "median": 0.175254,
+        "min": 0.169386,
+        "max": 0.198442,
+        "stdev": 0.009782
+      },
+      "avg_hits": 10.0,
+      "errors": 0
+    },
+    "keyword": {
+      "cases": 6,
+      "successes": 6,
+      "source_keyword_hit_at3": 0.0,
+      "content_keyword_hit_all_hits": 0.1667,
+      "avg_distinct_source_ratio_at3": 0.1667,
+      "avg_latency_sec": 0.003962,
+      "latency_stats": {
+        "count": 6,
+        "avg": 0.003962,
+        "median": 0.003911,
+        "min": 0.003109,
+        "max": 0.004791,
+        "stdev": 0.000646
+      },
+      "avg_hits": 0.17,
+      "errors": 0
+    },
+    "hybrid": {
+      "cases": 6,
+      "successes": 6,
+      "source_keyword_hit_at3": 0.1667,
+      "content_keyword_hit_all_hits": 0.8333,
+      "avg_distinct_source_ratio_at3": 0.5,
+      "avg_latency_sec": 0.18629,
+      "latency_stats": {
+        "count": 6,
+        "avg": 0.18629,
+        "median": 0.183838,
+        "min": 0.167064,
+        "max": 0.205847,
+        "stdev": 0.012505
+      },
+      "avg_hits": 10.0,
+      "errors": 0
+    },
+    "hybrid-rerank": {
+      "cases": 6,
+      "successes": 6,
+      "source_keyword_hit_at3": 0.1667,
+      "content_keyword_hit_all_hits": 0.8333,
+      "avg_distinct_source_ratio_at3": 0.6111,
+      "avg_latency_sec": 6.263754,
+      "latency_stats": {
+        "count": 6,
+        "avg": 6.263754,
+        "median": 6.306601,
+        "min": 5.632599,
+        "max": 6.840304,
+        "stdev": 0.373684
+      },
+      "avg_hits": 10.0,
+      "errors": 0
+    }
+  },
+  "results": [
+    {
+      "query": "デスクトップ版でOSのWebViewを採用した理由は",
+      "expected": [
+        "Tauri",
+        "WebView",
+        "wry",
+        "WebView2"
+      ],
+      "mode": "dense",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "WebView"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "Tauri",
+        "WebView",
+        "wry",
+        "WebView2"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0001-use-system-webview.md",
+          "rag_poc/corpus-alt/0001-use-system-webview.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md"
+        ],
+        "unique_source_count": 2,
+        "unique_ratio": 0.6667
+      },
+      "latency_sec": 0.198442,
+      "latency_stats": {
+        "count": 1,
+        "avg": 0.198442,
+        "median": 0.198442,
+        "min": 0.198442,
+        "max": 0.198442,
+        "stdev": 0.0,
+        "samples": [
+          0.198442
+        ],
+        "cold_latency_sec": 0.198442
+      },
+      "call": "search(query=..., mode='dense', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "デスクトップ版でOSのWebViewを採用した理由は",
+      "expected": [
+        "Tauri",
+        "WebView",
+        "wry",
+        "WebView2"
+      ],
+      "mode": "keyword",
+      "hits": 0,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": false,
+      "matched_content_keywords": [],
+      "unit_uniqueness": {
+        "top3_sources": [],
+        "unique_source_count": 0,
+        "unique_ratio": 0.0
+      },
+      "latency_sec": 0.003815,
+      "latency_stats": {
+        "count": 1,
+        "avg": 0.003815,
+        "median": 0.003815,
+        "min": 0.003815,
+        "max": 0.003815,
+        "stdev": 0.0,
+        "samples": [
+          0.003815
+        ],
+        "cold_latency_sec": 0.003815
+      },
+      "call": "search(query=..., mode='keyword', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "デスクトップ版でOSのWebViewを採用した理由は",
+      "expected": [
+        "Tauri",
+        "WebView",
+        "wry",
+        "WebView2"
+      ],
+      "mode": "hybrid",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "WebView"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "Tauri",
+        "WebView",
+        "wry",
+        "WebView2"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0001-use-system-webview.md",
+          "rag_poc/corpus-alt/0001-use-system-webview.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md"
+        ],
+        "unique_source_count": 2,
+        "unique_ratio": 0.6667
+      },
+      "latency_sec": 0.205847,
+      "latency_stats": {
+        "count": 1,
+        "avg": 0.205847,
+        "median": 0.205847,
+        "min": 0.205847,
+        "max": 0.205847,
+        "stdev": 0.0,
+        "samples": [
+          0.205847
+        ],
+        "cold_latency_sec": 0.205847
+      },
+      "call": "search(query=..., mode='hybrid', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "デスクトップ版でOSのWebViewを採用した理由は",
+      "expected": [
+        "Tauri",
+        "WebView",
+        "wry",
+        "WebView2"
+      ],
+      "mode": "hybrid-rerank",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "WebView"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "Tauri",
+        "WebView",
+        "wry",
+        "WebView2"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0001-use-system-webview.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0001-use-system-webview.md"
+        ],
+        "unique_source_count": 2,
+        "unique_ratio": 0.6667
+      },
+      "latency_sec": 6.025075,
+      "latency_stats": {
+        "count": 1,
+        "avg": 6.025075,
+        "median": 6.025075,
+        "min": 6.025075,
+        "max": 6.025075,
+        "stdev": 0.0,
+        "samples": [
+          6.025075
+        ],
+        "cold_latency_sec": 6.025075
+      },
+      "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "AIを使ったMarkdown生成・修正パイプライン",
+      "expected": [
+        "rumdl",
+        "markdownlint",
+        "tiktoken-rs"
+      ],
+      "mode": "dense",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "rumdl",
+        "markdownlint",
+        "tiktoken-rs"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md"
+        ],
+        "unique_source_count": 1,
+        "unique_ratio": 0.3333
+      },
+      "latency_sec": 0.174022,
+      "latency_stats": {
+        "count": 1,
+        "avg": 0.174022,
+        "median": 0.174022,
+        "min": 0.174022,
+        "max": 0.174022,
+        "stdev": 0.0,
+        "samples": [
+          0.174022
+        ],
+        "cold_latency_sec": 0.174022
+      },
+      "call": "search(query=..., mode='dense', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "AIを使ったMarkdown生成・修正パイプライン",
+      "expected": [
+        "rumdl",
+        "markdownlint",
+        "tiktoken-rs"
+      ],
+      "mode": "keyword",
+      "hits": 1,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "rumdl",
+        "markdownlint"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md"
+        ],
+        "unique_source_count": 1,
+        "unique_ratio": 1.0
+      },
+      "latency_sec": 0.004752,
+      "latency_stats": {
+        "count": 1,
+        "avg": 0.004752,
+        "median": 0.004752,
+        "min": 0.004752,
+        "max": 0.004752,
+        "stdev": 0.0,
+        "samples": [
+          0.004752
+        ],
+        "cold_latency_sec": 0.004752
+      },
+      "call": "search(query=..., mode='keyword', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "AIを使ったMarkdown生成・修正パイプライン",
+      "expected": [
+        "rumdl",
+        "markdownlint",
+        "tiktoken-rs"
+      ],
+      "mode": "hybrid",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "rumdl",
+        "markdownlint",
+        "tiktoken-rs"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md"
+        ],
+        "unique_source_count": 1,
+        "unique_ratio": 0.3333
+      },
+      "latency_sec": 0.179904,
+      "latency_stats": {
+        "count": 1,
+        "avg": 0.179904,
+        "median": 0.179904,
+        "min": 0.179904,
+        "max": 0.179904,
+        "stdev": 0.0,
+        "samples": [
+          0.179904
+        ],
+        "cold_latency_sec": 0.179904
+      },
+      "call": "search(query=..., mode='hybrid', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "AIを使ったMarkdown生成・修正パイプライン",
+      "expected": [
+        "rumdl",
+        "markdownlint",
+        "tiktoken-rs"
+      ],
+      "mode": "hybrid-rerank",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "rumdl",
+        "markdownlint",
+        "tiktoken-rs"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md"
+        ],
+        "unique_source_count": 1,
+        "unique_ratio": 0.3333
+      },
+      "latency_sec": 6.265757,
+      "latency_stats": {
+        "count": 1,
+        "avg": 6.265757,
+        "median": 6.265757,
+        "min": 6.265757,
+        "max": 6.265757,
+        "stdev": 0.0,
+        "samples": [
+          6.265757
+        ],
+        "cold_latency_sec": 6.265757
+      },
+      "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "WASMターゲットをどう分割したか",
+      "expected": [
+        "wasm32",
+        "target_arch",
+        "tokio",
+        "cfg"
+      ],
+      "mode": "dense",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "wasm32"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md"
+        ],
+        "unique_source_count": 1,
+        "unique_ratio": 0.3333
+      },
+      "latency_sec": 0.169386,
+      "latency_stats": {
+        "count": 1,
+        "avg": 0.169386,
+        "median": 0.169386,
+        "min": 0.169386,
+        "max": 0.169386,
+        "stdev": 0.0,
+        "samples": [
+          0.169386
+        ],
+        "cold_latency_sec": 0.169386
+      },
+      "call": "search(query=..., mode='dense', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "WASMターゲットをどう分割したか",
+      "expected": [
+        "wasm32",
+        "target_arch",
+        "tokio",
+        "cfg"
+      ],
+      "mode": "keyword",
+      "hits": 0,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": false,
+      "matched_content_keywords": [],
+      "unit_uniqueness": {
+        "top3_sources": [],
+        "unique_source_count": 0,
+        "unique_ratio": 0.0
+      },
+      "latency_sec": 0.003109,
+      "latency_stats": {
+        "count": 1,
+        "avg": 0.003109,
+        "median": 0.003109,
+        "min": 0.003109,
+        "max": 0.003109,
+        "stdev": 0.0,
+        "samples": [
+          0.003109
+        ],
+        "cold_latency_sec": 0.003109
+      },
+      "call": "search(query=..., mode='keyword', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "WASMターゲットをどう分割したか",
+      "expected": [
+        "wasm32",
+        "target_arch",
+        "tokio",
+        "cfg"
+      ],
+      "mode": "hybrid",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "wasm32"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md"
+        ],
+        "unique_source_count": 1,
+        "unique_ratio": 0.3333
+      },
+      "latency_sec": 0.181273,
+      "latency_stats": {
+        "count": 1,
+        "avg": 0.181273,
+        "median": 0.181273,
+        "min": 0.181273,
+        "max": 0.181273,
+        "stdev": 0.0,
+        "samples": [
+          0.181273
+        ],
+        "cold_latency_sec": 0.181273
+      },
+      "call": "search(query=..., mode='hybrid', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "WASMターゲットをどう分割したか",
+      "expected": [
+        "wasm32",
+        "target_arch",
+        "tokio",
+        "cfg"
+      ],
+      "mode": "hybrid-rerank",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "wasm32"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md"
+        ],
+        "unique_source_count": 2,
+        "unique_ratio": 0.6667
+      },
+      "latency_sec": 6.840304,
+      "latency_stats": {
+        "count": 1,
+        "avg": 6.840304,
+        "median": 6.840304,
+        "min": 6.840304,
+        "max": 6.840304,
+        "stdev": 0.0,
+        "samples": [
+          6.840304
+        ],
+        "cold_latency_sec": 6.840304
+      },
+      "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "Zipアーカイブの読み取り方式",
+      "expected": [
+        "zip",
+        "ArchiveReader",
+        "fail-closed",
+        "ArchiveLimits"
+      ],
+      "mode": "dense",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "fail-closed"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md"
+        ],
+        "unique_source_count": 2,
+        "unique_ratio": 0.6667
+      },
+      "latency_sec": 0.178347,
+      "latency_stats": {
+        "count": 1,
+        "avg": 0.178347,
+        "median": 0.178347,
+        "min": 0.178347,
+        "max": 0.178347,
+        "stdev": 0.0,
+        "samples": [
+          0.178347
+        ],
+        "cold_latency_sec": 0.178347
+      },
+      "call": "search(query=..., mode='dense', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "Zipアーカイブの読み取り方式",
+      "expected": [
+        "zip",
+        "ArchiveReader",
+        "fail-closed",
+        "ArchiveLimits"
+      ],
+      "mode": "keyword",
+      "hits": 0,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": false,
+      "matched_content_keywords": [],
+      "unit_uniqueness": {
+        "top3_sources": [],
+        "unique_source_count": 0,
+        "unique_ratio": 0.0
+      },
+      "latency_sec": 0.004007,
+      "latency_stats": {
+        "count": 1,
+        "avg": 0.004007,
+        "median": 0.004007,
+        "min": 0.004007,
+        "max": 0.004007,
+        "stdev": 0.0,
+        "samples": [
+          0.004007
+        ],
+        "cold_latency_sec": 0.004007
+      },
+      "call": "search(query=..., mode='keyword', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "Zipアーカイブの読み取り方式",
+      "expected": [
+        "zip",
+        "ArchiveReader",
+        "fail-closed",
+        "ArchiveLimits"
+      ],
+      "mode": "hybrid",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "fail-closed"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md"
+        ],
+        "unique_source_count": 2,
+        "unique_ratio": 0.6667
+      },
+      "latency_sec": 0.197249,
+      "latency_stats": {
+        "count": 1,
+        "avg": 0.197249,
+        "median": 0.197249,
+        "min": 0.197249,
+        "max": 0.197249,
+        "stdev": 0.0,
+        "samples": [
+          0.197249
+        ],
+        "cold_latency_sec": 0.197249
+      },
+      "call": "search(query=..., mode='hybrid', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "Zipアーカイブの読み取り方式",
+      "expected": [
+        "zip",
+        "ArchiveReader",
+        "fail-closed",
+        "ArchiveLimits"
+      ],
+      "mode": "hybrid-rerank",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "fail-closed"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md"
+        ],
+        "unique_source_count": 2,
+        "unique_ratio": 0.6667
+      },
+      "latency_sec": 6.471345,
+      "latency_stats": {
+        "count": 1,
+        "avg": 6.471345,
+        "median": 6.471345,
+        "min": 6.471345,
+        "max": 6.471345,
+        "stdev": 0.0,
+        "samples": [
+          6.471345
+        ],
+        "cold_latency_sec": 6.471345
+      },
+      "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "EPUB本文の読み出しをどう実装したか",
+      "expected": [
+        "quick-xml",
+        "container.xml",
+        "OPF",
+        "EpubBook"
+      ],
+      "mode": "dense",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "OPF"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md"
+        ],
+        "unique_source_count": 2,
+        "unique_ratio": 0.6667
+      },
+      "latency_sec": 0.169992,
+      "latency_stats": {
+        "count": 1,
+        "avg": 0.169992,
+        "median": 0.169992,
+        "min": 0.169992,
+        "max": 0.169992,
+        "stdev": 0.0,
+        "samples": [
+          0.169992
+        ],
+        "cold_latency_sec": 0.169992
+      },
+      "call": "search(query=..., mode='dense', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "EPUB本文の読み出しをどう実装したか",
+      "expected": [
+        "quick-xml",
+        "container.xml",
+        "OPF",
+        "EpubBook"
+      ],
+      "mode": "keyword",
+      "hits": 0,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": false,
+      "matched_content_keywords": [],
+      "unit_uniqueness": {
+        "top3_sources": [],
+        "unique_source_count": 0,
+        "unique_ratio": 0.0
+      },
+      "latency_sec": 0.003299,
+      "latency_stats": {
+        "count": 1,
+        "avg": 0.003299,
+        "median": 0.003299,
+        "min": 0.003299,
+        "max": 0.003299,
+        "stdev": 0.0,
+        "samples": [
+          0.003299
+        ],
+        "cold_latency_sec": 0.003299
+      },
+      "call": "search(query=..., mode='keyword', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "EPUB本文の読み出しをどう実装したか",
+      "expected": [
+        "quick-xml",
+        "container.xml",
+        "OPF",
+        "EpubBook"
+      ],
+      "mode": "hybrid",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "OPF"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md"
+        ],
+        "unique_source_count": 2,
+        "unique_ratio": 0.6667
+      },
+      "latency_sec": 0.167064,
+      "latency_stats": {
+        "count": 1,
+        "avg": 0.167064,
+        "median": 0.167064,
+        "min": 0.167064,
+        "max": 0.167064,
+        "stdev": 0.0,
+        "samples": [
+          0.167064
+        ],
+        "cold_latency_sec": 0.167064
+      },
+      "call": "search(query=..., mode='hybrid', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "EPUB本文の読み出しをどう実装したか",
+      "expected": [
+        "quick-xml",
+        "container.xml",
+        "OPF",
+        "EpubBook"
+      ],
+      "mode": "hybrid-rerank",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "OPF"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md"
+        ],
+        "unique_source_count": 2,
+        "unique_ratio": 0.6667
+      },
+      "latency_sec": 5.632599,
+      "latency_stats": {
+        "count": 1,
+        "avg": 5.632599,
+        "median": 5.632599,
+        "min": 5.632599,
+        "max": 5.632599,
+        "stdev": 0.0,
+        "samples": [
+          5.632599
+        ],
+        "cold_latency_sec": 5.632599
+      },
+      "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "EPUBの目次フラグメント問題",
+      "expected": [
+        "fragment",
+        "EpubTocEntry",
+        "href",
+        "split_fragment"
+      ],
+      "mode": "dense",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": false,
+      "matched_content_keywords": [],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md"
+        ],
+        "unique_source_count": 1,
+        "unique_ratio": 0.3333
+      },
+      "latency_sec": 0.176485,
+      "latency_stats": {
+        "count": 1,
+        "avg": 0.176485,
+        "median": 0.176485,
+        "min": 0.176485,
+        "max": 0.176485,
+        "stdev": 0.0,
+        "samples": [
+          0.176485
+        ],
+        "cold_latency_sec": 0.176485
+      },
+      "call": "search(query=..., mode='dense', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "EPUBの目次フラグメント問題",
+      "expected": [
+        "fragment",
+        "EpubTocEntry",
+        "href",
+        "split_fragment"
+      ],
+      "mode": "keyword",
+      "hits": 0,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": false,
+      "matched_content_keywords": [],
+      "unit_uniqueness": {
+        "top3_sources": [],
+        "unique_source_count": 0,
+        "unique_ratio": 0.0
+      },
+      "latency_sec": 0.004791,
+      "latency_stats": {
+        "count": 1,
+        "avg": 0.004791,
+        "median": 0.004791,
+        "min": 0.004791,
+        "max": 0.004791,
+        "stdev": 0.0,
+        "samples": [
+          0.004791
+        ],
+        "cold_latency_sec": 0.004791
+      },
+      "call": "search(query=..., mode='keyword', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "EPUBの目次フラグメント問題",
+      "expected": [
+        "fragment",
+        "EpubTocEntry",
+        "href",
+        "split_fragment"
+      ],
+      "mode": "hybrid",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": false,
+      "matched_content_keywords": [],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md"
+        ],
+        "unique_source_count": 1,
+        "unique_ratio": 0.3333
+      },
+      "latency_sec": 0.186404,
+      "latency_stats": {
+        "count": 1,
+        "avg": 0.186404,
+        "median": 0.186404,
+        "min": 0.186404,
+        "max": 0.186404,
+        "stdev": 0.0,
+        "samples": [
+          0.186404
+        ],
+        "cold_latency_sec": 0.186404
+      },
+      "call": "search(query=..., mode='hybrid', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "EPUBの目次フラグメント問題",
+      "expected": [
+        "fragment",
+        "EpubTocEntry",
+        "href",
+        "split_fragment"
+      ],
+      "mode": "hybrid-rerank",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": false,
+      "matched_content_keywords": [],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md"
+        ],
+        "unique_source_count": 2,
+        "unique_ratio": 0.6667
+      },
+      "latency_sec": 6.347445,
+      "latency_stats": {
+        "count": 1,
+        "avg": 6.347445,
+        "median": 6.347445,
+        "min": 6.347445,
+        "max": 6.347445,
+        "stdev": 0.0,
+        "samples": [
+          6.347445
+        ],
+        "cold_latency_sec": 6.347445
+      },
+      "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+      "error": null
+    }
+  ],
+  "heldout": {
+    "definitions": {
+      "recall_at_k": "各クエリについて、検索結果上位 k 件の source に relevant_sources のいずれかが含まれれば 1・否則 0 とし、全 held-out クエリで平均（query-level hit@k）。正解ファイル全体のうち何件回収したかという集合 recall ではない。",
+      "ndcg_at_k": "gain=1 / discount=log2(rank+1) の DCG を上位 k 件で計算し、IDCG=sum_{r=1..min(|relevant|,k)} 1/log2(r+1) で割ってクエリ平均。同一ファイルの複数チャンクは最上位の1回だけ計上する。",
+      "label_matching": "正解は passkey-gateway/docs 内の実在ファイル名。ingest.py の source はリポジトリルート相対パスなので、完全一致・相対パス suffix・basename で照合する。",
+      "failure_policy": "検索失敗ケースは 0 として分母に残す（生存者バイアス回避）。",
+      "k_scope": "上位 k 件は source 非空の結果に対して適用する（query.py の hits は常に source を持つため実害なし）。",
+      "preflight": "実行前に全 relevant_sources が config.CORPUS_DIR に実在するか確認し、欠落は notes に記録する。",
+      "reuse_policy": "--heldout-only は既存 JSON の collection / corpus_sha256 / embed_model / chat_model が現行と一致するときのみ簡易結果を再利用する（欠落キーは警告のみで再利用）。"
+    },
+    "recall_k": [
+      1,
+      3,
+      5,
+      10
+    ],
+    "ndcg_k": [
+      3,
+      10
+    ],
+    "queries": [
+      {
+        "id": "h01-webview-decision",
+        "query": "システム WebView 採用 理由 Tauri wry 配布サイズ CEF",
+        "relevant_sources": [
+          "0001-use-system-webview.md"
+        ]
+      },
+      {
+        "id": "h02-markdown-pipeline",
+        "query": "AI Markdown パイプライン rumdl プロンプトレジストリ CodeMirror",
+        "relevant_sources": [
+          "0002-ai-markdown-pipeline.md"
+        ]
+      },
+      {
+        "id": "h03-target-split",
+        "query": "共通コア ターゲット別依存 分割 wasm32 cfg tokio Trunk",
+        "relevant_sources": [
+          "0003-native-wasm-target-split.md"
+        ]
+      },
+      {
+        "id": "h04-archive-safety",
+        "query": "ZIP アーカイブ 読み取り専用 パス逸脱 過大展開 zip クレート",
+        "relevant_sources": [
+          "0004-zip-archive-reader.md"
+        ]
+      },
+      {
+        "id": "h05-epub-body-reading",
+        "query": "EPUB 本文 抽出 container.xml OPF quick-xml 章",
+        "relevant_sources": [
+          "0005-epub-body-reading.md"
+        ]
+      },
+      {
+        "id": "h06-toc-fragments",
+        "query": "EPUB 目次 フラグメント 保持 EpubTocEntry 空パス 読み飛ばし",
+        "relevant_sources": [
+          "0007-epub-toc-fragments.md"
+        ]
+      }
+    ],
+    "summary": {
+      "dense": {
+        "queries": 6,
+        "successes": 6,
+        "errors": 0,
+        "recall_at": {
+          "1": 0.3333,
+          "3": 0.6667,
+          "5": 0.6667,
+          "10": 0.8333
+        },
+        "ndcg_at": {
+          "3": 0.5218,
+          "10": 0.5774
+        },
+        "latency_stats": {
+          "count": 6,
+          "avg": 0.225838,
+          "median": 0.223202,
+          "min": 0.198117,
+          "max": 0.255461,
+          "stdev": 0.023454
+        }
+      },
+      "keyword": {
+        "queries": 6,
+        "successes": 6,
+        "errors": 0,
+        "recall_at": {
+          "1": 1.0,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_stats": {
+          "count": 6,
+          "avg": 0.004898,
+          "median": 0.004456,
+          "min": 0.003054,
+          "max": 0.00854,
+          "stdev": 0.001785
+        }
+      },
+      "hybrid": {
+        "queries": 6,
+        "successes": 6,
+        "errors": 0,
+        "recall_at": {
+          "1": 0.6667,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "ndcg_at": {
+          "3": 0.8552,
+          "10": 0.8552
+        },
+        "latency_stats": {
+          "count": 6,
+          "avg": 0.204895,
+          "median": 0.204101,
+          "min": 0.18813,
+          "max": 0.223818,
+          "stdev": 0.013582
+        }
+      },
+      "hybrid-rerank": {
+        "queries": 6,
+        "successes": 6,
+        "errors": 0,
+        "recall_at": {
+          "1": 0.5,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "ndcg_at": {
+          "3": 0.7936,
+          "10": 0.7936
+        },
+        "latency_stats": {
+          "count": 6,
+          "avg": 7.495534,
+          "median": 7.421646,
+          "min": 6.744233,
+          "max": 8.390966,
+          "stdev": 0.541684
+        }
+      }
+    },
+    "results": [
+      {
+        "id": "h01-webview-decision",
+        "query": "システム WebView 採用 理由 Tauri wry 配布サイズ CEF",
+        "relevant_sources": [
+          "0001-use-system-webview.md"
+        ],
+        "mode": "dense",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 0.255461,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.255461,
+          "median": 0.255461,
+          "min": 0.255461,
+          "max": 0.255461,
+          "stdev": 0.0,
+          "samples": [
+            0.255461
+          ],
+          "cold_latency_sec": 0.255461
+        },
+        "call": "search(query=..., mode='dense', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h01-webview-decision",
+        "query": "システム WebView 採用 理由 Tauri wry 配布サイズ CEF",
+        "relevant_sources": [
+          "0001-use-system-webview.md"
+        ],
+        "mode": "keyword",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0001-use-system-webview.md",
+          "rag_poc/corpus-alt/0001-use-system-webview.md",
+          "rag_poc/corpus-alt/0001-use-system-webview.md",
+          "rag_poc/corpus-alt/0001-use-system-webview.md",
+          "rag_poc/corpus-alt/0001-use-system-webview.md",
+          "rag_poc/corpus-alt/0001-use-system-webview.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-alt/0001-use-system-webview.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.00854,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.00854,
+          "median": 0.00854,
+          "min": 0.00854,
+          "max": 0.00854,
+          "stdev": 0.0,
+          "samples": [
+            0.00854
+          ],
+          "cold_latency_sec": 0.00854
+        },
+        "call": "search(query=..., mode='keyword', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h01-webview-decision",
+        "query": "システム WebView 採用 理由 Tauri wry 配布サイズ CEF",
+        "relevant_sources": [
+          "0001-use-system-webview.md"
+        ],
+        "mode": "hybrid",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0001-use-system-webview.md",
+          "rag_poc/corpus-alt/0001-use-system-webview.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0001-use-system-webview.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0001-use-system-webview.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0001-use-system-webview.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-alt/0001-use-system-webview.md"
+        ],
+        "recall_at": {
+          "1": false,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 0.63093,
+          "10": 0.63093
+        },
+        "latency_sec": 0.211455,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.211455,
+          "median": 0.211455,
+          "min": 0.211455,
+          "max": 0.211455,
+          "stdev": 0.0,
+          "samples": [
+            0.211455
+          ],
+          "cold_latency_sec": 0.211455
+        },
+        "call": "search(query=..., mode='hybrid', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h01-webview-decision",
+        "query": "システム WebView 採用 理由 Tauri wry 配布サイズ CEF",
+        "relevant_sources": [
+          "0001-use-system-webview.md"
+        ],
+        "mode": "hybrid-rerank",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0001-use-system-webview.md",
+          "rag_poc/corpus-alt/0001-use-system-webview.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0001-use-system-webview.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0001-use-system-webview.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0001-use-system-webview.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-alt/0001-use-system-webview.md"
+        ],
+        "recall_at": {
+          "1": false,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 0.63093,
+          "10": 0.63093
+        },
+        "latency_sec": 6.744233,
+        "latency_stats": {
+          "count": 1,
+          "avg": 6.744233,
+          "median": 6.744233,
+          "min": 6.744233,
+          "max": 6.744233,
+          "stdev": 0.0,
+          "samples": [
+            6.744233
+          ],
+          "cold_latency_sec": 6.744233
+        },
+        "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h02-markdown-pipeline",
+        "query": "AI Markdown パイプライン rumdl プロンプトレジストリ CodeMirror",
+        "relevant_sources": [
+          "0002-ai-markdown-pipeline.md"
+        ],
+        "mode": "dense",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0001-use-system-webview.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md"
+        ],
+        "recall_at": {
+          "1": false,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 0.5,
+          "10": 0.5
+        },
+        "latency_sec": 0.198117,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.198117,
+          "median": 0.198117,
+          "min": 0.198117,
+          "max": 0.198117,
+          "stdev": 0.0,
+          "samples": [
+            0.198117
+          ],
+          "cold_latency_sec": 0.198117
+        },
+        "call": "search(query=..., mode='dense', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h02-markdown-pipeline",
+        "query": "AI Markdown パイプライン rumdl プロンプトレジストリ CodeMirror",
+        "relevant_sources": [
+          "0002-ai-markdown-pipeline.md"
+        ],
+        "mode": "keyword",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.005337,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.005337,
+          "median": 0.005337,
+          "min": 0.005337,
+          "max": 0.005337,
+          "stdev": 0.0,
+          "samples": [
+            0.005337
+          ],
+          "cold_latency_sec": 0.005337
+        },
+        "call": "search(query=..., mode='keyword', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h02-markdown-pipeline",
+        "query": "AI Markdown パイプライン rumdl プロンプトレジストリ CodeMirror",
+        "relevant_sources": [
+          "0002-ai-markdown-pipeline.md"
+        ],
+        "mode": "hybrid",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.191226,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.191226,
+          "median": 0.191226,
+          "min": 0.191226,
+          "max": 0.191226,
+          "stdev": 0.0,
+          "samples": [
+            0.191226
+          ],
+          "cold_latency_sec": 0.191226
+        },
+        "call": "search(query=..., mode='hybrid', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h02-markdown-pipeline",
+        "query": "AI Markdown パイプライン rumdl プロンプトレジストリ CodeMirror",
+        "relevant_sources": [
+          "0002-ai-markdown-pipeline.md"
+        ],
+        "mode": "hybrid-rerank",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 8.390966,
+        "latency_stats": {
+          "count": 1,
+          "avg": 8.390966,
+          "median": 8.390966,
+          "min": 8.390966,
+          "max": 8.390966,
+          "stdev": 0.0,
+          "samples": [
+            8.390966
+          ],
+          "cold_latency_sec": 8.390966
+        },
+        "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h03-target-split",
+        "query": "共通コア ターゲット別依存 分割 wasm32 cfg tokio Trunk",
+        "relevant_sources": [
+          "0003-native-wasm-target-split.md"
+        ],
+        "mode": "dense",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0001-use-system-webview.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.205478,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.205478,
+          "median": 0.205478,
+          "min": 0.205478,
+          "max": 0.205478,
+          "stdev": 0.0,
+          "samples": [
+            0.205478
+          ],
+          "cold_latency_sec": 0.205478
+        },
+        "call": "search(query=..., mode='dense', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h03-target-split",
+        "query": "共通コア ターゲット別依存 分割 wasm32 cfg tokio Trunk",
+        "relevant_sources": [
+          "0003-native-wasm-target-split.md"
+        ],
+        "mode": "keyword",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.003054,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.003054,
+          "median": 0.003054,
+          "min": 0.003054,
+          "max": 0.003054,
+          "stdev": 0.0,
+          "samples": [
+            0.003054
+          ],
+          "cold_latency_sec": 0.003054
+        },
+        "call": "search(query=..., mode='keyword', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h03-target-split",
+        "query": "共通コア ターゲット別依存 分割 wasm32 cfg tokio Trunk",
+        "relevant_sources": [
+          "0003-native-wasm-target-split.md"
+        ],
+        "mode": "hybrid",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0001-use-system-webview.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.18813,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.18813,
+          "median": 0.18813,
+          "min": 0.18813,
+          "max": 0.18813,
+          "stdev": 0.0,
+          "samples": [
+            0.18813
+          ],
+          "cold_latency_sec": 0.18813
+        },
+        "call": "search(query=..., mode='hybrid', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h03-target-split",
+        "query": "共通コア ターゲット別依存 分割 wasm32 cfg tokio Trunk",
+        "relevant_sources": [
+          "0003-native-wasm-target-split.md"
+        ],
+        "mode": "hybrid-rerank",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0001-use-system-webview.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md"
+        ],
+        "recall_at": {
+          "1": false,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 0.63093,
+          "10": 0.63093
+        },
+        "latency_sec": 7.934707,
+        "latency_stats": {
+          "count": 1,
+          "avg": 7.934707,
+          "median": 7.934707,
+          "min": 7.934707,
+          "max": 7.934707,
+          "stdev": 0.0,
+          "samples": [
+            7.934707
+          ],
+          "cold_latency_sec": 7.934707
+        },
+        "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h04-archive-safety",
+        "query": "ZIP アーカイブ 読み取り専用 パス逸脱 過大展開 zip クレート",
+        "relevant_sources": [
+          "0004-zip-archive-reader.md"
+        ],
+        "mode": "dense",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md"
+        ],
+        "recall_at": {
+          "1": false,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 0.63093,
+          "10": 0.63093
+        },
+        "latency_sec": 0.240926,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.240926,
+          "median": 0.240926,
+          "min": 0.240926,
+          "max": 0.240926,
+          "stdev": 0.0,
+          "samples": [
+            0.240926
+          ],
+          "cold_latency_sec": 0.240926
+        },
+        "call": "search(query=..., mode='dense', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h04-archive-safety",
+        "query": "ZIP アーカイブ 読み取り専用 パス逸脱 過大展開 zip クレート",
+        "relevant_sources": [
+          "0004-zip-archive-reader.md"
+        ],
+        "mode": "keyword",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.004605,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.004605,
+          "median": 0.004605,
+          "min": 0.004605,
+          "max": 0.004605,
+          "stdev": 0.0,
+          "samples": [
+            0.004605
+          ],
+          "cold_latency_sec": 0.004605
+        },
+        "call": "search(query=..., mode='keyword', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h04-archive-safety",
+        "query": "ZIP アーカイブ 読み取り専用 パス逸脱 過大展開 zip クレート",
+        "relevant_sources": [
+          "0004-zip-archive-reader.md"
+        ],
+        "mode": "hybrid",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.223818,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.223818,
+          "median": 0.223818,
+          "min": 0.223818,
+          "max": 0.223818,
+          "stdev": 0.0,
+          "samples": [
+            0.223818
+          ],
+          "cold_latency_sec": 0.223818
+        },
+        "call": "search(query=..., mode='hybrid', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h04-archive-safety",
+        "query": "ZIP アーカイブ 読み取り専用 パス逸脱 過大展開 zip クレート",
+        "relevant_sources": [
+          "0004-zip-archive-reader.md"
+        ],
+        "mode": "hybrid-rerank",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 7.060006,
+        "latency_stats": {
+          "count": 1,
+          "avg": 7.060006,
+          "median": 7.060006,
+          "min": 7.060006,
+          "max": 7.060006,
+          "stdev": 0.0,
+          "samples": [
+            7.060006
+          ],
+          "cold_latency_sec": 7.060006
+        },
+        "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h05-epub-body-reading",
+        "query": "EPUB 本文 抽出 container.xml OPF quick-xml 章",
+        "relevant_sources": [
+          "0005-epub-body-reading.md"
+        ],
+        "mode": "dense",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0001-use-system-webview.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0001-use-system-webview.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-alt/0005-epub-body-reading.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.205087,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.205087,
+          "median": 0.205087,
+          "min": 0.205087,
+          "max": 0.205087,
+          "stdev": 0.0,
+          "samples": [
+            0.205087
+          ],
+          "cold_latency_sec": 0.205087
+        },
+        "call": "search(query=..., mode='dense', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h05-epub-body-reading",
+        "query": "EPUB 本文 抽出 container.xml OPF quick-xml 章",
+        "relevant_sources": [
+          "0005-epub-body-reading.md"
+        ],
+        "mode": "keyword",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-alt/0005-epub-body-reading.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.003545,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.003545,
+          "median": 0.003545,
+          "min": 0.003545,
+          "max": 0.003545,
+          "stdev": 0.0,
+          "samples": [
+            0.003545
+          ],
+          "cold_latency_sec": 0.003545
+        },
+        "call": "search(query=..., mode='keyword', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h05-epub-body-reading",
+        "query": "EPUB 本文 抽出 container.xml OPF quick-xml 章",
+        "relevant_sources": [
+          "0005-epub-body-reading.md"
+        ],
+        "mode": "hybrid",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0001-use-system-webview.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-alt/0005-epub-body-reading.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.196748,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.196748,
+          "median": 0.196748,
+          "min": 0.196748,
+          "max": 0.196748,
+          "stdev": 0.0,
+          "samples": [
+            0.196748
+          ],
+          "cold_latency_sec": 0.196748
+        },
+        "call": "search(query=..., mode='hybrid', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h05-epub-body-reading",
+        "query": "EPUB 本文 抽出 container.xml OPF quick-xml 章",
+        "relevant_sources": [
+          "0005-epub-body-reading.md"
+        ],
+        "mode": "hybrid-rerank",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0001-use-system-webview.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-alt/0005-epub-body-reading.md"
+        ],
+        "recall_at": {
+          "1": false,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 0.5,
+          "10": 0.5
+        },
+        "latency_sec": 7.401613,
+        "latency_stats": {
+          "count": 1,
+          "avg": 7.401613,
+          "median": 7.401613,
+          "min": 7.401613,
+          "max": 7.401613,
+          "stdev": 0.0,
+          "samples": [
+            7.401613
+          ],
+          "cold_latency_sec": 7.401613
+        },
+        "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h06-toc-fragments",
+        "query": "EPUB 目次 フラグメント 保持 EpubTocEntry 空パス 読み飛ばし",
+        "relevant_sources": [
+          "0007-epub-toc-fragments.md"
+        ],
+        "mode": "dense",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md"
+        ],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.333333
+        },
+        "latency_sec": 0.249958,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.249958,
+          "median": 0.249958,
+          "min": 0.249958,
+          "max": 0.249958,
+          "stdev": 0.0,
+          "samples": [
+            0.249958
+          ],
+          "cold_latency_sec": 0.249958
+        },
+        "call": "search(query=..., mode='dense', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h06-toc-fragments",
+        "query": "EPUB 目次 フラグメント 保持 EpubTocEntry 空パス 読み飛ばし",
+        "relevant_sources": [
+          "0007-epub-toc-fragments.md"
+        ],
+        "mode": "keyword",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.004307,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.004307,
+          "median": 0.004307,
+          "min": 0.004307,
+          "max": 0.004307,
+          "stdev": 0.0,
+          "samples": [
+            0.004307
+          ],
+          "cold_latency_sec": 0.004307
+        },
+        "call": "search(query=..., mode='keyword', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h06-toc-fragments",
+        "query": "EPUB 目次 フラグメント 保持 EpubTocEntry 空パス 読み飛ばし",
+        "relevant_sources": [
+          "0007-epub-toc-fragments.md"
+        ],
+        "mode": "hybrid",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md"
+        ],
+        "recall_at": {
+          "1": false,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 0.5,
+          "10": 0.5
+        },
+        "latency_sec": 0.217991,
+        "latency_stats": {
+          "count": 1,
+          "avg": 0.217991,
+          "median": 0.217991,
+          "min": 0.217991,
+          "max": 0.217991,
+          "stdev": 0.0,
+          "samples": [
+            0.217991
+          ],
+          "cold_latency_sec": 0.217991
+        },
+        "call": "search(query=..., mode='hybrid', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h06-toc-fragments",
+        "query": "EPUB 目次 フラグメント 保持 EpubTocEntry 空パス 読み飛ばし",
+        "relevant_sources": [
+          "0007-epub-toc-fragments.md"
+        ],
+        "mode": "hybrid-rerank",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md"
+        ],
+        "matched_sources": [
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 7.44168,
+        "latency_stats": {
+          "count": 1,
+          "avg": 7.44168,
+          "median": 7.44168,
+          "min": 7.44168,
+          "max": 7.44168,
+          "stdev": 0.0,
+          "samples": [
+            7.44168
+          ],
+          "cold_latency_sec": 7.44168
+        },
+        "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+        "error": null
+      }
+    ]
+  }
+}

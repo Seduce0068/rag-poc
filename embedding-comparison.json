@@ -1,0 +1,136 @@
+{
+  "generated_at": "2026-11-26T07:57:48Z",
+  "models": {
+    "qwen2.5:3b": {
+      "dim": 2048,
+      "queries": [
+        {
+          "query": "パスキー sudo の使い方",
+          "top_source": "jarvis-muse-dsh-roles.md",
+          "top_score": 0.774055,
+          "distribution": {
+            "min": 0.096606,
+            "max": 0.774055,
+            "mean": 0.43159,
+            "stdev": 0.231225
+          }
+        },
+        {
+          "query": "DSH 起動トークン",
+          "top_source": "jarvis-muse-dsh-roles.md",
+          "top_score": 0.74729,
+          "distribution": {
+            "min": 0.045571,
+            "max": 0.74729,
+            "mean": 0.435566,
+            "stdev": 0.242932
+          }
+        },
+        {
+          "query": "Qdrant 常駐構成",
+          "top_source": "jarvis-muse-dsh-roles.md",
+          "top_score": 0.75071,
+          "distribution": {
+            "min": 0.043165,
+            "max": 0.75071,
+            "mean": 0.433784,
+            "stdev": 0.242606
+          }
+        },
+        {
+          "query": "OKF メタデータ",
+          "top_source": "jarvis-muse-dsh-roles.md",
+          "top_score": 0.712074,
+          "distribution": {
+            "min": -0.035696,
+            "max": 0.712074,
+            "mean": 0.397269,
+            "stdev": 0.288583
+          }
+        },
+        {
+          "query": "RAG 検索モード比較",
+          "top_source": "jarvis-muse-dsh-roles.md",
+          "top_score": 0.758892,
+          "distribution": {
+            "min": 0.045687,
+            "max": 0.758892,
+            "mean": 0.429054,
+            "stdev": 0.248279
+          }
+        }
+      ],
+      "avg_top_score": 0.748604
+    },
+    "qwen2.5:7b": {
+      "dim": 3584,
+      "queries": [
+        {
+          "query": "パスキー sudo の使い方",
+          "top_source": "jarvis-muse-dsh-roles.md",
+          "top_score": 0.786873,
+          "distribution": {
+            "min": -0.068602,
+            "max": 0.786873,
+            "mean": 0.340309,
+            "stdev": 0.304738
+          }
+        },
+        {
+          "query": "DSH 起動トークン",
+          "top_source": "jarvis-muse-dsh-roles.md",
+          "top_score": 0.764746,
+          "distribution": {
+            "min": -0.085533,
+            "max": 0.764746,
+            "mean": 0.344062,
+            "stdev": 0.324201
+          }
+        },
+        {
+          "query": "Qdrant 常駐構成",
+          "top_source": "jarvis-muse-dsh-roles.md",
+          "top_score": 0.765226,
+          "distribution": {
+            "min": -0.08662,
+            "max": 0.765226,
+            "mean": 0.342089,
+            "stdev": 0.323802
+          }
+        },
+        {
+          "query": "OKF メタデータ",
+          "top_source": "passkey-sudo-design.md",
+          "top_score": 0.679954,
+          "distribution": {
+            "min": -0.096677,
+            "max": 0.679954,
+            "mean": 0.328008,
+            "stdev": 0.317056
+          }
+        },
+        {
+          "query": "RAG 検索モード比較",
+          "top_source": "jarvis-muse-dsh-roles.md",
+          "top_score": 0.74822,
+          "distribution": {
+            "min": -0.06257,
+            "max": 0.74822,
+            "mean": 0.338947,
+            "stdev": 0.307119
+          }
+        }
+      ],
+      "avg_top_score": 0.749004
+    }
+  },
+  "notes": [
+    "top_score は固定5クエリ×6ファイルのコサイン代理値であり、qrels の Recall@k / nDCG@k ではない",
+    "埋め込みは Ollama /api/embed のみを使用。Qdrant は使わずコサイン類似度はインメモリで算出。",
+    "前処理は全モデル共通: 改行を含む空白類を単一スペースへ正規化し先頭 2000 文字で切り詰め。",
+    "ファイル埋め込みは1ファイル1リクエスト（6回）、クエリ埋め込みはモデルごとに1バッチリクエスト。",
+    "distribution は6ファイル分のコサイン類似度の min/max/mean/母集団 stdev（ddof=0）。",
+    "top_source はサブセット内のファイル名（basename）。比較クエリは固定5件。",
+    "cosine_batch は Rust bridge を使用（質問×ファイルを1回で計算）"
+  ]
+}

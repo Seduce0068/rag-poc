@@ -1,0 +1,3461 @@
+{
+  "generated_at": "2026-11-26T07:12:51.030289+00:00",
+  "schema_version": 2,
+  "qrels_schema_version": 1,
+  "qrels_label": "qrels.json",
+  "script": "rag_poc/evaluate.py",
+  "search_function": {
+    "module": "query",
+    "name": "search",
+    "preferred_name": "search"
+  },
+  "collection": "rag_poc_other_domain",
+  "embed_model": "qwen2.5:3b",
+  "chat_model": "qwen2.5:3b",
+  "vector_size": 2048,
+  "corpus_file_count": 6,
+  "corpus_sha256": "27b7581ba0b29c8b31449968fba1d0e4cb3bf7d01e28cff3df7f9b7fdd12de4f",
+  "repeat": 10,
+  "modes": [
+    "dense",
+    "keyword",
+    "hybrid",
+    "hybrid-rerank"
+  ],
+  "top_k": 10,
+  "heldout_retrieval_k": 10,
+  "metric_definitions": {
+    "source_keyword_hit_at3": "上位3件の source に expected 語が1つ以上含まれるか（any-match の真偽値。真の recall@k ではない）",
+    "content_keyword_hit_all_hits": "全ヒットの text に expected 語が1つ以上含まれるか。source 側と取得深度が異なる",
+    "avg_distinct_source_ratio_at3": "上位3件 source のUnit一意性。検索品質ではなく多様性の指標",
+    "avg_hits": "モード別の実返却件数（hybrid-rerank も全 top_k を返すよう修正済み）",
+    "latency": "RAG_EVAL_REPEAT 回（既定1＝ウォームアップなし1回、2以上でwarmup1回＋N回）の実測。コーパス規模とLLM呼び出しに強く依存",
+    "latency_stats": "record / summary の avg / median / min / max / stdev（秒）。avg_latency_sec は後方互換のため avg と同値。",
+    "heldout": {
+      "recall_at_k": "各クエリについて、検索結果上位 k 件の source に relevant_sources のいずれかが含まれれば 1・否則 0 とし、全 held-out クエリで平均（query-level hit@k）。正解ファイル全体のうち何件回収したかという集合 recall ではない。",
+      "ndcg_at_k": "gain=1 / discount=log2(rank+1) の DCG を上位 k 件で計算し、IDCG=sum_{r=1..min(|relevant|,k)} 1/log2(r+1) で割ってクエリ平均。同一ファイルの複数チャンクは最上位の1回だけ計上する。",
+      "label_matching": "正解は passkey-gateway/docs 内の実在ファイル名。ingest.py の source はリポジトリルート相対パスなので、完全一致・相対パス suffix・basename で照合する。",
+      "failure_policy": "検索失敗ケースは 0 として分母に残す（生存者バイアス回避）。",
+      "k_scope": "上位 k 件は source 非空の結果に対して適用する（query.py の hits は常に source を持つため実害なし）。",
+      "preflight": "実行前に全 relevant_sources が config.CORPUS_DIR に実在するか確認し、欠落は notes に記録する。",
+      "reuse_policy": "--heldout-only は既存 JSON の collection / corpus_sha256 / corpus_file_count / embed_model / chat_model / vector_size / top_k / schema_version / qrels_label / qrels_schema_version が現行と一致するときのみ簡易結果を再利用する（欠落キーは再計測の対象）。"
+    }
+  },
+  "notes": [
+    "設定の出所: config.current_settings() + 環境変数（値はマスク済み）: RAG_TOP_K=10, RAG_VECTOR_SIZE=2048, RAG_COLLECTION=rag_poc_other_domain, RAG_CORPUS_DIR=rag_poc/corpus-alt, OLLAMA_URL=<masked>, QDRANT_URL=<masked>, EMBED_MODEL=qwen2.5:3b, CHAT_MODEL=qwen2.5:3b, RAG_EVAL_REPEAT=10",
+    "held-out 正解ファイルがコーパスに不在: tooling-research-2026-11-09.md, dsh-plugin-markets-research-2026-11-26.md, okf-v03-upgrade-proposal-2026-11-25.md, dsh-home-consolidation-prep-2026-11-25.md, fs-selection-ext4-report-20261123.md, session-local-cache-adr-2026-11-22.md, session-local-cache-adr-2026-11-20.md, network-investigation-2026-11-21.md, system-health-anomalies-2026-11-09.md, container-tools-setup-2026-11-21.md",
+    "評価クエリは qrels.json（schema_version=1）から読み込み",
+    "簡易指標は 6 クエリの any-match、held-out は 9 クエリの正解ラベル付き",
+    "コーパスは config.COLLECTION（環境変数 RAG_COLLECTION で上書き）に依存",
+    "レイテンシはウォームアップ1回＋10回計測（RAG_EVAL_REPEAT で変更可能）",
+    "再現メタ情報: embed_model=qwen2.5:3b chat_model=qwen2.5:3b vector_size=2048 corpus_files=6 corpus_sha256=27b7581ba0b29c8b31449968fba1d0e4cb3bf7d01e28cff3df7f9b7fdd12de4f"
+  ],
+  "summary": {
+    "dense": {
+      "cases": 6,
+      "successes": 6,
+      "source_keyword_hit_at3": 0.1667,
+      "content_keyword_hit_all_hits": 0.1667,
+      "avg_distinct_source_ratio_at3": 0.3889,
+      "avg_latency_sec": 0.179311,
+      "latency_stats": {
+        "count": 60,
+        "avg": 0.179312,
+        "median": 0.177574,
+        "min": 0.151074,
+        "max": 0.221775,
+        "stdev": 0.017251
+      },
+      "avg_hits": 10.0,
+      "errors": 0
+    },
+    "keyword": {
+      "cases": 6,
+      "successes": 6,
+      "source_keyword_hit_at3": 0.1667,
+      "content_keyword_hit_all_hits": 0.1667,
+      "avg_distinct_source_ratio_at3": 0.3333,
+      "avg_latency_sec": 0.041268,
+      "latency_stats": {
+        "count": 60,
+        "avg": 0.041268,
+        "median": 0.043049,
+        "min": 0.003454,
+        "max": 0.044877,
+        "stdev": 0.008663
+      },
+      "avg_hits": 4.67,
+      "errors": 0
+    },
+    "hybrid": {
+      "cases": 6,
+      "successes": 6,
+      "source_keyword_hit_at3": 0.1667,
+      "content_keyword_hit_all_hits": 0.3333,
+      "avg_distinct_source_ratio_at3": 0.5555,
+      "avg_latency_sec": 0.216995,
+      "latency_stats": {
+        "count": 60,
+        "avg": 0.216995,
+        "median": 0.224074,
+        "min": 0.1674,
+        "max": 0.263296,
+        "stdev": 0.020755
+      },
+      "avg_hits": 10.0,
+      "errors": 0
+    },
+    "hybrid-rerank": {
+      "cases": 6,
+      "successes": 6,
+      "source_keyword_hit_at3": 0.1667,
+      "content_keyword_hit_all_hits": 0.3333,
+      "avg_distinct_source_ratio_at3": 0.6667,
+      "avg_latency_sec": 7.171518,
+      "latency_stats": {
+        "count": 60,
+        "avg": 7.171518,
+        "median": 7.050868,
+        "min": 6.422771,
+        "max": 8.155586,
+        "stdev": 0.44902
+      },
+      "avg_hits": 10.0,
+      "errors": 0
+    }
+  },
+  "results": [
+    {
+      "query": "DSH 起動トークンの取得方法",
+      "expected": [
+        "token",
+        "起動トークン",
+        "journalctl"
+      ],
+      "mode": "dense",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "token"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md"
+        ],
+        "unique_source_count": 1,
+        "unique_ratio": 0.3333
+      },
+      "latency_sec": 0.18967,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.18967,
+        "median": 0.190746,
+        "min": 0.173497,
+        "max": 0.204203,
+        "stdev": 0.010714,
+        "samples": [
+          0.203573,
+          0.193027,
+          0.200919,
+          0.204203,
+          0.188465,
+          0.179627,
+          0.194645,
+          0.180942,
+          0.173497,
+          0.177806
+        ],
+        "cold_latency_sec": 0.203896
+      },
+      "call": "search(query=..., mode='dense', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "DSH 起動トークンの取得方法",
+      "expected": [
+        "token",
+        "起動トークン",
+        "journalctl"
+      ],
+      "mode": "keyword",
+      "hits": 0,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": false,
+      "matched_content_keywords": [],
+      "unit_uniqueness": {
+        "top3_sources": [],
+        "unique_source_count": 0,
+        "unique_ratio": 0.0
+      },
+      "latency_sec": 0.043286,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.043286,
+        "median": 0.043139,
+        "min": 0.042033,
+        "max": 0.044093,
+        "stdev": 0.000606,
+        "samples": [
+          0.043019,
+          0.043151,
+          0.042835,
+          0.043008,
+          0.043127,
+          0.043798,
+          0.04404,
+          0.044093,
+          0.043758,
+          0.042033
+        ],
+        "cold_latency_sec": 0.043184
+      },
+      "call": "search(query=..., mode='keyword', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "DSH 起動トークンの取得方法",
+      "expected": [
+        "token",
+        "起動トークン",
+        "journalctl"
+      ],
+      "mode": "hybrid",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "token"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md"
+        ],
+        "unique_source_count": 1,
+        "unique_ratio": 0.3333
+      },
+      "latency_sec": 0.218699,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.218699,
+        "median": 0.221515,
+        "min": 0.2069,
+        "max": 0.228962,
+        "stdev": 0.007756,
+        "samples": [
+          0.224119,
+          0.2069,
+          0.228962,
+          0.206936,
+          0.210162,
+          0.215932,
+          0.224886,
+          0.221983,
+          0.221047,
+          0.226059
+        ],
+        "cold_latency_sec": 0.238875
+      },
+      "call": "search(query=..., mode='hybrid', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "DSH 起動トークンの取得方法",
+      "expected": [
+        "token",
+        "起動トークン",
+        "journalctl"
+      ],
+      "mode": "hybrid-rerank",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "token"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md"
+        ],
+        "unique_source_count": 2,
+        "unique_ratio": 0.6667
+      },
+      "latency_sec": 6.900805,
+      "latency_stats": {
+        "count": 10,
+        "avg": 6.900805,
+        "median": 6.867062,
+        "min": 6.675664,
+        "max": 7.210524,
+        "stdev": 0.130178,
+        "samples": [
+          6.836621,
+          6.962216,
+          6.847916,
+          6.837432,
+          6.884781,
+          6.947149,
+          6.956406,
+          7.210524,
+          6.675664,
+          6.849343
+        ],
+        "cold_latency_sec": 6.794048
+      },
+      "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "パスキー sudo の使い方",
+      "expected": [
+        "sudo",
+        "passkey",
+        "auth"
+      ],
+      "mode": "dense",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": false,
+      "matched_content_keywords": [],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md"
+        ],
+        "unique_source_count": 1,
+        "unique_ratio": 0.3333
+      },
+      "latency_sec": 0.16415,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.16415,
+        "median": 0.165037,
+        "min": 0.151074,
+        "max": 0.183829,
+        "stdev": 0.00891,
+        "samples": [
+          0.166234,
+          0.155063,
+          0.168275,
+          0.160618,
+          0.170775,
+          0.165029,
+          0.183829,
+          0.165044,
+          0.155559,
+          0.151074
+        ],
+        "cold_latency_sec": 0.184432
+      },
+      "call": "search(query=..., mode='dense', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "パスキー sudo の使い方",
+      "expected": [
+        "sudo",
+        "passkey",
+        "auth"
+      ],
+      "mode": "keyword",
+      "hits": 0,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": false,
+      "matched_content_keywords": [],
+      "unit_uniqueness": {
+        "top3_sources": [],
+        "unique_source_count": 0,
+        "unique_ratio": 0.0
+      },
+      "latency_sec": 0.043286,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.043286,
+        "median": 0.04309,
+        "min": 0.042782,
+        "max": 0.044041,
+        "stdev": 0.000463,
+        "samples": [
+          0.044041,
+          0.042791,
+          0.043299,
+          0.042782,
+          0.042923,
+          0.043989,
+          0.043136,
+          0.043043,
+          0.04383,
+          0.043027
+        ],
+        "cold_latency_sec": 0.042367
+      },
+      "call": "search(query=..., mode='keyword', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "パスキー sudo の使い方",
+      "expected": [
+        "sudo",
+        "passkey",
+        "auth"
+      ],
+      "mode": "hybrid",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": false,
+      "matched_content_keywords": [],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md"
+        ],
+        "unique_source_count": 1,
+        "unique_ratio": 0.3333
+      },
+      "latency_sec": 0.1842,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.1842,
+        "median": 0.181027,
+        "min": 0.178042,
+        "max": 0.195017,
+        "stdev": 0.005906,
+        "samples": [
+          0.192907,
+          0.185191,
+          0.180895,
+          0.179868,
+          0.180165,
+          0.178818,
+          0.178042,
+          0.181159,
+          0.189941,
+          0.195017
+        ],
+        "cold_latency_sec": 0.181963
+      },
+      "call": "search(query=..., mode='hybrid', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "パスキー sudo の使い方",
+      "expected": [
+        "sudo",
+        "passkey",
+        "auth"
+      ],
+      "mode": "hybrid-rerank",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": false,
+      "matched_content_keywords": [],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md"
+        ],
+        "unique_source_count": 1,
+        "unique_ratio": 0.3333
+      },
+      "latency_sec": 7.378777,
+      "latency_stats": {
+        "count": 10,
+        "avg": 7.378777,
+        "median": 7.365707,
+        "min": 6.925342,
+        "max": 7.94145,
+        "stdev": 0.337653,
+        "samples": [
+          7.590371,
+          7.94145,
+          7.871318,
+          6.925342,
+          7.313073,
+          7.452552,
+          7.021432,
+          7.387155,
+          7.34426,
+          6.940816
+        ],
+        "cold_latency_sec": 7.339535
+      },
+      "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "Qdrant と PostgreSQL の常駐構成",
+      "expected": [
+        "qdrant",
+        "postgresql",
+        "jarvis"
+      ],
+      "mode": "dense",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": false,
+      "matched_content_keywords": [],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md"
+        ],
+        "unique_source_count": 1,
+        "unique_ratio": 0.3333
+      },
+      "latency_sec": 0.183043,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.183043,
+        "median": 0.182022,
+        "min": 0.174316,
+        "max": 0.197395,
+        "stdev": 0.006372,
+        "samples": [
+          0.189394,
+          0.197395,
+          0.18006,
+          0.18625,
+          0.183842,
+          0.181703,
+          0.174316,
+          0.178396,
+          0.176731,
+          0.18234
+        ],
+        "cold_latency_sec": 0.177794
+      },
+      "call": "search(query=..., mode='dense', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "Qdrant と PostgreSQL の常駐構成",
+      "expected": [
+        "qdrant",
+        "postgresql",
+        "jarvis"
+      ],
+      "mode": "keyword",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": false,
+      "matched_content_keywords": [],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md"
+        ],
+        "unique_source_count": 3,
+        "unique_ratio": 1.0
+      },
+      "latency_sec": 0.043399,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.043399,
+        "median": 0.043052,
+        "min": 0.042956,
+        "max": 0.044877,
+        "stdev": 0.000628,
+        "samples": [
+          0.043066,
+          0.043067,
+          0.044877,
+          0.044077,
+          0.043015,
+          0.042987,
+          0.043914,
+          0.042995,
+          0.042956,
+          0.043038
+        ],
+        "cold_latency_sec": 0.044389
+      },
+      "call": "search(query=..., mode='keyword', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "Qdrant と PostgreSQL の常駐構成",
+      "expected": [
+        "qdrant",
+        "postgresql",
+        "jarvis"
+      ],
+      "mode": "hybrid",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": false,
+      "matched_content_keywords": [],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md"
+        ],
+        "unique_source_count": 3,
+        "unique_ratio": 1.0
+      },
+      "latency_sec": 0.22489,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.22489,
+        "median": 0.227361,
+        "min": 0.187935,
+        "max": 0.245725,
+        "stdev": 0.015178,
+        "samples": [
+          0.224028,
+          0.224288,
+          0.228816,
+          0.245725,
+          0.209928,
+          0.236201,
+          0.232052,
+          0.225907,
+          0.23402,
+          0.187935
+        ],
+        "cold_latency_sec": 0.222907
+      },
+      "call": "search(query=..., mode='hybrid', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "Qdrant と PostgreSQL の常駐構成",
+      "expected": [
+        "qdrant",
+        "postgresql",
+        "jarvis"
+      ],
+      "mode": "hybrid-rerank",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": false,
+      "matched_content_keywords": [],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md"
+        ],
+        "unique_source_count": 3,
+        "unique_ratio": 1.0
+      },
+      "latency_sec": 6.632954,
+      "latency_stats": {
+        "count": 10,
+        "avg": 6.632954,
+        "median": 6.63143,
+        "min": 6.422771,
+        "max": 6.80544,
+        "stdev": 0.099466,
+        "samples": [
+          6.558701,
+          6.73314,
+          6.663829,
+          6.58318,
+          6.617629,
+          6.700166,
+          6.599455,
+          6.645231,
+          6.422771,
+          6.80544
+        ],
+        "cold_latency_sec": 6.593367
+      },
+      "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "DSH のセッション履歴が UI に表示されない",
+      "expected": [
+        "workspace",
+        "session",
+        "dsh"
+      ],
+      "mode": "dense",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": false,
+      "matched_content_keywords": [],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md"
+        ],
+        "unique_source_count": 2,
+        "unique_ratio": 0.6667
+      },
+      "latency_sec": 0.163529,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.163529,
+        "median": 0.164448,
+        "min": 0.154712,
+        "max": 0.171937,
+        "stdev": 0.005175,
+        "samples": [
+          0.167912,
+          0.168516,
+          0.163989,
+          0.160153,
+          0.158866,
+          0.154712,
+          0.166406,
+          0.157893,
+          0.171937,
+          0.164907
+        ],
+        "cold_latency_sec": 0.182465
+      },
+      "call": "search(query=..., mode='dense', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "DSH のセッション履歴が UI に表示されない",
+      "expected": [
+        "workspace",
+        "session",
+        "dsh"
+      ],
+      "mode": "keyword",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": false,
+      "matched_content_keywords": [],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md"
+        ],
+        "unique_source_count": 2,
+        "unique_ratio": 0.6667
+      },
+      "latency_sec": 0.042989,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.042989,
+        "median": 0.042992,
+        "min": 0.041967,
+        "max": 0.043987,
+        "stdev": 0.000617,
+        "samples": [
+          0.042957,
+          0.042993,
+          0.043987,
+          0.042993,
+          0.042971,
+          0.043054,
+          0.041967,
+          0.04299,
+          0.042053,
+          0.043927
+        ],
+        "cold_latency_sec": 0.042606
+      },
+      "call": "search(query=..., mode='keyword', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "DSH のセッション履歴が UI に表示されない",
+      "expected": [
+        "workspace",
+        "session",
+        "dsh"
+      ],
+      "mode": "hybrid",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": false,
+      "matched_content_keywords": [],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md"
+        ],
+        "unique_source_count": 2,
+        "unique_ratio": 0.6667
+      },
+      "latency_sec": 0.218904,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.218904,
+        "median": 0.224973,
+        "min": 0.1674,
+        "max": 0.239074,
+        "stdev": 0.020464,
+        "samples": [
+          0.1674,
+          0.201614,
+          0.220035,
+          0.223926,
+          0.226019,
+          0.22709,
+          0.210861,
+          0.236046,
+          0.236978,
+          0.239074
+        ],
+        "cold_latency_sec": 0.203908
+      },
+      "call": "search(query=..., mode='hybrid', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "DSH のセッション履歴が UI に表示されない",
+      "expected": [
+        "workspace",
+        "session",
+        "dsh"
+      ],
+      "mode": "hybrid-rerank",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": false,
+      "matched_content_keywords": [],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md"
+        ],
+        "unique_source_count": 2,
+        "unique_ratio": 0.6667
+      },
+      "latency_sec": 7.956013,
+      "latency_stats": {
+        "count": 10,
+        "avg": 7.956013,
+        "median": 7.956539,
+        "min": 7.803155,
+        "max": 8.155586,
+        "stdev": 0.088623,
+        "samples": [
+          7.952125,
+          7.803155,
+          7.943023,
+          8.155586,
+          7.965888,
+          7.849281,
+          7.99442,
+          7.960953,
+          7.937087,
+          7.998611
+        ],
+        "cold_latency_sec": 7.930318
+      },
+      "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "Caddy を再作成して 502 を解消する手順",
+      "expected": [
+        "caddy",
+        "trial",
+        "502"
+      ],
+      "mode": "dense",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": false,
+      "matched_content_keywords": [],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md"
+        ],
+        "unique_source_count": 1,
+        "unique_ratio": 0.3333
+      },
+      "latency_sec": 0.205513,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.205513,
+        "median": 0.202056,
+        "min": 0.193363,
+        "max": 0.221775,
+        "stdev": 0.009094,
+        "samples": [
+          0.201214,
+          0.208065,
+          0.211446,
+          0.196556,
+          0.202536,
+          0.198777,
+          0.201575,
+          0.193363,
+          0.219825,
+          0.221775
+        ],
+        "cold_latency_sec": 0.205638
+      },
+      "call": "search(query=..., mode='dense', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "Caddy を再作成して 502 を解消する手順",
+      "expected": [
+        "caddy",
+        "trial",
+        "502"
+      ],
+      "mode": "keyword",
+      "hits": 0,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": false,
+      "matched_content_keywords": [],
+      "unit_uniqueness": {
+        "top3_sources": [],
+        "unique_source_count": 0,
+        "unique_ratio": 0.0
+      },
+      "latency_sec": 0.03124,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.03124,
+        "median": 0.043007,
+        "min": 0.003454,
+        "max": 0.043438,
+        "stdev": 0.018107,
+        "samples": [
+          0.043163,
+          0.042932,
+          0.003682,
+          0.003609,
+          0.042815,
+          0.04312,
+          0.003454,
+          0.043438,
+          0.043099,
+          0.043083
+        ],
+        "cold_latency_sec": 0.002988
+      },
+      "call": "search(query=..., mode='keyword', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "Caddy を再作成して 502 を解消する手順",
+      "expected": [
+        "caddy",
+        "trial",
+        "502"
+      ],
+      "mode": "hybrid",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": false,
+      "matched_content_keywords": [],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md"
+        ],
+        "unique_source_count": 1,
+        "unique_ratio": 0.3333
+      },
+      "latency_sec": 0.239292,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.239292,
+        "median": 0.237704,
+        "min": 0.226894,
+        "max": 0.263296,
+        "stdev": 0.010462,
+        "samples": [
+          0.243265,
+          0.239428,
+          0.263296,
+          0.249812,
+          0.232224,
+          0.230007,
+          0.241894,
+          0.226894,
+          0.235981,
+          0.230118
+        ],
+        "cold_latency_sec": 0.24257
+      },
+      "call": "search(query=..., mode='hybrid', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "Caddy を再作成して 502 を解消する手順",
+      "expected": [
+        "caddy",
+        "trial",
+        "502"
+      ],
+      "mode": "hybrid-rerank",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": false,
+      "matched_content_keywords": [],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md"
+        ],
+        "unique_source_count": 2,
+        "unique_ratio": 0.6667
+      },
+      "latency_sec": 7.025742,
+      "latency_stats": {
+        "count": 10,
+        "avg": 7.025742,
+        "median": 7.028838,
+        "min": 6.836293,
+        "max": 7.190986,
+        "stdev": 0.090547,
+        "samples": [
+          7.101089,
+          6.836293,
+          7.044939,
+          6.965539,
+          7.024955,
+          7.096442,
+          7.190986,
+          6.994195,
+          6.970261,
+          7.032721
+        ],
+        "cold_latency_sec": 7.22428
+      },
+      "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "RAG の検索モードを比較する方法",
+      "expected": [
+        "rag",
+        "hybrid",
+        "rerank"
+      ],
+      "mode": "dense",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "rag"
+      ],
+      "content_recall": false,
+      "matched_content_keywords": [],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md"
+        ],
+        "unique_source_count": 1,
+        "unique_ratio": 0.3333
+      },
+      "latency_sec": 0.169964,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.169964,
+        "median": 0.171751,
+        "min": 0.154893,
+        "max": 0.180989,
+        "stdev": 0.008203,
+        "samples": [
+          0.171827,
+          0.180989,
+          0.173503,
+          0.179481,
+          0.171676,
+          0.166692,
+          0.177343,
+          0.159347,
+          0.154893,
+          0.16389
+        ],
+        "cold_latency_sec": 0.186545
+      },
+      "call": "search(query=..., mode='dense', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "RAG の検索モードを比較する方法",
+      "expected": [
+        "rag",
+        "hybrid",
+        "rerank"
+      ],
+      "mode": "keyword",
+      "hits": 8,
+      "recall": true,
+      "matched_keywords": [
+        "rag"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "rag"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md"
+        ],
+        "unique_source_count": 1,
+        "unique_ratio": 0.3333
+      },
+      "latency_sec": 0.043407,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.043407,
+        "median": 0.043096,
+        "min": 0.042928,
+        "max": 0.044013,
+        "stdev": 0.000477,
+        "samples": [
+          0.043953,
+          0.044008,
+          0.043976,
+          0.044013,
+          0.043101,
+          0.042951,
+          0.042928,
+          0.043034,
+          0.04301,
+          0.04309
+        ],
+        "cold_latency_sec": 0.044356
+      },
+      "call": "search(query=..., mode='keyword', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "RAG の検索モードを比較する方法",
+      "expected": [
+        "rag",
+        "hybrid",
+        "rerank"
+      ],
+      "mode": "hybrid",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "rag"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "rag"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md"
+        ],
+        "unique_source_count": 2,
+        "unique_ratio": 0.6667
+      },
+      "latency_sec": 0.215984,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.215984,
+        "median": 0.216462,
+        "min": 0.202914,
+        "max": 0.22978,
+        "stdev": 0.009404,
+        "samples": [
+          0.214063,
+          0.202914,
+          0.218861,
+          0.2057,
+          0.20427,
+          0.22522,
+          0.209958,
+          0.224923,
+          0.224155,
+          0.22978
+        ],
+        "cold_latency_sec": 0.218828
+      },
+      "call": "search(query=..., mode='hybrid', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "RAG の検索モードを比較する方法",
+      "expected": [
+        "rag",
+        "hybrid",
+        "rerank"
+      ],
+      "mode": "hybrid-rerank",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "rag"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "rag"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md"
+        ],
+        "unique_source_count": 2,
+        "unique_ratio": 0.6667
+      },
+      "latency_sec": 7.134817,
+      "latency_stats": {
+        "count": 10,
+        "avg": 7.134817,
+        "median": 7.10959,
+        "min": 7.039894,
+        "max": 7.341747,
+        "stdev": 0.092124,
+        "samples": [
+          7.056798,
+          7.11533,
+          7.083248,
+          7.341747,
+          7.039894,
+          7.084001,
+          7.131585,
+          7.110981,
+          7.276387,
+          7.108198
+        ],
+        "cold_latency_sec": 7.378337
+      },
+      "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+      "error": null
+    }
+  ],
+  "heldout": {
+    "definitions": {
+      "recall_at_k": "各クエリについて、検索結果上位 k 件の source に relevant_sources のいずれかが含まれれば 1・否則 0 とし、全 held-out クエリで平均（query-level hit@k）。正解ファイル全体のうち何件回収したかという集合 recall ではない。",
+      "ndcg_at_k": "gain=1 / discount=log2(rank+1) の DCG を上位 k 件で計算し、IDCG=sum_{r=1..min(|relevant|,k)} 1/log2(r+1) で割ってクエリ平均。同一ファイルの複数チャンクは最上位の1回だけ計上する。",
+      "label_matching": "正解は passkey-gateway/docs 内の実在ファイル名。ingest.py の source はリポジトリルート相対パスなので、完全一致・相対パス suffix・basename で照合する。",
+      "failure_policy": "検索失敗ケースは 0 として分母に残す（生存者バイアス回避）。",
+      "k_scope": "上位 k 件は source 非空の結果に対して適用する（query.py の hits は常に source を持つため実害なし）。",
+      "preflight": "実行前に全 relevant_sources が config.CORPUS_DIR に実在するか確認し、欠落は notes に記録する。",
+      "reuse_policy": "--heldout-only は既存 JSON の collection / corpus_sha256 / corpus_file_count / embed_model / chat_model / vector_size / top_k / schema_version / qrels_label / qrels_schema_version が現行と一致するときのみ簡易結果を再利用する（欠落キーは再計測の対象）。"
+    },
+    "recall_k": [
+      1,
+      3,
+      5,
+      10
+    ],
+    "ndcg_k": [
+      3,
+      10
+    ],
+    "queries": [
+      {
+        "id": "h01-tooling-research",
+        "query": "DSH opencode VSCode Zed ツール 調査 比較 2026-11-09",
+        "relevant_sources": [
+          "tooling-research-2026-11-09.md"
+        ]
+      },
+      {
+        "id": "h02-plugin-markets",
+        "query": "DSH プラグイン マーケット index 調査 結果",
+        "relevant_sources": [
+          "dsh-plugin-markets-research-2026-11-26.md"
+        ]
+      },
+      {
+        "id": "h03-okf-v03",
+        "query": "OKF v0.3 アップグレード 提案 メタデータ",
+        "relevant_sources": [
+          "okf-v03-upgrade-proposal-2026-11-25.md"
+        ]
+      },
+      {
+        "id": "h04-home-consolidation",
+        "query": "DSH_HOME 統合 準備 ディレクトリ バックアップ rsync",
+        "relevant_sources": [
+          "dsh-home-consolidation-prep-2026-11-25.md"
+        ]
+      },
+      {
+        "id": "h05-fs-ext4",
+        "query": "ext4 ファイルシステム 選定 バックアップ レポート",
+        "relevant_sources": [
+          "fs-selection-ext4-report-20261123.md"
+        ]
+      },
+      {
+        "id": "h06-session-cache-adr",
+        "query": "セッション ローカル キャッシュ ADR 差分取得 cursor 決定",
+        "relevant_sources": [
+          "session-local-cache-adr-2026-11-22.md",
+          "session-local-cache-adr-2026-11-20.md"
+        ]
+      },
+      {
+        "id": "h07-network-investigation",
+        "query": "ネットワーク 調査 Tailscale 到達性 結果",
+        "relevant_sources": [
+          "network-investigation-2026-11-21.md"
+        ]
+      },
+      {
+        "id": "h08-health-report",
+        "query": "健康 点検 anomalies journal 検出 異常 HDD pending sectors",
+        "relevant_sources": [
+          "system-health-anomalies-2026-11-09.md"
+        ]
+      },
+      {
+        "id": "h09-container-tools",
+        "query": "kiri docker コンテナ ツール セットアップ 権限",
+        "relevant_sources": [
+          "container-tools-setup-2026-11-21.md"
+        ]
+      }
+    ],
+    "summary": {
+      "dense": {
+        "queries": 9,
+        "successes": 9,
+        "errors": 0,
+        "recall_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_stats": {
+          "count": 90,
+          "avg": 0.199009,
+          "median": 0.197598,
+          "min": 0.173736,
+          "max": 0.232032,
+          "stdev": 0.012972
+        }
+      },
+      "keyword": {
+        "queries": 9,
+        "successes": 9,
+        "errors": 0,
+        "recall_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_stats": {
+          "count": 90,
+          "avg": 0.042877,
+          "median": 0.043081,
+          "min": 0.003506,
+          "max": 0.045802,
+          "stdev": 0.004229
+        }
+      },
+      "hybrid": {
+        "queries": 9,
+        "successes": 9,
+        "errors": 0,
+        "recall_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_stats": {
+          "count": 90,
+          "avg": 0.240128,
+          "median": 0.237005,
+          "min": 0.221041,
+          "max": 0.300024,
+          "stdev": 0.013834
+        }
+      },
+      "hybrid-rerank": {
+        "queries": 9,
+        "successes": 9,
+        "errors": 0,
+        "recall_at": {
+          "1": 0.0,
+          "3": 0.0,
+          "5": 0.0,
+          "10": 0.0
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_stats": {
+          "count": 90,
+          "avg": 7.976989,
+          "median": 7.698947,
+          "min": 6.966477,
+          "max": 9.378126,
+          "stdev": 0.703861
+        }
+      }
+    },
+    "results": [
+      {
+        "id": "h01-tooling-research",
+        "query": "DSH opencode VSCode Zed ツール 調査 比較 2026-11-09",
+        "relevant_sources": [
+          "tooling-research-2026-11-09.md"
+        ],
+        "mode": "dense",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 0.213933,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.213933,
+          "median": 0.213634,
+          "min": 0.206218,
+          "max": 0.222847,
+          "stdev": 0.005822,
+          "samples": [
+            0.218645,
+            0.215385,
+            0.222847,
+            0.220936,
+            0.210095,
+            0.206643,
+            0.21853,
+            0.206218,
+            0.208153,
+            0.211882
+          ],
+          "cold_latency_sec": 0.237435
+        },
+        "call": "search(query=..., mode='dense', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h01-tooling-research",
+        "query": "DSH opencode VSCode Zed ツール 調査 比較 2026-11-09",
+        "relevant_sources": [
+          "tooling-research-2026-11-09.md"
+        ],
+        "mode": "keyword",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0001-use-system-webview.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0001-use-system-webview.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 0.043172,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.043172,
+          "median": 0.043051,
+          "min": 0.042749,
+          "max": 0.043947,
+          "stdev": 0.000397,
+          "samples": [
+            0.043947,
+            0.042827,
+            0.043125,
+            0.043903,
+            0.043139,
+            0.042962,
+            0.042749,
+            0.042976,
+            0.042938,
+            0.043154
+          ],
+          "cold_latency_sec": 0.044356
+        },
+        "call": "search(query=..., mode='keyword', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h01-tooling-research",
+        "query": "DSH opencode VSCode Zed ツール 調査 比較 2026-11-09",
+        "relevant_sources": [
+          "tooling-research-2026-11-09.md"
+        ],
+        "mode": "hybrid",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0001-use-system-webview.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 0.266807,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.266807,
+          "median": 0.264456,
+          "min": 0.249987,
+          "max": 0.300024,
+          "stdev": 0.014245,
+          "samples": [
+            0.249987,
+            0.255022,
+            0.265023,
+            0.25699,
+            0.259065,
+            0.263889,
+            0.266998,
+            0.300024,
+            0.285117,
+            0.265959
+          ],
+          "cold_latency_sec": 0.261737
+        },
+        "call": "search(query=..., mode='hybrid', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h01-tooling-research",
+        "query": "DSH opencode VSCode Zed ツール 調査 比較 2026-11-09",
+        "relevant_sources": [
+          "tooling-research-2026-11-09.md"
+        ],
+        "mode": "hybrid-rerank",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0001-use-system-webview.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 7.667504,
+        "latency_stats": {
+          "count": 10,
+          "avg": 7.667504,
+          "median": 7.586446,
+          "min": 7.480152,
+          "max": 7.957756,
+          "stdev": 0.18245,
+          "samples": [
+            7.494752,
+            7.501877,
+            7.556477,
+            7.511209,
+            7.480152,
+            7.616414,
+            7.852639,
+            7.766371,
+            7.937396,
+            7.957756
+          ],
+          "cold_latency_sec": 7.59622
+        },
+        "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h02-plugin-markets",
+        "query": "DSH プラグイン マーケット index 調査 結果",
+        "relevant_sources": [
+          "dsh-plugin-markets-research-2026-11-26.md"
+        ],
+        "mode": "dense",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 0.192338,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.192338,
+          "median": 0.192884,
+          "min": 0.180893,
+          "max": 0.20503,
+          "stdev": 0.00785,
+          "samples": [
+            0.197943,
+            0.192422,
+            0.20503,
+            0.193969,
+            0.203909,
+            0.184932,
+            0.193346,
+            0.187199,
+            0.183742,
+            0.180893
+          ],
+          "cold_latency_sec": 0.220107
+        },
+        "call": "search(query=..., mode='dense', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h02-plugin-markets",
+        "query": "DSH プラグイン マーケット index 調査 結果",
+        "relevant_sources": [
+          "dsh-plugin-markets-research-2026-11-26.md"
+        ],
+        "mode": "keyword",
+        "retrieval_k": 10,
+        "hits": 5,
+        "sources": [
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 0.043312,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.043312,
+          "median": 0.043183,
+          "min": 0.042807,
+          "max": 0.044009,
+          "stdev": 0.00041,
+          "samples": [
+            0.042951,
+            0.043121,
+            0.043013,
+            0.043984,
+            0.044009,
+            0.042807,
+            0.043246,
+            0.043023,
+            0.043275,
+            0.043688
+          ],
+          "cold_latency_sec": 0.043238
+        },
+        "call": "search(query=..., mode='keyword', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h02-plugin-markets",
+        "query": "DSH プラグイン マーケット index 調査 結果",
+        "relevant_sources": [
+          "dsh-plugin-markets-research-2026-11-26.md"
+        ],
+        "mode": "hybrid",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 0.232503,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.232503,
+          "median": 0.230556,
+          "min": 0.225093,
+          "max": 0.239019,
+          "stdev": 0.004929,
+          "samples": [
+            0.225093,
+            0.22993,
+            0.231181,
+            0.237912,
+            0.228957,
+            0.239019,
+            0.237256,
+            0.238775,
+            0.227912,
+            0.228989
+          ],
+          "cold_latency_sec": 0.229473
+        },
+        "call": "search(query=..., mode='hybrid', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h02-plugin-markets",
+        "query": "DSH プラグイン マーケット index 調査 結果",
+        "relevant_sources": [
+          "dsh-plugin-markets-research-2026-11-26.md"
+        ],
+        "mode": "hybrid-rerank",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 7.642455,
+        "latency_stats": {
+          "count": 10,
+          "avg": 7.642455,
+          "median": 7.619662,
+          "min": 7.457303,
+          "max": 7.875184,
+          "stdev": 0.14329,
+          "samples": [
+            7.457303,
+            7.77334,
+            7.624752,
+            7.509616,
+            7.460606,
+            7.875184,
+            7.76751,
+            7.794708,
+            7.614573,
+            7.546958
+          ],
+          "cold_latency_sec": 7.533933
+        },
+        "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h03-okf-v03",
+        "query": "OKF v0.3 アップグレード 提案 メタデータ",
+        "relevant_sources": [
+          "okf-v03-upgrade-proposal-2026-11-25.md"
+        ],
+        "mode": "dense",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0001-use-system-webview.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 0.185904,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.185904,
+          "median": 0.185513,
+          "min": 0.173736,
+          "max": 0.194414,
+          "stdev": 0.005956,
+          "samples": [
+            0.188452,
+            0.184898,
+            0.1929,
+            0.178444,
+            0.194414,
+            0.184849,
+            0.173736,
+            0.186128,
+            0.190362,
+            0.184861
+          ],
+          "cold_latency_sec": 0.201717
+        },
+        "call": "search(query=..., mode='dense', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h03-okf-v03",
+        "query": "OKF v0.3 アップグレード 提案 メタデータ",
+        "relevant_sources": [
+          "okf-v03-upgrade-proposal-2026-11-25.md"
+        ],
+        "mode": "keyword",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0001-use-system-webview.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 0.043507,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.043507,
+          "median": 0.043226,
+          "min": 0.042785,
+          "max": 0.045049,
+          "stdev": 0.000664,
+          "samples": [
+            0.04317,
+            0.043968,
+            0.043986,
+            0.045049,
+            0.042785,
+            0.043012,
+            0.043282,
+            0.042903,
+            0.043839,
+            0.043076
+          ],
+          "cold_latency_sec": 0.043007
+        },
+        "call": "search(query=..., mode='keyword', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h03-okf-v03",
+        "query": "OKF v0.3 アップグレード 提案 メタデータ",
+        "relevant_sources": [
+          "okf-v03-upgrade-proposal-2026-11-25.md"
+        ],
+        "mode": "hybrid",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0001-use-system-webview.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 0.236251,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.236251,
+          "median": 0.236592,
+          "min": 0.222995,
+          "max": 0.249836,
+          "stdev": 0.008828,
+          "samples": [
+            0.228691,
+            0.249836,
+            0.238229,
+            0.238897,
+            0.234955,
+            0.227094,
+            0.245071,
+            0.247823,
+            0.228916,
+            0.222995
+          ],
+          "cold_latency_sec": 0.235044
+        },
+        "call": "search(query=..., mode='hybrid', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h03-okf-v03",
+        "query": "OKF v0.3 アップグレード 提案 メタデータ",
+        "relevant_sources": [
+          "okf-v03-upgrade-proposal-2026-11-25.md"
+        ],
+        "mode": "hybrid-rerank",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0001-use-system-webview.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 7.75844,
+        "latency_stats": {
+          "count": 10,
+          "avg": 7.75844,
+          "median": 7.704235,
+          "min": 7.557144,
+          "max": 8.053774,
+          "stdev": 0.149697,
+          "samples": [
+            7.684062,
+            7.900787,
+            7.557144,
+            8.053774,
+            7.805125,
+            7.704338,
+            7.910466,
+            7.570812,
+            7.693763,
+            7.704131
+          ],
+          "cold_latency_sec": 7.59108
+        },
+        "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h04-home-consolidation",
+        "query": "DSH_HOME 統合 準備 ディレクトリ バックアップ rsync",
+        "relevant_sources": [
+          "dsh-home-consolidation-prep-2026-11-25.md"
+        ],
+        "mode": "dense",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 0.185933,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.185933,
+          "median": 0.183848,
+          "min": 0.179257,
+          "max": 0.197253,
+          "stdev": 0.005603,
+          "samples": [
+            0.193005,
+            0.183589,
+            0.187418,
+            0.184108,
+            0.179257,
+            0.197253,
+            0.182076,
+            0.181226,
+            0.190342,
+            0.181061
+          ],
+          "cold_latency_sec": 0.192527
+        },
+        "call": "search(query=..., mode='dense', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h04-home-consolidation",
+        "query": "DSH_HOME 統合 準備 ディレクトリ バックアップ rsync",
+        "relevant_sources": [
+          "dsh-home-consolidation-prep-2026-11-25.md"
+        ],
+        "mode": "keyword",
+        "retrieval_k": 10,
+        "hits": 3,
+        "sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 0.042595,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.042595,
+          "median": 0.042483,
+          "min": 0.04196,
+          "max": 0.044048,
+          "stdev": 0.000657,
+          "samples": [
+            0.042131,
+            0.044048,
+            0.042836,
+            0.043053,
+            0.042926,
+            0.042989,
+            0.042003,
+            0.04196,
+            0.042012,
+            0.041991
+          ],
+          "cold_latency_sec": 0.042937
+        },
+        "call": "search(query=..., mode='keyword', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h04-home-consolidation",
+        "query": "DSH_HOME 統合 準備 ディレクトリ バックアップ rsync",
+        "relevant_sources": [
+          "dsh-home-consolidation-prep-2026-11-25.md"
+        ],
+        "mode": "hybrid",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 0.234789,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.234789,
+          "median": 0.233924,
+          "min": 0.227938,
+          "max": 0.249765,
+          "stdev": 0.006781,
+          "samples": [
+            0.227938,
+            0.228025,
+            0.234059,
+            0.229101,
+            0.233788,
+            0.229279,
+            0.237798,
+            0.235014,
+            0.243122,
+            0.249765
+          ],
+          "cold_latency_sec": 0.223925
+        },
+        "call": "search(query=..., mode='hybrid', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h04-home-consolidation",
+        "query": "DSH_HOME 統合 準備 ディレクトリ バックアップ rsync",
+        "relevant_sources": [
+          "dsh-home-consolidation-prep-2026-11-25.md"
+        ],
+        "mode": "hybrid-rerank",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 9.034133,
+        "latency_stats": {
+          "count": 10,
+          "avg": 9.034133,
+          "median": 9.010356,
+          "min": 8.807622,
+          "max": 9.32757,
+          "stdev": 0.179316,
+          "samples": [
+            9.087159,
+            9.283183,
+            9.32757,
+            8.881997,
+            9.21498,
+            8.988024,
+            8.807622,
+            8.860421,
+            9.032689,
+            8.857681
+          ],
+          "cold_latency_sec": 8.770885
+        },
+        "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h05-fs-ext4",
+        "query": "ext4 ファイルシステム 選定 バックアップ レポート",
+        "relevant_sources": [
+          "fs-selection-ext4-report-20261123.md"
+        ],
+        "mode": "dense",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 0.198973,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.198973,
+          "median": 0.193331,
+          "min": 0.185683,
+          "max": 0.223227,
+          "stdev": 0.011954,
+          "samples": [
+            0.187933,
+            0.191019,
+            0.191602,
+            0.185683,
+            0.191356,
+            0.213881,
+            0.223227,
+            0.210308,
+            0.199661,
+            0.19506
+          ],
+          "cold_latency_sec": 0.213429
+        },
+        "call": "search(query=..., mode='dense', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h05-fs-ext4",
+        "query": "ext4 ファイルシステム 選定 バックアップ レポート",
+        "relevant_sources": [
+          "fs-selection-ext4-report-20261123.md"
+        ],
+        "mode": "keyword",
+        "retrieval_k": 10,
+        "hits": 3,
+        "sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 0.043084,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.043084,
+          "median": 0.043016,
+          "min": 0.042839,
+          "max": 0.043948,
+          "stdev": 0.000302,
+          "samples": [
+            0.043948,
+            0.042882,
+            0.043085,
+            0.042839,
+            0.043051,
+            0.043161,
+            0.042916,
+            0.043016,
+            0.043016,
+            0.042929
+          ],
+          "cold_latency_sec": 0.043098
+        },
+        "call": "search(query=..., mode='keyword', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h05-fs-ext4",
+        "query": "ext4 ファイルシステム 選定 バックアップ レポート",
+        "relevant_sources": [
+          "fs-selection-ext4-report-20261123.md"
+        ],
+        "mode": "hybrid",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 0.236207,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.236207,
+          "median": 0.233554,
+          "min": 0.228928,
+          "max": 0.261378,
+          "stdev": 0.009331,
+          "samples": [
+            0.228928,
+            0.22911,
+            0.229675,
+            0.261378,
+            0.23291,
+            0.237016,
+            0.24301,
+            0.234886,
+            0.230961,
+            0.234198
+          ],
+          "cold_latency_sec": 0.225762
+        },
+        "call": "search(query=..., mode='hybrid', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h05-fs-ext4",
+        "query": "ext4 ファイルシステム 選定 バックアップ レポート",
+        "relevant_sources": [
+          "fs-selection-ext4-report-20261123.md"
+        ],
+        "mode": "hybrid-rerank",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 7.521428,
+        "latency_stats": {
+          "count": 10,
+          "avg": 7.521428,
+          "median": 7.6107,
+          "min": 7.296711,
+          "max": 7.725071,
+          "stdev": 0.16281,
+          "samples": [
+            7.328721,
+            7.349188,
+            7.296711,
+            7.725071,
+            7.681348,
+            7.627626,
+            7.63818,
+            7.331608,
+            7.593774,
+            7.642057
+          ],
+          "cold_latency_sec": 7.407012
+        },
+        "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h06-session-cache-adr",
+        "query": "セッション ローカル キャッシュ ADR 差分取得 cursor 決定",
+        "relevant_sources": [
+          "session-local-cache-adr-2026-11-22.md",
+          "session-local-cache-adr-2026-11-20.md"
+        ],
+        "mode": "dense",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 0.213603,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.213603,
+          "median": 0.209064,
+          "min": 0.197127,
+          "max": 0.232032,
+          "stdev": 0.012418,
+          "samples": [
+            0.232032,
+            0.205377,
+            0.211708,
+            0.21362,
+            0.206421,
+            0.230155,
+            0.232027,
+            0.202855,
+            0.204704,
+            0.197127
+          ],
+          "cold_latency_sec": 0.254594
+        },
+        "call": "search(query=..., mode='dense', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h06-session-cache-adr",
+        "query": "セッション ローカル キャッシュ ADR 差分取得 cursor 決定",
+        "relevant_sources": [
+          "session-local-cache-adr-2026-11-22.md",
+          "session-local-cache-adr-2026-11-20.md"
+        ],
+        "mode": "keyword",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0001-use-system-webview.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 0.043118,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.043118,
+          "median": 0.043023,
+          "min": 0.042886,
+          "max": 0.043999,
+          "stdev": 0.000307,
+          "samples": [
+            0.042995,
+            0.042983,
+            0.043052,
+            0.043999,
+            0.043075,
+            0.042902,
+            0.042985,
+            0.043205,
+            0.042886,
+            0.043094
+          ],
+          "cold_latency_sec": 0.043072
+        },
+        "call": "search(query=..., mode='keyword', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h06-session-cache-adr",
+        "query": "セッション ローカル キャッシュ ADR 差分取得 cursor 決定",
+        "relevant_sources": [
+          "session-local-cache-adr-2026-11-22.md",
+          "session-local-cache-adr-2026-11-20.md"
+        ],
+        "mode": "hybrid",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 0.233478,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.233478,
+          "median": 0.232894,
+          "min": 0.224029,
+          "max": 0.243957,
+          "stdev": 0.005862,
+          "samples": [
+            0.237783,
+            0.224029,
+            0.229998,
+            0.228023,
+            0.236994,
+            0.239924,
+            0.234026,
+            0.243957,
+            0.228287,
+            0.231762
+          ],
+          "cold_latency_sec": 0.2367
+        },
+        "call": "search(query=..., mode='hybrid', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h06-session-cache-adr",
+        "query": "セッション ローカル キャッシュ ADR 差分取得 cursor 決定",
+        "relevant_sources": [
+          "session-local-cache-adr-2026-11-22.md",
+          "session-local-cache-adr-2026-11-20.md"
+        ],
+        "mode": "hybrid-rerank",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0007-epub-toc-fragments.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 7.23838,
+        "latency_stats": {
+          "count": 10,
+          "avg": 7.23838,
+          "median": 7.224757,
+          "min": 6.966477,
+          "max": 7.479656,
+          "stdev": 0.161772,
+          "samples": [
+            7.241725,
+            6.966477,
+            7.441622,
+            7.387134,
+            7.306636,
+            7.479656,
+            7.160747,
+            7.179517,
+            7.012496,
+            7.20779
+          ],
+          "cold_latency_sec": 7.085395
+        },
+        "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h07-network-investigation",
+        "query": "ネットワーク 調査 Tailscale 到達性 結果",
+        "relevant_sources": [
+          "network-investigation-2026-11-21.md"
+        ],
+        "mode": "dense",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 0.194849,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.194849,
+          "median": 0.193587,
+          "min": 0.186454,
+          "max": 0.217604,
+          "stdev": 0.008667,
+          "samples": [
+            0.190982,
+            0.186752,
+            0.200624,
+            0.217604,
+            0.186454,
+            0.193284,
+            0.19389,
+            0.194671,
+            0.188195,
+            0.196036
+          ],
+          "cold_latency_sec": 0.199687
+        },
+        "call": "search(query=..., mode='dense', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h07-network-investigation",
+        "query": "ネットワーク 調査 Tailscale 到達性 結果",
+        "relevant_sources": [
+          "network-investigation-2026-11-21.md"
+        ],
+        "mode": "keyword",
+        "retrieval_k": 10,
+        "hits": 4,
+        "sources": [
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 0.039184,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.039184,
+          "median": 0.042967,
+          "min": 0.003506,
+          "max": 0.044072,
+          "stdev": 0.0119,
+          "samples": [
+            0.003506,
+            0.0425,
+            0.044072,
+            0.043833,
+            0.042987,
+            0.043003,
+            0.043117,
+            0.042947,
+            0.042944,
+            0.042929
+          ],
+          "cold_latency_sec": 0.043621
+        },
+        "call": "search(query=..., mode='keyword', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h07-network-investigation",
+        "query": "ネットワーク 調査 Tailscale 到達性 結果",
+        "relevant_sources": [
+          "network-investigation-2026-11-21.md"
+        ],
+        "mode": "hybrid",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 0.23293,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.23293,
+          "median": 0.233104,
+          "min": 0.221041,
+          "max": 0.246323,
+          "stdev": 0.008531,
+          "samples": [
+            0.224866,
+            0.221041,
+            0.236138,
+            0.224814,
+            0.230069,
+            0.225043,
+            0.244052,
+            0.236202,
+            0.240746,
+            0.246323
+          ],
+          "cold_latency_sec": 0.234968
+        },
+        "call": "search(query=..., mode='hybrid', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h07-network-investigation",
+        "query": "ネットワーク 調査 Tailscale 到達性 結果",
+        "relevant_sources": [
+          "network-investigation-2026-11-21.md"
+        ],
+        "mode": "hybrid-rerank",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 8.506509,
+        "latency_stats": {
+          "count": 10,
+          "avg": 8.506509,
+          "median": 8.454232,
+          "min": 8.275859,
+          "max": 8.876268,
+          "stdev": 0.176485,
+          "samples": [
+            8.876268,
+            8.659395,
+            8.4229,
+            8.517589,
+            8.468296,
+            8.311929,
+            8.440169,
+            8.397743,
+            8.694945,
+            8.275859
+          ],
+          "cold_latency_sec": 8.527796
+        },
+        "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h08-health-report",
+        "query": "健康 点検 anomalies journal 検出 異常 HDD pending sectors",
+        "relevant_sources": [
+          "system-health-anomalies-2026-11-09.md"
+        ],
+        "mode": "dense",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 0.205108,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.205108,
+          "median": 0.202225,
+          "min": 0.198371,
+          "max": 0.21591,
+          "stdev": 0.006496,
+          "samples": [
+            0.209255,
+            0.204418,
+            0.21591,
+            0.212339,
+            0.199511,
+            0.198951,
+            0.200031,
+            0.198371,
+            0.212956,
+            0.199338
+          ],
+          "cold_latency_sec": 0.195924
+        },
+        "call": "search(query=..., mode='dense', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h08-health-report",
+        "query": "健康 点検 anomalies journal 検出 異常 HDD pending sectors",
+        "relevant_sources": [
+          "system-health-anomalies-2026-11-09.md"
+        ],
+        "mode": "keyword",
+        "retrieval_k": 10,
+        "hits": 1,
+        "sources": [
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 0.044163,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.044163,
+          "median": 0.044031,
+          "min": 0.042991,
+          "max": 0.045802,
+          "stdev": 0.000865,
+          "samples": [
+            0.043338,
+            0.042991,
+            0.043993,
+            0.044199,
+            0.04375,
+            0.044069,
+            0.045802,
+            0.043294,
+            0.044986,
+            0.04521
+          ],
+          "cold_latency_sec": 0.003775
+        },
+        "call": "search(query=..., mode='keyword', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h08-health-report",
+        "query": "健康 点検 anomalies journal 検出 異常 HDD pending sectors",
+        "relevant_sources": [
+          "system-health-anomalies-2026-11-09.md"
+        ],
+        "mode": "hybrid",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 0.248784,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.248784,
+          "median": 0.248063,
+          "min": 0.236842,
+          "max": 0.263935,
+          "stdev": 0.009871,
+          "samples": [
+            0.263935,
+            0.252987,
+            0.263095,
+            0.236842,
+            0.258002,
+            0.248955,
+            0.237913,
+            0.247172,
+            0.238991,
+            0.239946
+          ],
+          "cold_latency_sec": 0.257535
+        },
+        "call": "search(query=..., mode='hybrid', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h08-health-report",
+        "query": "健康 点検 anomalies journal 検出 異常 HDD pending sectors",
+        "relevant_sources": [
+          "system-health-anomalies-2026-11-09.md"
+        ],
+        "mode": "hybrid-rerank",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 9.131691,
+        "latency_stats": {
+          "count": 10,
+          "avg": 9.131691,
+          "median": 9.135345,
+          "min": 8.823612,
+          "max": 9.378126,
+          "stdev": 0.177512,
+          "samples": [
+            9.191904,
+            8.991009,
+            9.378126,
+            9.284083,
+            9.275827,
+            9.324498,
+            9.050713,
+            8.823612,
+            9.078786,
+            8.918349
+          ],
+          "cold_latency_sec": 9.264788
+        },
+        "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h09-container-tools",
+        "query": "kiri docker コンテナ ツール セットアップ 権限",
+        "relevant_sources": [
+          "container-tools-setup-2026-11-21.md"
+        ],
+        "mode": "dense",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 0.200438,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.200438,
+          "median": 0.200611,
+          "min": 0.189293,
+          "max": 0.21579,
+          "stdev": 0.00763,
+          "samples": [
+            0.189293,
+            0.190619,
+            0.201113,
+            0.208141,
+            0.204846,
+            0.198526,
+            0.194051,
+            0.201891,
+            0.200109,
+            0.21579
+          ],
+          "cold_latency_sec": 0.191177
+        },
+        "call": "search(query=..., mode='dense', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h09-container-tools",
+        "query": "kiri docker コンテナ ツール セットアップ 権限",
+        "relevant_sources": [
+          "container-tools-setup-2026-11-21.md"
+        ],
+        "mode": "keyword",
+        "retrieval_k": 10,
+        "hits": 1,
+        "sources": [
+          "rag_poc/corpus-alt/0005-epub-body-reading.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 0.043758,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.043758,
+          "median": 0.043696,
+          "min": 0.042905,
+          "max": 0.044712,
+          "stdev": 0.000558,
+          "samples": [
+            0.044712,
+            0.044543,
+            0.043491,
+            0.044045,
+            0.042905,
+            0.043997,
+            0.043107,
+            0.04339,
+            0.043901,
+            0.043488
+          ],
+          "cold_latency_sec": 0.043029
+        },
+        "call": "search(query=..., mode='keyword', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h09-container-tools",
+        "query": "kiri docker コンテナ ツール セットアップ 権限",
+        "relevant_sources": [
+          "container-tools-setup-2026-11-21.md"
+        ],
+        "mode": "hybrid",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 0.2394,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.2394,
+          "median": 0.236112,
+          "min": 0.231902,
+          "max": 0.261908,
+          "stdev": 0.008904,
+          "samples": [
+            0.239945,
+            0.261908,
+            0.234139,
+            0.248915,
+            0.233997,
+            0.238981,
+            0.23299,
+            0.238085,
+            0.231902,
+            0.233133
+          ],
+          "cold_latency_sec": 0.244925
+        },
+        "call": "search(query=..., mode='hybrid', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h09-container-tools",
+        "query": "kiri docker コンテナ ツール セットアップ 権限",
+        "relevant_sources": [
+          "container-tools-setup-2026-11-21.md"
+        ],
+        "mode": "hybrid-rerank",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0004-zip-archive-reader.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0002-ai-markdown-pipeline.md",
+          "rag_poc/corpus-alt/0005-epub-body-reading.md",
+          "rag_poc/corpus-alt/0003-native-wasm-target-split.md"
+        ],
+        "matched_sources": [],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": false,
+          "10": false
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.0
+        },
+        "latency_sec": 7.292364,
+        "latency_stats": {
+          "count": 10,
+          "avg": 7.292364,
+          "median": 7.293635,
+          "min": 7.016141,
+          "max": 7.479268,
+          "stdev": 0.162891,
+          "samples": [
+            7.192886,
+            7.465186,
+            7.45141,
+            7.016141,
+            7.449421,
+            7.479268,
+            7.21302,
+            7.088256,
+            7.193801,
+            7.37425
+          ],
+          "cold_latency_sec": 7.371702
+        },
+        "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+        "error": null
+      }
+    ]
+  }
+}

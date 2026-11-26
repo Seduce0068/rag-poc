@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-11-26T10:20:00+09:00",
+  "author": "lead/swarm-unlimited",
+  "selection_criteria": "passkey-gateway/docs 内の実在ファイル名から、簡易 eval (q01-q06) とトピック・ラベルが重複しないものを人手で選択。リーク回避のため簡易 eval の上位結果に出ていないファイルを優先。",
+  "reviewer": "未レビュー（単一作成者）",
+  "notes": "ラベルはファイル名（basename 照合）。コーパス更新時に実在確認が必要。",
+  "simple_queries": [
+    {"id": "q01-dsh-token", "query": "DSH 起動トークンの取得方法", "expected": ["token", "起動トークン", "journalctl"]},
+    {"id": "q02-passkey-sudo", "query": "パスキー sudo の使い方", "expected": ["sudo", "passkey", "auth"]},
+    {"id": "q03-qdrant-postgres", "query": "Qdrant と PostgreSQL の常駐構成", "expected": ["qdrant", "postgresql", "jarvis"]},
+    {"id": "q04-workspace-json", "query": "DSH のセッション履歴が UI に表示されない", "expected": ["workspace", "session", "dsh"]},
+    {"id": "q05-caddy-recreate", "query": "Caddy を再作成して 502 を解消する手順", "expected": ["caddy", "trial", "502"]},
+    {"id": "q06-rag-modes", "query": "RAG の検索モードを比較する方法", "expected": ["rag", "hybrid", "rerank"]}
+  ],
+  "heldout_queries": [
+    {"id": "h01-tooling-research", "query": "DSH opencode VSCode Zed ツール 調査 比較 2026-11-09", "relevant_sources": ["tooling-research-2026-11-09.md"]},
+    {"id": "h02-plugin-markets", "query": "DSH プラグイン マーケット index 調査 結果", "relevant_sources": ["dsh-plugin-markets-research-2026-11-26.md"]},
+    {"id": "h03-okf-v03", "query": "OKF v0.3 アップグレード 提案 メタデータ", "relevant_sources": ["okf-v03-upgrade-proposal-2026-11-25.md"]},
+    {"id": "h04-home-consolidation", "query": "DSH_HOME 統合 準備 ディレクトリ バックアップ rsync", "relevant_sources": ["dsh-home-consolidation-prep-2026-11-25.md"]},
+    {"id": "h05-fs-ext4", "query": "ext4 ファイルシステム 選定 バックアップ レポート", "relevant_sources": ["fs-selection-ext4-report-20261123.md"]},
+    {"id": "h06-session-cache-adr", "query": "セッション ローカル キャッシュ ADR 差分取得 cursor 決定", "relevant_sources": ["session-local-cache-adr-2026-11-22.md", "session-local-cache-adr-2026-11-20.md"]},
+    {"id": "h07-network-investigation", "query": "ネットワーク 調査 Tailscale 到達性 結果", "relevant_sources": ["network-investigation-2026-11-21.md"]},
+    {"id": "h08-health-report", "query": "健康 点検 anomalies journal 検出 異常 HDD pending sectors", "relevant_sources": ["system-health-anomalies-2026-11-09.md"]},
+    {"id": "h09-container-tools", "query": "kiri docker コンテナ ツール セットアップ 権限", "relevant_sources": ["container-tools-setup-2026-11-21.md"]}
+  ]
+}

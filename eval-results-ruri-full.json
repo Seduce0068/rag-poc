@@ -1,0 +1,3697 @@
+{
+  "generated_at": "2026-11-26T06:50:31.480876+00:00",
+  "schema_version": 2,
+  "qrels_schema_version": 1,
+  "qrels_label": "qrels.json",
+  "script": "rag_poc/evaluate.py",
+  "search_function": {
+    "module": "query",
+    "name": "search",
+    "preferred_name": "search"
+  },
+  "collection": "rag_poc_ruri_full",
+  "embed_model": "kun432/cl-nagoya-ruri-base",
+  "chat_model": "qwen2.5:3b",
+  "vector_size": 768,
+  "corpus_file_count": 88,
+  "corpus_sha256": "c05b982ef56cd7995b229f197ae2fb0efe20992487bc70725abf9ed9d0168c70",
+  "repeat": 10,
+  "modes": [
+    "dense",
+    "keyword",
+    "hybrid",
+    "hybrid-rerank"
+  ],
+  "top_k": 10,
+  "heldout_retrieval_k": 10,
+  "metric_definitions": {
+    "source_keyword_hit_at3": "上位3件の source に expected 語が1つ以上含まれるか（any-match の真偽値。真の recall@k ではない）",
+    "content_keyword_hit_all_hits": "全ヒットの text に expected 語が1つ以上含まれるか。source 側と取得深度が異なる",
+    "avg_distinct_source_ratio_at3": "上位3件 source のUnit一意性。検索品質ではなく多様性の指標",
+    "avg_hits": "モード別の実返却件数（hybrid-rerank も全 top_k を返すよう修正済み）",
+    "latency": "RAG_EVAL_REPEAT 回（既定1＝ウォームアップなし1回、2以上でwarmup1回＋N回）の実測。コーパス規模とLLM呼び出しに強く依存",
+    "latency_stats": "record / summary の avg / median / min / max / stdev（秒）。avg_latency_sec は後方互換のため avg と同値。",
+    "heldout": {
+      "recall_at_k": "各クエリについて、検索結果上位 k 件の source に relevant_sources のいずれかが含まれれば 1・否則 0 とし、全 held-out クエリで平均（query-level hit@k）。正解ファイル全体のうち何件回収したかという集合 recall ではない。",
+      "ndcg_at_k": "gain=1 / discount=log2(rank+1) の DCG を上位 k 件で計算し、IDCG=sum_{r=1..min(|relevant|,k)} 1/log2(r+1) で割ってクエリ平均。同一ファイルの複数チャンクは最上位の1回だけ計上する。",
+      "label_matching": "正解は passkey-gateway/docs 内の実在ファイル名。ingest.py の source はリポジトリルート相対パスなので、完全一致・相対パス suffix・basename で照合する。",
+      "failure_policy": "検索失敗ケースは 0 として分母に残す（生存者バイアス回避）。",
+      "k_scope": "上位 k 件は source 非空の結果に対して適用する（query.py の hits は常に source を持つため実害なし）。",
+      "preflight": "実行前に全 relevant_sources が config.CORPUS_DIR に実在するか確認し、欠落は notes に記録する。",
+      "reuse_policy": "--heldout-only は既存 JSON の collection / corpus_sha256 / corpus_file_count / embed_model / chat_model / vector_size / top_k / schema_version / qrels_label / qrels_schema_version が現行と一致するときのみ簡易結果を再利用する（欠落キーは再計測の対象）。"
+    }
+  },
+  "notes": [
+    "設定の出所: config.current_settings() + 環境変数（値はマスク済み）: RAG_TOP_K=10, RAG_VECTOR_SIZE=768, RAG_COLLECTION=rag_poc_ruri_full, RAG_CORPUS_DIR=passkey-gateway/docs, OLLAMA_URL=<masked>, QDRANT_URL=<masked>, EMBED_MODEL=kun432/cl-nagoya-ruri-base, CHAT_MODEL=qwen2.5:3b, RAG_EVAL_REPEAT=10",
+    "評価クエリは qrels.json（schema_version=1）から読み込み",
+    "簡易指標は 6 クエリの any-match、held-out は 9 クエリの正解ラベル付き",
+    "コーパスは config.COLLECTION（環境変数 RAG_COLLECTION で上書き）に依存",
+    "レイテンシはウォームアップ1回＋10回計測（RAG_EVAL_REPEAT で変更可能）",
+    "再現メタ情報: embed_model=kun432/cl-nagoya-ruri-base chat_model=qwen2.5:3b vector_size=768 corpus_files=88 corpus_sha256=c05b982ef56cd7995b229f197ae2fb0efe20992487bc70725abf9ed9d0168c70"
+  ],
+  "summary": {
+    "dense": {
+      "cases": 6,
+      "successes": 6,
+      "source_keyword_hit_at3": 0.5,
+      "content_keyword_hit_all_hits": 1.0,
+      "avg_distinct_source_ratio_at3": 0.7222,
+      "avg_latency_sec": 0.047327,
+      "latency_stats": {
+        "count": 60,
+        "avg": 0.047327,
+        "median": 0.047129,
+        "min": 0.025225,
+        "max": 0.077317,
+        "stdev": 0.01292
+      },
+      "avg_hits": 10.0,
+      "errors": 0
+    },
+    "keyword": {
+      "cases": 6,
+      "successes": 6,
+      "source_keyword_hit_at3": 0.8333,
+      "content_keyword_hit_all_hits": 0.8333,
+      "avg_distinct_source_ratio_at3": 0.9444,
+      "avg_latency_sec": 0.063413,
+      "latency_stats": {
+        "count": 60,
+        "avg": 0.063413,
+        "median": 0.061491,
+        "min": 0.049473,
+        "max": 0.103896,
+        "stdev": 0.010118
+      },
+      "avg_hits": 10.0,
+      "errors": 0
+    },
+    "hybrid": {
+      "cases": 6,
+      "successes": 6,
+      "source_keyword_hit_at3": 0.6667,
+      "content_keyword_hit_all_hits": 1.0,
+      "avg_distinct_source_ratio_at3": 0.8889,
+      "avg_latency_sec": 0.113308,
+      "latency_stats": {
+        "count": 60,
+        "avg": 0.113308,
+        "median": 0.110345,
+        "min": 0.080647,
+        "max": 0.172518,
+        "stdev": 0.018663
+      },
+      "avg_hits": 10.0,
+      "errors": 0
+    },
+    "hybrid-rerank": {
+      "cases": 6,
+      "successes": 6,
+      "source_keyword_hit_at3": 0.6667,
+      "content_keyword_hit_all_hits": 1.0,
+      "avg_distinct_source_ratio_at3": 0.9444,
+      "avg_latency_sec": 3.322006,
+      "latency_stats": {
+        "count": 60,
+        "avg": 3.322006,
+        "median": 3.327622,
+        "min": 2.88936,
+        "max": 3.681571,
+        "stdev": 0.184194
+      },
+      "avg_hits": 10.0,
+      "errors": 0
+    }
+  },
+  "results": [
+    {
+      "query": "DSH 起動トークンの取得方法",
+      "expected": [
+        "token",
+        "起動トークン",
+        "journalctl"
+      ],
+      "mode": "dense",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "token",
+        "起動トークン"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "passkey-gateway/docs/dsh-session-create-failed-2026-11-11.md",
+          "passkey-gateway/docs/cutover.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md"
+        ],
+        "unique_source_count": 3,
+        "unique_ratio": 1.0
+      },
+      "latency_sec": 0.027932,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.027932,
+        "median": 0.02685,
+        "min": 0.025225,
+        "max": 0.032173,
+        "stdev": 0.002259,
+        "samples": [
+          0.02689,
+          0.029146,
+          0.025225,
+          0.026041,
+          0.026399,
+          0.02681,
+          0.032173,
+          0.029672,
+          0.030964,
+          0.025997
+        ],
+        "cold_latency_sec": 0.025349
+      },
+      "call": "search(query=..., mode='dense', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "DSH 起動トークンの取得方法",
+      "expected": [
+        "token",
+        "起動トークン",
+        "journalctl"
+      ],
+      "mode": "keyword",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": false,
+      "matched_content_keywords": [],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "passkey-gateway/docs/battery-drain-dsh-mobile-investigation-2026-11-21.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/agent-skills-research-2026-11-20.yomiyasu.md"
+        ],
+        "unique_source_count": 3,
+        "unique_ratio": 1.0
+      },
+      "latency_sec": 0.054755,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.054755,
+        "median": 0.055088,
+        "min": 0.049473,
+        "max": 0.060847,
+        "stdev": 0.004477,
+        "samples": [
+          0.056821,
+          0.056031,
+          0.054144,
+          0.060847,
+          0.059654,
+          0.060716,
+          0.050465,
+          0.049844,
+          0.049473,
+          0.049552
+        ],
+        "cold_latency_sec": 0.055885
+      },
+      "call": "search(query=..., mode='keyword', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "DSH 起動トークンの取得方法",
+      "expected": [
+        "token",
+        "起動トークン",
+        "journalctl"
+      ],
+      "mode": "hybrid",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "token",
+        "起動トークン"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "passkey-gateway/docs/battery-drain-dsh-mobile-investigation-2026-11-21.md",
+          "passkey-gateway/docs/dsh-session-create-failed-2026-11-11.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md"
+        ],
+        "unique_source_count": 3,
+        "unique_ratio": 1.0
+      },
+      "latency_sec": 0.089328,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.089328,
+        "median": 0.090422,
+        "min": 0.080647,
+        "max": 0.095264,
+        "stdev": 0.003949,
+        "samples": [
+          0.086283,
+          0.08747,
+          0.092091,
+          0.091739,
+          0.08921,
+          0.080647,
+          0.086841,
+          0.091633,
+          0.095264,
+          0.092099
+        ],
+        "cold_latency_sec": 0.091358
+      },
+      "call": "search(query=..., mode='hybrid', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "DSH 起動トークンの取得方法",
+      "expected": [
+        "token",
+        "起動トークン",
+        "journalctl"
+      ],
+      "mode": "hybrid-rerank",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "token",
+        "起動トークン"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "passkey-gateway/docs/battery-drain-dsh-mobile-investigation-2026-11-21.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/agent-skills-research-2026-11-20.yomiyasu.md"
+        ],
+        "unique_source_count": 3,
+        "unique_ratio": 1.0
+      },
+      "latency_sec": 3.173031,
+      "latency_stats": {
+        "count": 10,
+        "avg": 3.173031,
+        "median": 3.105524,
+        "min": 2.983912,
+        "max": 3.571246,
+        "stdev": 0.179114,
+        "samples": [
+          3.054926,
+          3.311548,
+          3.091313,
+          3.129048,
+          3.382385,
+          2.983912,
+          3.110367,
+          3.571246,
+          2.994881,
+          3.10068
+        ],
+        "cold_latency_sec": 5.386689
+      },
+      "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "パスキー sudo の使い方",
+      "expected": [
+        "sudo",
+        "passkey",
+        "auth"
+      ],
+      "mode": "dense",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "sudo",
+        "passkey"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "sudo",
+        "auth"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "passkey-gateway/docs/passkey-sudo-design.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/passkey-sudo-design.md"
+        ],
+        "unique_source_count": 2,
+        "unique_ratio": 0.6667
+      },
+      "latency_sec": 0.041212,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.041212,
+        "median": 0.038045,
+        "min": 0.030234,
+        "max": 0.056219,
+        "stdev": 0.008395,
+        "samples": [
+          0.056219,
+          0.035975,
+          0.039552,
+          0.038611,
+          0.037301,
+          0.030234,
+          0.056216,
+          0.046003,
+          0.03748,
+          0.034526
+        ],
+        "cold_latency_sec": 0.033393
+      },
+      "call": "search(query=..., mode='dense', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "パスキー sudo の使い方",
+      "expected": [
+        "sudo",
+        "passkey",
+        "auth"
+      ],
+      "mode": "keyword",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "passkey",
+        "auth"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "sudo",
+        "passkey",
+        "auth"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "passkey-gateway/docs/INDEX.md",
+          "passkey-gateway/docs/pending-root-actions.md",
+          "passkey-gateway/docs/face-auth-passkey-investigation-2026-11-10.md"
+        ],
+        "unique_source_count": 3,
+        "unique_ratio": 1.0
+      },
+      "latency_sec": 0.068377,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.068377,
+        "median": 0.06772,
+        "min": 0.059671,
+        "max": 0.077421,
+        "stdev": 0.006971,
+        "samples": [
+          0.0766,
+          0.059671,
+          0.060752,
+          0.060706,
+          0.077421,
+          0.075799,
+          0.062362,
+          0.069653,
+          0.075017,
+          0.065787
+        ],
+        "cold_latency_sec": 0.075849
+      },
+      "call": "search(query=..., mode='keyword', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "パスキー sudo の使い方",
+      "expected": [
+        "sudo",
+        "passkey",
+        "auth"
+      ],
+      "mode": "hybrid",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "sudo",
+        "passkey",
+        "auth"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "sudo",
+        "passkey",
+        "auth"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/passkey-sudo-design.md",
+          "passkey-gateway/docs/face-auth-passkey-investigation-2026-11-10.md"
+        ],
+        "unique_source_count": 3,
+        "unique_ratio": 1.0
+      },
+      "latency_sec": 0.115117,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.115117,
+        "median": 0.113083,
+        "min": 0.095601,
+        "max": 0.145854,
+        "stdev": 0.015536,
+        "samples": [
+          0.098698,
+          0.117423,
+          0.106323,
+          0.098347,
+          0.095601,
+          0.128531,
+          0.145854,
+          0.108742,
+          0.124313,
+          0.127341
+        ],
+        "cold_latency_sec": 0.093339
+      },
+      "call": "search(query=..., mode='hybrid', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "パスキー sudo の使い方",
+      "expected": [
+        "sudo",
+        "passkey",
+        "auth"
+      ],
+      "mode": "hybrid-rerank",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "passkey",
+        "auth"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "sudo",
+        "passkey",
+        "auth"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "passkey-gateway/docs/pending-root-actions.md",
+          "passkey-gateway/docs/INDEX.md",
+          "passkey-gateway/docs/face-auth-passkey-investigation-2026-11-10.md"
+        ],
+        "unique_source_count": 3,
+        "unique_ratio": 1.0
+      },
+      "latency_sec": 3.256783,
+      "latency_stats": {
+        "count": 10,
+        "avg": 3.256783,
+        "median": 3.244547,
+        "min": 2.88936,
+        "max": 3.54436,
+        "stdev": 0.185411,
+        "samples": [
+          3.217414,
+          3.464076,
+          3.13705,
+          3.312116,
+          3.54436,
+          3.271681,
+          3.141201,
+          3.44957,
+          2.88936,
+          3.140998
+        ],
+        "cold_latency_sec": 5.184723
+      },
+      "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "Qdrant と PostgreSQL の常駐構成",
+      "expected": [
+        "qdrant",
+        "postgresql",
+        "jarvis"
+      ],
+      "mode": "dense",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "qdrant",
+        "postgresql",
+        "jarvis"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "passkey-gateway/docs/oci-decommission-runbook.md",
+          "passkey-gateway/docs/oci-decommission-runbook.md",
+          "passkey-gateway/docs/rag-methods-selection-2026-11-26.md"
+        ],
+        "unique_source_count": 2,
+        "unique_ratio": 0.6667
+      },
+      "latency_sec": 0.053074,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.053074,
+        "median": 0.051597,
+        "min": 0.046658,
+        "max": 0.064832,
+        "stdev": 0.005827,
+        "samples": [
+          0.054039,
+          0.053469,
+          0.059848,
+          0.064832,
+          0.057966,
+          0.046658,
+          0.047584,
+          0.049417,
+          0.047199,
+          0.049726
+        ],
+        "cold_latency_sec": 0.055874
+      },
+      "call": "search(query=..., mode='dense', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "Qdrant と PostgreSQL の常駐構成",
+      "expected": [
+        "qdrant",
+        "postgresql",
+        "jarvis"
+      ],
+      "mode": "keyword",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "jarvis"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "qdrant",
+        "postgresql",
+        "jarvis"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "passkey-gateway/docs/rag-methods-selection-2026-11-26.md",
+          "passkey-gateway/docs/jarvis-generalization-proposal.md",
+          "passkey-gateway/docs/jarvis-muse-dsh-roles.md"
+        ],
+        "unique_source_count": 3,
+        "unique_ratio": 1.0
+      },
+      "latency_sec": 0.076042,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.076042,
+        "median": 0.072498,
+        "min": 0.062368,
+        "max": 0.103896,
+        "stdev": 0.012301,
+        "samples": [
+          0.062523,
+          0.062368,
+          0.067523,
+          0.0754,
+          0.103896,
+          0.090886,
+          0.081276,
+          0.073392,
+          0.071605,
+          0.071552
+        ],
+        "cold_latency_sec": 0.070345
+      },
+      "call": "search(query=..., mode='keyword', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "Qdrant と PostgreSQL の常駐構成",
+      "expected": [
+        "qdrant",
+        "postgresql",
+        "jarvis"
+      ],
+      "mode": "hybrid",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "qdrant",
+        "postgresql",
+        "jarvis"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "passkey-gateway/docs/rag-methods-selection-2026-11-26.md",
+          "passkey-gateway/docs/rag-methods-selection-2026-11-26.md",
+          "passkey-gateway/docs/oci-decommission-runbook.md"
+        ],
+        "unique_source_count": 2,
+        "unique_ratio": 0.6667
+      },
+      "latency_sec": 0.133152,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.133152,
+        "median": 0.129316,
+        "min": 0.11627,
+        "max": 0.172518,
+        "stdev": 0.016676,
+        "samples": [
+          0.154138,
+          0.172518,
+          0.124085,
+          0.131536,
+          0.132315,
+          0.13465,
+          0.121223,
+          0.117688,
+          0.127095,
+          0.11627
+        ],
+        "cold_latency_sec": 0.141257
+      },
+      "call": "search(query=..., mode='hybrid', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "Qdrant と PostgreSQL の常駐構成",
+      "expected": [
+        "qdrant",
+        "postgresql",
+        "jarvis"
+      ],
+      "mode": "hybrid-rerank",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "qdrant",
+        "postgresql",
+        "jarvis"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "passkey-gateway/docs/rag-methods-selection-2026-11-26.md",
+          "passkey-gateway/docs/rag-methods-selection-2026-11-26.md",
+          "passkey-gateway/docs/oci-decommission-runbook.md"
+        ],
+        "unique_source_count": 2,
+        "unique_ratio": 0.6667
+      },
+      "latency_sec": 3.386181,
+      "latency_stats": {
+        "count": 10,
+        "avg": 3.386181,
+        "median": 3.38298,
+        "min": 3.10219,
+        "max": 3.610662,
+        "stdev": 0.151018,
+        "samples": [
+          3.495356,
+          3.331109,
+          3.179425,
+          3.376807,
+          3.555162,
+          3.10219,
+          3.479677,
+          3.389154,
+          3.610662,
+          3.342267
+        ],
+        "cold_latency_sec": 4.561697
+      },
+      "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "DSH のセッション履歴が UI に表示されない",
+      "expected": [
+        "workspace",
+        "session",
+        "dsh"
+      ],
+      "mode": "dense",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "workspace",
+        "dsh"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "workspace",
+        "session",
+        "dsh"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "passkey-gateway/docs/dsh-workspace-json-merge-2026-11-25.md",
+          "passkey-gateway/docs/dsh-loading-ux-local-fix-scope-2026-11-24.md",
+          "passkey-gateway/docs/dsh-loading-ux-local-fix-scope-2026-11-24.md"
+        ],
+        "unique_source_count": 2,
+        "unique_ratio": 0.6667
+      },
+      "latency_sec": 0.045677,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.045677,
+        "median": 0.045391,
+        "min": 0.043728,
+        "max": 0.047903,
+        "stdev": 0.001528,
+        "samples": [
+          0.046659,
+          0.047886,
+          0.04694,
+          0.047903,
+          0.046025,
+          0.044394,
+          0.043785,
+          0.044689,
+          0.043728,
+          0.044758
+        ],
+        "cold_latency_sec": 0.049608
+      },
+      "call": "search(query=..., mode='dense', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "DSH のセッション履歴が UI に表示されない",
+      "expected": [
+        "workspace",
+        "session",
+        "dsh"
+      ],
+      "mode": "keyword",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "dsh"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "session",
+        "dsh"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "passkey-gateway/docs/battery-drain-dsh-mobile-investigation-2026-11-21.md",
+          "passkey-gateway/docs/dsh-opencode-gap-2026-11-11.md",
+          "passkey-gateway/docs/dsh-token-rd-fix-2026-11-25.md"
+        ],
+        "unique_source_count": 3,
+        "unique_ratio": 1.0
+      },
+      "latency_sec": 0.055075,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.055075,
+        "median": 0.054492,
+        "min": 0.049574,
+        "max": 0.062205,
+        "stdev": 0.003856,
+        "samples": [
+          0.052387,
+          0.052303,
+          0.051415,
+          0.054512,
+          0.049574,
+          0.054953,
+          0.054471,
+          0.062205,
+          0.059331,
+          0.059601
+        ],
+        "cold_latency_sec": 0.055503
+      },
+      "call": "search(query=..., mode='keyword', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "DSH のセッション履歴が UI に表示されない",
+      "expected": [
+        "workspace",
+        "session",
+        "dsh"
+      ],
+      "mode": "hybrid",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "session",
+        "dsh"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "workspace",
+        "session",
+        "dsh"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "passkey-gateway/docs/dsh-loading-ux-local-fix-scope-2026-11-24.md",
+          "passkey-gateway/docs/session-local-cache-adr-2026-11-20.md",
+          "passkey-gateway/docs/battery-drain-dsh-mobile-investigation-2026-11-21.md"
+        ],
+        "unique_source_count": 3,
+        "unique_ratio": 1.0
+      },
+      "latency_sec": 0.113804,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.113804,
+        "median": 0.110268,
+        "min": 0.097849,
+        "max": 0.1389,
+        "stdev": 0.012215,
+        "samples": [
+          0.104955,
+          0.102407,
+          0.11239,
+          0.1389,
+          0.119409,
+          0.108146,
+          0.105974,
+          0.129692,
+          0.097849,
+          0.118319
+        ],
+        "cold_latency_sec": 0.102335
+      },
+      "call": "search(query=..., mode='hybrid', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "DSH のセッション履歴が UI に表示されない",
+      "expected": [
+        "workspace",
+        "session",
+        "dsh"
+      ],
+      "mode": "hybrid-rerank",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "dsh"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "workspace",
+        "session",
+        "dsh"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "passkey-gateway/docs/battery-drain-dsh-mobile-investigation-2026-11-21.md",
+          "passkey-gateway/docs/dsh-opencode-gap-2026-11-11.md",
+          "passkey-gateway/docs/dsh-loading-ux-local-fix-scope-2026-11-24.md"
+        ],
+        "unique_source_count": 3,
+        "unique_ratio": 1.0
+      },
+      "latency_sec": 3.369063,
+      "latency_stats": {
+        "count": 10,
+        "avg": 3.369063,
+        "median": 3.397133,
+        "min": 3.075867,
+        "max": 3.681571,
+        "stdev": 0.207774,
+        "samples": [
+          3.228276,
+          3.075867,
+          3.681571,
+          3.640786,
+          3.173507,
+          3.324134,
+          3.102519,
+          3.506982,
+          3.470131,
+          3.486862
+        ],
+        "cold_latency_sec": 6.130404
+      },
+      "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "Caddy を再作成して 502 を解消する手順",
+      "expected": [
+        "caddy",
+        "trial",
+        "502"
+      ],
+      "mode": "dense",
+      "hits": 10,
+      "recall": false,
+      "matched_keywords": [],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "caddy",
+        "trial",
+        "502"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "passkey-gateway/docs/dsh-token-rd-fix-2026-11-25.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/dsh-session-create-failed-2026-11-11.md"
+        ],
+        "unique_source_count": 3,
+        "unique_ratio": 1.0
+      },
+      "latency_sec": 0.063325,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.063325,
+        "median": 0.065028,
+        "min": 0.046833,
+        "max": 0.077317,
+        "stdev": 0.011405,
+        "samples": [
+          0.072231,
+          0.070068,
+          0.077317,
+          0.076893,
+          0.052072,
+          0.059988,
+          0.074171,
+          0.050273,
+          0.053407,
+          0.046833
+        ],
+        "cold_latency_sec": 0.055076
+      },
+      "call": "search(query=..., mode='dense', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "Caddy を再作成して 502 を解消する手順",
+      "expected": [
+        "caddy",
+        "trial",
+        "502"
+      ],
+      "mode": "keyword",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "502"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "caddy",
+        "trial",
+        "502"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "passkey-gateway/docs/dsh-token-rd-fix-2026-11-25.md",
+          "passkey-gateway/docs/incident-502-agentrouter-2026-11-22.md",
+          "passkey-gateway/docs/incident-502-agentrouter-2026-11-22.md"
+        ],
+        "unique_source_count": 2,
+        "unique_ratio": 0.6667
+      },
+      "latency_sec": 0.060852,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.060852,
+        "median": 0.060212,
+        "min": 0.055481,
+        "max": 0.066046,
+        "stdev": 0.00379,
+        "samples": [
+          0.065205,
+          0.060847,
+          0.066046,
+          0.066021,
+          0.062591,
+          0.059578,
+          0.05918,
+          0.057693,
+          0.055875,
+          0.055481
+        ],
+        "cold_latency_sec": 0.069511
+      },
+      "call": "search(query=..., mode='keyword', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "Caddy を再作成して 502 を解消する手順",
+      "expected": [
+        "caddy",
+        "trial",
+        "502"
+      ],
+      "mode": "hybrid",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "502"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "caddy",
+        "trial",
+        "502"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "passkey-gateway/docs/dsh-token-rd-fix-2026-11-25.md",
+          "passkey-gateway/docs/incident-502-agentrouter-2026-11-22.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md"
+        ],
+        "unique_source_count": 3,
+        "unique_ratio": 1.0
+      },
+      "latency_sec": 0.111137,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.111137,
+        "median": 0.110345,
+        "min": 0.102047,
+        "max": 0.125947,
+        "stdev": 0.007007,
+        "samples": [
+          0.109694,
+          0.103922,
+          0.102047,
+          0.10632,
+          0.110996,
+          0.105393,
+          0.113171,
+          0.11883,
+          0.115049,
+          0.125947
+        ],
+        "cold_latency_sec": 0.108679
+      },
+      "call": "search(query=..., mode='hybrid', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "Caddy を再作成して 502 を解消する手順",
+      "expected": [
+        "caddy",
+        "trial",
+        "502"
+      ],
+      "mode": "hybrid-rerank",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "502"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "caddy",
+        "trial",
+        "502"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "passkey-gateway/docs/dsh-token-rd-fix-2026-11-25.md",
+          "passkey-gateway/docs/dsh-session-create-failed-2026-11-11.md",
+          "passkey-gateway/docs/incident-502-agentrouter-2026-11-22.md"
+        ],
+        "unique_source_count": 3,
+        "unique_ratio": 1.0
+      },
+      "latency_sec": 3.361612,
+      "latency_stats": {
+        "count": 10,
+        "avg": 3.361612,
+        "median": 3.359528,
+        "min": 3.227826,
+        "max": 3.502068,
+        "stdev": 0.080231,
+        "samples": [
+          3.406405,
+          3.298229,
+          3.260029,
+          3.343417,
+          3.227826,
+          3.375639,
+          3.419663,
+          3.440026,
+          3.342813,
+          3.502068
+        ],
+        "cold_latency_sec": 5.11471
+      },
+      "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "RAG の検索モードを比較する方法",
+      "expected": [
+        "rag",
+        "hybrid",
+        "rerank"
+      ],
+      "mode": "dense",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "rag"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "rag",
+        "hybrid",
+        "rerank"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "passkey-gateway/docs/rag-methods-selection-2026-11-26.md",
+          "passkey-gateway/docs/rag-methods-selection-2026-11-26.md",
+          "passkey-gateway/docs/rag-methods-selection-2026-11-26.md"
+        ],
+        "unique_source_count": 1,
+        "unique_ratio": 0.3333
+      },
+      "latency_sec": 0.052743,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.052743,
+        "median": 0.051018,
+        "min": 0.046521,
+        "max": 0.059424,
+        "stdev": 0.005001,
+        "samples": [
+          0.057879,
+          0.059424,
+          0.058167,
+          0.047809,
+          0.04706,
+          0.058941,
+          0.046521,
+          0.051154,
+          0.050882,
+          0.049594
+        ],
+        "cold_latency_sec": 0.055856
+      },
+      "call": "search(query=..., mode='dense', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "RAG の検索モードを比較する方法",
+      "expected": [
+        "rag",
+        "hybrid",
+        "rerank"
+      ],
+      "mode": "keyword",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "rag"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "rag",
+        "hybrid",
+        "rerank"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "passkey-gateway/docs/github-personal-repo-review-2026-11-09.md",
+          "passkey-gateway/docs/cloud-rag-research-2026-11-26.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md"
+        ],
+        "unique_source_count": 3,
+        "unique_ratio": 1.0
+      },
+      "latency_sec": 0.065375,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.065375,
+        "median": 0.064895,
+        "min": 0.057914,
+        "max": 0.075668,
+        "stdev": 0.005102,
+        "samples": [
+          0.057914,
+          0.066656,
+          0.062136,
+          0.059074,
+          0.069035,
+          0.069362,
+          0.067888,
+          0.075668,
+          0.063134,
+          0.062886
+        ],
+        "cold_latency_sec": 0.055644
+      },
+      "call": "search(query=..., mode='keyword', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "RAG の検索モードを比較する方法",
+      "expected": [
+        "rag",
+        "hybrid",
+        "rerank"
+      ],
+      "mode": "hybrid",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "rag"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "rag",
+        "hybrid",
+        "rerank"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "passkey-gateway/docs/rag-methods-selection-2026-11-26.md",
+          "passkey-gateway/docs/rag-methods-selection-2026-11-26.md",
+          "passkey-gateway/docs/github-personal-repo-review-2026-11-09.md"
+        ],
+        "unique_source_count": 2,
+        "unique_ratio": 0.6667
+      },
+      "latency_sec": 0.117308,
+      "latency_stats": {
+        "count": 10,
+        "avg": 0.117308,
+        "median": 0.116214,
+        "min": 0.09445,
+        "max": 0.147625,
+        "stdev": 0.019062,
+        "samples": [
+          0.147625,
+          0.127339,
+          0.138701,
+          0.137159,
+          0.124971,
+          0.098619,
+          0.101403,
+          0.09536,
+          0.09445,
+          0.107458
+        ],
+        "cold_latency_sec": 0.125671
+      },
+      "call": "search(query=..., mode='hybrid', top_k=10)",
+      "error": null
+    },
+    {
+      "query": "RAG の検索モードを比較する方法",
+      "expected": [
+        "rag",
+        "hybrid",
+        "rerank"
+      ],
+      "mode": "hybrid-rerank",
+      "hits": 10,
+      "recall": true,
+      "matched_keywords": [
+        "rag"
+      ],
+      "content_recall": true,
+      "matched_content_keywords": [
+        "rag",
+        "hybrid",
+        "rerank"
+      ],
+      "unit_uniqueness": {
+        "top3_sources": [
+          "passkey-gateway/docs/rag-methods-selection-2026-11-26.md",
+          "passkey-gateway/docs/github-personal-repo-review-2026-11-09.md",
+          "passkey-gateway/docs/cloud-rag-research-2026-11-26.md"
+        ],
+        "unique_source_count": 3,
+        "unique_ratio": 1.0
+      },
+      "latency_sec": 3.385367,
+      "latency_stats": {
+        "count": 10,
+        "avg": 3.385367,
+        "median": 3.36774,
+        "min": 3.112287,
+        "max": 3.630883,
+        "stdev": 0.162259,
+        "samples": [
+          3.630883,
+          3.237067,
+          3.112287,
+          3.322747,
+          3.456826,
+          3.228522,
+          3.541071,
+          3.318102,
+          3.593433,
+          3.412732
+        ],
+        "cold_latency_sec": 5.857208
+      },
+      "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+      "error": null
+    }
+  ],
+  "heldout": {
+    "definitions": {
+      "recall_at_k": "各クエリについて、検索結果上位 k 件の source に relevant_sources のいずれかが含まれれば 1・否則 0 とし、全 held-out クエリで平均（query-level hit@k）。正解ファイル全体のうち何件回収したかという集合 recall ではない。",
+      "ndcg_at_k": "gain=1 / discount=log2(rank+1) の DCG を上位 k 件で計算し、IDCG=sum_{r=1..min(|relevant|,k)} 1/log2(r+1) で割ってクエリ平均。同一ファイルの複数チャンクは最上位の1回だけ計上する。",
+      "label_matching": "正解は passkey-gateway/docs 内の実在ファイル名。ingest.py の source はリポジトリルート相対パスなので、完全一致・相対パス suffix・basename で照合する。",
+      "failure_policy": "検索失敗ケースは 0 として分母に残す（生存者バイアス回避）。",
+      "k_scope": "上位 k 件は source 非空の結果に対して適用する（query.py の hits は常に source を持つため実害なし）。",
+      "preflight": "実行前に全 relevant_sources が config.CORPUS_DIR に実在するか確認し、欠落は notes に記録する。",
+      "reuse_policy": "--heldout-only は既存 JSON の collection / corpus_sha256 / corpus_file_count / embed_model / chat_model / vector_size / top_k / schema_version / qrels_label / qrels_schema_version が現行と一致するときのみ簡易結果を再利用する（欠落キーは再計測の対象）。"
+    },
+    "recall_k": [
+      1,
+      3,
+      5,
+      10
+    ],
+    "ndcg_k": [
+      3,
+      10
+    ],
+    "queries": [
+      {
+        "id": "h01-tooling-research",
+        "query": "DSH opencode VSCode Zed ツール 調査 比較 2026-11-09",
+        "relevant_sources": [
+          "tooling-research-2026-11-09.md"
+        ]
+      },
+      {
+        "id": "h02-plugin-markets",
+        "query": "DSH プラグイン マーケット index 調査 結果",
+        "relevant_sources": [
+          "dsh-plugin-markets-research-2026-11-26.md"
+        ]
+      },
+      {
+        "id": "h03-okf-v03",
+        "query": "OKF v0.3 アップグレード 提案 メタデータ",
+        "relevant_sources": [
+          "okf-v03-upgrade-proposal-2026-11-25.md"
+        ]
+      },
+      {
+        "id": "h04-home-consolidation",
+        "query": "DSH_HOME 統合 準備 ディレクトリ バックアップ rsync",
+        "relevant_sources": [
+          "dsh-home-consolidation-prep-2026-11-25.md"
+        ]
+      },
+      {
+        "id": "h05-fs-ext4",
+        "query": "ext4 ファイルシステム 選定 バックアップ レポート",
+        "relevant_sources": [
+          "fs-selection-ext4-report-20261123.md"
+        ]
+      },
+      {
+        "id": "h06-session-cache-adr",
+        "query": "セッション ローカル キャッシュ ADR 差分取得 cursor 決定",
+        "relevant_sources": [
+          "session-local-cache-adr-2026-11-22.md",
+          "session-local-cache-adr-2026-11-20.md"
+        ]
+      },
+      {
+        "id": "h07-network-investigation",
+        "query": "ネットワーク 調査 Tailscale 到達性 結果",
+        "relevant_sources": [
+          "network-investigation-2026-11-21.md"
+        ]
+      },
+      {
+        "id": "h08-health-report",
+        "query": "健康 点検 anomalies journal 検出 異常 HDD pending sectors",
+        "relevant_sources": [
+          "system-health-anomalies-2026-11-09.md"
+        ]
+      },
+      {
+        "id": "h09-container-tools",
+        "query": "kiri docker コンテナ ツール セットアップ 権限",
+        "relevant_sources": [
+          "container-tools-setup-2026-11-21.md"
+        ]
+      }
+    ],
+    "summary": {
+      "dense": {
+        "queries": 9,
+        "successes": 9,
+        "errors": 0,
+        "recall_at": {
+          "1": 0.5556,
+          "3": 0.8889,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "ndcg_at": {
+          "3": 0.7513,
+          "10": 0.7992
+        },
+        "latency_stats": {
+          "count": 90,
+          "avg": 0.049642,
+          "median": 0.049916,
+          "min": 0.030014,
+          "max": 0.082419,
+          "stdev": 0.010175
+        }
+      },
+      "keyword": {
+        "queries": 9,
+        "successes": 9,
+        "errors": 0,
+        "recall_at": {
+          "1": 0.6667,
+          "3": 0.7778,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "ndcg_at": {
+          "3": 0.7222,
+          "10": 0.8179
+        },
+        "latency_stats": {
+          "count": 90,
+          "avg": 0.0658,
+          "median": 0.064289,
+          "min": 0.053068,
+          "max": 0.089254,
+          "stdev": 0.008453
+        }
+      },
+      "hybrid": {
+        "queries": 9,
+        "successes": 9,
+        "errors": 0,
+        "recall_at": {
+          "1": 0.6667,
+          "3": 1.0,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "ndcg_at": {
+          "3": 0.8624,
+          "10": 0.8624
+        },
+        "latency_stats": {
+          "count": 90,
+          "avg": 0.10963,
+          "median": 0.106554,
+          "min": 0.0842,
+          "max": 0.150187,
+          "stdev": 0.016917
+        }
+      },
+      "hybrid-rerank": {
+        "queries": 9,
+        "successes": 9,
+        "errors": 0,
+        "recall_at": {
+          "1": 0.4444,
+          "3": 0.8889,
+          "5": 1.0,
+          "10": 1.0
+        },
+        "ndcg_at": {
+          "3": 0.6819,
+          "10": 0.7542
+        },
+        "latency_stats": {
+          "count": 90,
+          "avg": 3.306837,
+          "median": 3.327741,
+          "min": 2.647536,
+          "max": 4.035856,
+          "stdev": 0.258838
+        }
+      }
+    },
+    "results": [
+      {
+        "id": "h01-tooling-research",
+        "query": "DSH opencode VSCode Zed ツール 調査 比較 2026-11-09",
+        "relevant_sources": [
+          "tooling-research-2026-11-09.md"
+        ],
+        "mode": "dense",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/tooling-research-2026-11-09.md",
+          "passkey-gateway/docs/dsh-client-gpui-migration-2026-11-16.md",
+          "passkey-gateway/docs/dsh-home-consolidation-prep-2026-11-25.md",
+          "passkey-gateway/docs/zed-setup-2026-11-10.md",
+          "passkey-gateway/docs/tooling-research-2026-11-09.md",
+          "passkey-gateway/docs/agent-config-consolidation-2026-11-12.md",
+          "passkey-gateway/docs/zed-setup-2026-11-10.md",
+          "passkey-gateway/docs/tooling-research-2026-11-09.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/tooling-research-2026-11-09.md"
+        ],
+        "recall_at": {
+          "1": false,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 0.63093,
+          "10": 0.63093
+        },
+        "latency_sec": 0.051728,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.051728,
+          "median": 0.048658,
+          "min": 0.046598,
+          "max": 0.074627,
+          "stdev": 0.00792,
+          "samples": [
+            0.074627,
+            0.054165,
+            0.048808,
+            0.051173,
+            0.048384,
+            0.046656,
+            0.048509,
+            0.046598,
+            0.048314,
+            0.050048
+          ],
+          "cold_latency_sec": 1.18026
+        },
+        "call": "search(query=..., mode='dense', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h01-tooling-research",
+        "query": "DSH opencode VSCode Zed ツール 調査 比較 2026-11-09",
+        "relevant_sources": [
+          "tooling-research-2026-11-09.md"
+        ],
+        "mode": "keyword",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/FINAL-SUMMARY.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/community-research-2026-11-09.md",
+          "passkey-gateway/docs/tooling-research-2026-11-09.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/INDEX.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/tooling-research-2026-11-09.md"
+        ],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.430677
+        },
+        "latency_sec": 0.059503,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.059503,
+          "median": 0.05506,
+          "min": 0.053326,
+          "max": 0.076656,
+          "stdev": 0.00747,
+          "samples": [
+            0.076656,
+            0.066725,
+            0.066811,
+            0.055069,
+            0.054815,
+            0.053326,
+            0.053474,
+            0.054999,
+            0.055051,
+            0.058102
+          ],
+          "cold_latency_sec": 0.105567
+        },
+        "call": "search(query=..., mode='keyword', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h01-tooling-research",
+        "query": "DSH opencode VSCode Zed ツール 調査 比較 2026-11-09",
+        "relevant_sources": [
+          "tooling-research-2026-11-09.md"
+        ],
+        "mode": "hybrid",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/tooling-research-2026-11-09.md",
+          "passkey-gateway/docs/FINAL-SUMMARY.md",
+          "passkey-gateway/docs/tooling-research-2026-11-09.md",
+          "passkey-gateway/docs/community-research-2026-11-09.md",
+          "passkey-gateway/docs/dsh-client-gpui-migration-2026-11-16.md",
+          "passkey-gateway/docs/dsh-home-consolidation-prep-2026-11-25.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/zed-setup-2026-11-10.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/tooling-research-2026-11-09.md"
+        ],
+        "recall_at": {
+          "1": false,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 0.63093,
+          "10": 0.63093
+        },
+        "latency_sec": 0.108564,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.108564,
+          "median": 0.109973,
+          "min": 0.096318,
+          "max": 0.116459,
+          "stdev": 0.006686,
+          "samples": [
+            0.10927,
+            0.100688,
+            0.096318,
+            0.100469,
+            0.109948,
+            0.112136,
+            0.116459,
+            0.11627,
+            0.109999,
+            0.114089
+          ],
+          "cold_latency_sec": 0.103696
+        },
+        "call": "search(query=..., mode='hybrid', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h01-tooling-research",
+        "query": "DSH opencode VSCode Zed ツール 調査 比較 2026-11-09",
+        "relevant_sources": [
+          "tooling-research-2026-11-09.md"
+        ],
+        "mode": "hybrid-rerank",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/community-research-2026-11-09.md",
+          "passkey-gateway/docs/tooling-research-2026-11-09.md",
+          "passkey-gateway/docs/FINAL-SUMMARY.md",
+          "passkey-gateway/docs/tooling-research-2026-11-09.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/dsh-client-gpui-migration-2026-11-16.md",
+          "passkey-gateway/docs/dsh-home-consolidation-prep-2026-11-25.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/zed-setup-2026-11-10.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/tooling-research-2026-11-09.md"
+        ],
+        "recall_at": {
+          "1": false,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 0.63093,
+          "10": 0.63093
+        },
+        "latency_sec": 3.389973,
+        "latency_stats": {
+          "count": 10,
+          "avg": 3.389973,
+          "median": 3.369572,
+          "min": 3.188476,
+          "max": 3.703682,
+          "stdev": 0.156341,
+          "samples": [
+            3.241873,
+            3.458944,
+            3.188476,
+            3.345491,
+            3.580349,
+            3.457355,
+            3.393653,
+            3.703682,
+            3.216561,
+            3.313344
+          ],
+          "cold_latency_sec": 6.235545
+        },
+        "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h02-plugin-markets",
+        "query": "DSH プラグイン マーケット index 調査 結果",
+        "relevant_sources": [
+          "dsh-plugin-markets-research-2026-11-26.md"
+        ],
+        "mode": "dense",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/dsh-plugin-markets-research-2026-11-26.md",
+          "passkey-gateway/docs/dsh-plugin-markets-research-2026-11-26.md",
+          "passkey-gateway/docs/dsh-plugin-markets-research-2026-11-26.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/agent-config-consolidation-2026-11-12.md",
+          "passkey-gateway/docs/battery-drain-dsh-mobile-investigation-2026-11-21.md",
+          "passkey-gateway/docs/dsh-plugin-markets-research-2026-11-26.md",
+          "passkey-gateway/docs/jarvis-muse-dsh-roles.md",
+          "passkey-gateway/docs/dsh-opencode-gap-2026-11-11.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/dsh-plugin-markets-research-2026-11-26.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.038883,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.038883,
+          "median": 0.037121,
+          "min": 0.030989,
+          "max": 0.057169,
+          "stdev": 0.007933,
+          "samples": [
+            0.046019,
+            0.038008,
+            0.030989,
+            0.031095,
+            0.031313,
+            0.057169,
+            0.037794,
+            0.04516,
+            0.034831,
+            0.036448
+          ],
+          "cold_latency_sec": 0.068605
+        },
+        "call": "search(query=..., mode='dense', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h02-plugin-markets",
+        "query": "DSH プラグイン マーケット index 調査 結果",
+        "relevant_sources": [
+          "dsh-plugin-markets-research-2026-11-26.md"
+        ],
+        "mode": "keyword",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/dsh-plugin-markets-research-2026-11-26.md",
+          "passkey-gateway/docs/dsh-plugin-markets-research-2026-11-26.md",
+          "passkey-gateway/docs/session-local-cache-adr-2026-11-20.md",
+          "passkey-gateway/docs/dsh-client-gpui-migration-2026-11-16.md",
+          "passkey-gateway/docs/dsh-plugin-markets-research-2026-11-26.md",
+          "passkey-gateway/docs/dsh-opencode-gap-2026-11-11.md",
+          "passkey-gateway/docs/dsh-plugin-markets-research-2026-11-26.md",
+          "passkey-gateway/docs/dsh-plugin-markets-research-2026-11-26.md",
+          "passkey-gateway/docs/dsh-plugin-markets-research-2026-11-26.md",
+          "passkey-gateway/docs/dsh-plugin-markets-research-2026-11-26.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/dsh-plugin-markets-research-2026-11-26.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.070374,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.070374,
+          "median": 0.067128,
+          "min": 0.061769,
+          "max": 0.089254,
+          "stdev": 0.0086,
+          "samples": [
+            0.068145,
+            0.06412,
+            0.063889,
+            0.083868,
+            0.089254,
+            0.069663,
+            0.071184,
+            0.066112,
+            0.061769,
+            0.065739
+          ],
+          "cold_latency_sec": 0.068618
+        },
+        "call": "search(query=..., mode='keyword', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h02-plugin-markets",
+        "query": "DSH プラグイン マーケット index 調査 結果",
+        "relevant_sources": [
+          "dsh-plugin-markets-research-2026-11-26.md"
+        ],
+        "mode": "hybrid",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/dsh-plugin-markets-research-2026-11-26.md",
+          "passkey-gateway/docs/dsh-plugin-markets-research-2026-11-26.md",
+          "passkey-gateway/docs/dsh-plugin-markets-research-2026-11-26.md",
+          "passkey-gateway/docs/dsh-plugin-markets-research-2026-11-26.md",
+          "passkey-gateway/docs/dsh-plugin-markets-research-2026-11-26.md",
+          "passkey-gateway/docs/session-local-cache-adr-2026-11-20.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/dsh-client-gpui-migration-2026-11-16.md",
+          "passkey-gateway/docs/dsh-plugin-markets-research-2026-11-26.md",
+          "passkey-gateway/docs/agent-config-consolidation-2026-11-12.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/dsh-plugin-markets-research-2026-11-26.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.093051,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.093051,
+          "median": 0.091305,
+          "min": 0.0842,
+          "max": 0.108159,
+          "stdev": 0.007017,
+          "samples": [
+            0.101052,
+            0.108159,
+            0.093376,
+            0.089234,
+            0.085905,
+            0.08922,
+            0.095784,
+            0.0842,
+            0.09571,
+            0.087867
+          ],
+          "cold_latency_sec": 0.093914
+        },
+        "call": "search(query=..., mode='hybrid', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h02-plugin-markets",
+        "query": "DSH プラグイン マーケット index 調査 結果",
+        "relevant_sources": [
+          "dsh-plugin-markets-research-2026-11-26.md"
+        ],
+        "mode": "hybrid-rerank",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/dsh-plugin-markets-research-2026-11-26.md",
+          "passkey-gateway/docs/dsh-plugin-markets-research-2026-11-26.md",
+          "passkey-gateway/docs/dsh-plugin-markets-research-2026-11-26.md",
+          "passkey-gateway/docs/dsh-plugin-markets-research-2026-11-26.md",
+          "passkey-gateway/docs/dsh-plugin-markets-research-2026-11-26.md",
+          "passkey-gateway/docs/session-local-cache-adr-2026-11-20.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/dsh-client-gpui-migration-2026-11-16.md",
+          "passkey-gateway/docs/dsh-plugin-markets-research-2026-11-26.md",
+          "passkey-gateway/docs/agent-config-consolidation-2026-11-12.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/dsh-plugin-markets-research-2026-11-26.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 3.517373,
+        "latency_stats": {
+          "count": 10,
+          "avg": 3.517373,
+          "median": 3.496427,
+          "min": 3.1903,
+          "max": 4.035856,
+          "stdev": 0.217188,
+          "samples": [
+            3.430479,
+            3.554233,
+            3.43862,
+            3.56665,
+            3.326593,
+            3.659803,
+            3.1903,
+            3.38645,
+            3.584752,
+            4.035856
+          ],
+          "cold_latency_sec": 5.876586
+        },
+        "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h03-okf-v03",
+        "query": "OKF v0.3 アップグレード 提案 メタデータ",
+        "relevant_sources": [
+          "okf-v03-upgrade-proposal-2026-11-25.md"
+        ],
+        "mode": "dense",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/mobile-maxxing-adoption-2026-11-12.md",
+          "passkey-gateway/docs/mobile-maxxing-adoption-2026-11-12.md",
+          "passkey-gateway/docs/okf-v03-upgrade-proposal-2026-11-25.md",
+          "passkey-gateway/docs/operations-schedule.md",
+          "passkey-gateway/docs/okf-v03-upgrade-proposal-2026-11-25.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/mobile-maxxing-adoption-2026-11-12.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/windows-removal-plan-r3-20261122.md",
+          "passkey-gateway/docs/FINAL-SUMMARY.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/okf-v03-upgrade-proposal-2026-11-25.md"
+        ],
+        "recall_at": {
+          "1": false,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 0.5,
+          "10": 0.5
+        },
+        "latency_sec": 0.053136,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.053136,
+          "median": 0.053594,
+          "min": 0.047586,
+          "max": 0.057793,
+          "stdev": 0.003791,
+          "samples": [
+            0.056696,
+            0.055998,
+            0.057738,
+            0.057793,
+            0.048129,
+            0.048831,
+            0.052558,
+            0.054631,
+            0.047586,
+            0.051403
+          ],
+          "cold_latency_sec": 0.056225
+        },
+        "call": "search(query=..., mode='dense', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h03-okf-v03",
+        "query": "OKF v0.3 アップグレード 提案 メタデータ",
+        "relevant_sources": [
+          "okf-v03-upgrade-proposal-2026-11-25.md"
+        ],
+        "mode": "keyword",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/okf-v03-upgrade-proposal-2026-11-25.md",
+          "passkey-gateway/docs/okf-v03-upgrade-proposal-2026-11-25.md",
+          "passkey-gateway/docs/okf-v03-upgrade-proposal-2026-11-25.md",
+          "passkey-gateway/docs/rag-methods-selection-2026-11-26.md",
+          "passkey-gateway/docs/okf-v03-upgrade-proposal-2026-11-25.md",
+          "passkey-gateway/docs/rag-methods-selection-2026-11-26.md",
+          "passkey-gateway/docs/okf-v03-upgrade-proposal-2026-11-25.md",
+          "passkey-gateway/docs/okf-v03-upgrade-proposal-2026-11-25.md",
+          "passkey-gateway/docs/agents-skills-review-2026-11-09.md",
+          "passkey-gateway/docs/network-investigation-2026-11-21.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/okf-v03-upgrade-proposal-2026-11-25.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.071002,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.071002,
+          "median": 0.068933,
+          "min": 0.060918,
+          "max": 0.083924,
+          "stdev": 0.00788,
+          "samples": [
+            0.080216,
+            0.069213,
+            0.083924,
+            0.064459,
+            0.061173,
+            0.060918,
+            0.068653,
+            0.067032,
+            0.073592,
+            0.08084
+          ],
+          "cold_latency_sec": 0.086513
+        },
+        "call": "search(query=..., mode='keyword', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h03-okf-v03",
+        "query": "OKF v0.3 アップグレード 提案 メタデータ",
+        "relevant_sources": [
+          "okf-v03-upgrade-proposal-2026-11-25.md"
+        ],
+        "mode": "hybrid",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/okf-v03-upgrade-proposal-2026-11-25.md",
+          "passkey-gateway/docs/okf-v03-upgrade-proposal-2026-11-25.md",
+          "passkey-gateway/docs/okf-v03-upgrade-proposal-2026-11-25.md",
+          "passkey-gateway/docs/mobile-maxxing-adoption-2026-11-12.md",
+          "passkey-gateway/docs/mobile-maxxing-adoption-2026-11-12.md",
+          "passkey-gateway/docs/rag-methods-selection-2026-11-26.md",
+          "passkey-gateway/docs/operations-schedule.md",
+          "passkey-gateway/docs/okf-v03-upgrade-proposal-2026-11-25.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/rag-methods-selection-2026-11-26.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/okf-v03-upgrade-proposal-2026-11-25.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.112556,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.112556,
+          "median": 0.108082,
+          "min": 0.100951,
+          "max": 0.150006,
+          "stdev": 0.013671,
+          "samples": [
+            0.104741,
+            0.107359,
+            0.104915,
+            0.122033,
+            0.150006,
+            0.108805,
+            0.100951,
+            0.103657,
+            0.111207,
+            0.111883
+          ],
+          "cold_latency_sec": 0.115688
+        },
+        "call": "search(query=..., mode='hybrid', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h03-okf-v03",
+        "query": "OKF v0.3 アップグレード 提案 メタデータ",
+        "relevant_sources": [
+          "okf-v03-upgrade-proposal-2026-11-25.md"
+        ],
+        "mode": "hybrid-rerank",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/okf-v03-upgrade-proposal-2026-11-25.md",
+          "passkey-gateway/docs/okf-v03-upgrade-proposal-2026-11-25.md",
+          "passkey-gateway/docs/mobile-maxxing-adoption-2026-11-12.md",
+          "passkey-gateway/docs/mobile-maxxing-adoption-2026-11-12.md",
+          "passkey-gateway/docs/okf-v03-upgrade-proposal-2026-11-25.md",
+          "passkey-gateway/docs/rag-methods-selection-2026-11-26.md",
+          "passkey-gateway/docs/operations-schedule.md",
+          "passkey-gateway/docs/okf-v03-upgrade-proposal-2026-11-25.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/rag-methods-selection-2026-11-26.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/okf-v03-upgrade-proposal-2026-11-25.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 2.988032,
+        "latency_stats": {
+          "count": 10,
+          "avg": 2.988032,
+          "median": 2.974216,
+          "min": 2.751699,
+          "max": 3.319289,
+          "stdev": 0.176975,
+          "samples": [
+            3.156674,
+            3.114529,
+            2.769523,
+            3.319289,
+            2.981689,
+            2.751699,
+            3.10992,
+            2.966743,
+            2.806384,
+            2.90387
+          ],
+          "cold_latency_sec": 4.899284
+        },
+        "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h04-home-consolidation",
+        "query": "DSH_HOME 統合 準備 ディレクトリ バックアップ rsync",
+        "relevant_sources": [
+          "dsh-home-consolidation-prep-2026-11-25.md"
+        ],
+        "mode": "dense",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/dsh-home-consolidation-prep-2026-11-25.md",
+          "passkey-gateway/docs/STATUS.md",
+          "passkey-gateway/docs/dsh-session-controller-restore-2026-11-20.md",
+          "passkey-gateway/docs/dsh-home-consolidation-prep-2026-11-25.md",
+          "passkey-gateway/docs/dsh-home-consolidation-prep-2026-11-25.md",
+          "passkey-gateway/docs/dsh-home-consolidation-prep-2026-11-25.md",
+          "passkey-gateway/docs/dsh-loading-ux-local-fix-scope-2026-11-24.md",
+          "passkey-gateway/docs/sudoers-stage2-applied.md",
+          "passkey-gateway/docs/dsh-home-consolidation-prep-2026-11-25.md",
+          "passkey-gateway/docs/dsh-home-consolidation-prep-2026-11-25.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/dsh-home-consolidation-prep-2026-11-25.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.055989,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.055989,
+          "median": 0.056739,
+          "min": 0.049783,
+          "max": 0.06636,
+          "stdev": 0.004786,
+          "samples": [
+            0.058091,
+            0.06636,
+            0.058801,
+            0.051518,
+            0.051673,
+            0.051367,
+            0.055855,
+            0.058818,
+            0.057624,
+            0.049783
+          ],
+          "cold_latency_sec": 0.055291
+        },
+        "call": "search(query=..., mode='dense', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h04-home-consolidation",
+        "query": "DSH_HOME 統合 準備 ディレクトリ バックアップ rsync",
+        "relevant_sources": [
+          "dsh-home-consolidation-prep-2026-11-25.md"
+        ],
+        "mode": "keyword",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/cutover.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/dsh-home-consolidation-prep-2026-11-25.md",
+          "passkey-gateway/docs/dsh-home-consolidation-prep-2026-11-25.md",
+          "passkey-gateway/docs/dsh-home-consolidation-prep-2026-11-25.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/dsh-home-consolidation-prep-2026-11-25.md",
+          "passkey-gateway/docs/dsh-workspace-json-merge-2026-11-25.md",
+          "passkey-gateway/docs/sudoers-proposal.md",
+          "passkey-gateway/docs/cutover.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/dsh-home-consolidation-prep-2026-11-25.md"
+        ],
+        "recall_at": {
+          "1": false,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 0.5,
+          "10": 0.5
+        },
+        "latency_sec": 0.07257,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.07257,
+          "median": 0.074045,
+          "min": 0.060983,
+          "max": 0.082329,
+          "stdev": 0.00746,
+          "samples": [
+            0.073527,
+            0.077155,
+            0.079009,
+            0.067535,
+            0.066448,
+            0.082329,
+            0.074563,
+            0.060983,
+            0.06217,
+            0.081983
+          ],
+          "cold_latency_sec": 0.078454
+        },
+        "call": "search(query=..., mode='keyword', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h04-home-consolidation",
+        "query": "DSH_HOME 統合 準備 ディレクトリ バックアップ rsync",
+        "relevant_sources": [
+          "dsh-home-consolidation-prep-2026-11-25.md"
+        ],
+        "mode": "hybrid",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/dsh-home-consolidation-prep-2026-11-25.md",
+          "passkey-gateway/docs/dsh-home-consolidation-prep-2026-11-25.md",
+          "passkey-gateway/docs/cutover.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/STATUS.md",
+          "passkey-gateway/docs/dsh-session-controller-restore-2026-11-20.md",
+          "passkey-gateway/docs/dsh-home-consolidation-prep-2026-11-25.md",
+          "passkey-gateway/docs/dsh-home-consolidation-prep-2026-11-25.md",
+          "passkey-gateway/docs/dsh-home-consolidation-prep-2026-11-25.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/dsh-home-consolidation-prep-2026-11-25.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.126426,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.126426,
+          "median": 0.125655,
+          "min": 0.105306,
+          "max": 0.148253,
+          "stdev": 0.012934,
+          "samples": [
+            0.136636,
+            0.137081,
+            0.120741,
+            0.148253,
+            0.136663,
+            0.123987,
+            0.105306,
+            0.127323,
+            0.120716,
+            0.107558
+          ],
+          "cold_latency_sec": 0.133578
+        },
+        "call": "search(query=..., mode='hybrid', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h04-home-consolidation",
+        "query": "DSH_HOME 統合 準備 ディレクトリ バックアップ rsync",
+        "relevant_sources": [
+          "dsh-home-consolidation-prep-2026-11-25.md"
+        ],
+        "mode": "hybrid-rerank",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/dsh-home-consolidation-prep-2026-11-25.md",
+          "passkey-gateway/docs/dsh-home-consolidation-prep-2026-11-25.md",
+          "passkey-gateway/docs/cutover.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/STATUS.md",
+          "passkey-gateway/docs/dsh-session-controller-restore-2026-11-20.md",
+          "passkey-gateway/docs/dsh-home-consolidation-prep-2026-11-25.md",
+          "passkey-gateway/docs/dsh-home-consolidation-prep-2026-11-25.md",
+          "passkey-gateway/docs/dsh-home-consolidation-prep-2026-11-25.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/dsh-home-consolidation-prep-2026-11-25.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 3.438502,
+        "latency_stats": {
+          "count": 10,
+          "avg": 3.438502,
+          "median": 3.470024,
+          "min": 2.994419,
+          "max": 3.833119,
+          "stdev": 0.246737,
+          "samples": [
+            3.733468,
+            3.238915,
+            3.439889,
+            3.597981,
+            3.234363,
+            3.573742,
+            3.500159,
+            2.994419,
+            3.238959,
+            3.833119
+          ],
+          "cold_latency_sec": 6.24074
+        },
+        "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h05-fs-ext4",
+        "query": "ext4 ファイルシステム 選定 バックアップ レポート",
+        "relevant_sources": [
+          "fs-selection-ext4-report-20261123.md"
+        ],
+        "mode": "dense",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/DECISIONS.md",
+          "passkey-gateway/docs/timeshift-decision.md",
+          "passkey-gateway/docs/oci-decommission-runbook.md",
+          "passkey-gateway/docs/fs-selection-ext4-report-20261123.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/INDEX.md",
+          "passkey-gateway/docs/security-exposure-audit-2026-11-09.md",
+          "passkey-gateway/docs/security-exposure-audit-2026-11-09.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/fs-selection-ext4-report-20261123.md"
+        ],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.430677
+        },
+        "latency_sec": 0.033401,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.033401,
+          "median": 0.032299,
+          "min": 0.030014,
+          "max": 0.044176,
+          "stdev": 0.003925,
+          "samples": [
+            0.032439,
+            0.032291,
+            0.030915,
+            0.030014,
+            0.032306,
+            0.044176,
+            0.030638,
+            0.031304,
+            0.034911,
+            0.035017
+          ],
+          "cold_latency_sec": 0.057629
+        },
+        "call": "search(query=..., mode='dense', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h05-fs-ext4",
+        "query": "ext4 ファイルシステム 選定 バックアップ レポート",
+        "relevant_sources": [
+          "fs-selection-ext4-report-20261123.md"
+        ],
+        "mode": "keyword",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/fs-selection-ext4-report-20261123.md",
+          "passkey-gateway/docs/fs-selection-ext4-report-20261123.md",
+          "passkey-gateway/docs/timeshift-decision.md",
+          "passkey-gateway/docs/security-posture.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/timeshift-decision.md",
+          "passkey-gateway/docs/timeshift-decision.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/backup-restore.md",
+          "passkey-gateway/docs/backup-restore.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/fs-selection-ext4-report-20261123.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.061474,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.061474,
+          "median": 0.060441,
+          "min": 0.058574,
+          "max": 0.070529,
+          "stdev": 0.003326,
+          "samples": [
+            0.06072,
+            0.061799,
+            0.05923,
+            0.061955,
+            0.060162,
+            0.058574,
+            0.059446,
+            0.05913,
+            0.070529,
+            0.063197
+          ],
+          "cold_latency_sec": 0.062391
+        },
+        "call": "search(query=..., mode='keyword', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h05-fs-ext4",
+        "query": "ext4 ファイルシステム 選定 バックアップ レポート",
+        "relevant_sources": [
+          "fs-selection-ext4-report-20261123.md"
+        ],
+        "mode": "hybrid",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/fs-selection-ext4-report-20261123.md",
+          "passkey-gateway/docs/DECISIONS.md",
+          "passkey-gateway/docs/fs-selection-ext4-report-20261123.md",
+          "passkey-gateway/docs/timeshift-decision.md",
+          "passkey-gateway/docs/timeshift-decision.md",
+          "passkey-gateway/docs/oci-decommission-runbook.md",
+          "passkey-gateway/docs/security-posture.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/timeshift-decision.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/fs-selection-ext4-report-20261123.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.092127,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.092127,
+          "median": 0.09006,
+          "min": 0.086029,
+          "max": 0.099694,
+          "stdev": 0.004452,
+          "samples": [
+            0.095123,
+            0.086029,
+            0.093733,
+            0.08969,
+            0.089026,
+            0.099694,
+            0.099501,
+            0.090431,
+            0.088776,
+            0.089267
+          ],
+          "cold_latency_sec": 0.090515
+        },
+        "call": "search(query=..., mode='hybrid', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h05-fs-ext4",
+        "query": "ext4 ファイルシステム 選定 バックアップ レポート",
+        "relevant_sources": [
+          "fs-selection-ext4-report-20261123.md"
+        ],
+        "mode": "hybrid-rerank",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/DECISIONS.md",
+          "passkey-gateway/docs/fs-selection-ext4-report-20261123.md",
+          "passkey-gateway/docs/fs-selection-ext4-report-20261123.md",
+          "passkey-gateway/docs/timeshift-decision.md",
+          "passkey-gateway/docs/timeshift-decision.md",
+          "passkey-gateway/docs/oci-decommission-runbook.md",
+          "passkey-gateway/docs/security-posture.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/timeshift-decision.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/fs-selection-ext4-report-20261123.md"
+        ],
+        "recall_at": {
+          "1": false,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 0.63093,
+          "10": 0.63093
+        },
+        "latency_sec": 3.356946,
+        "latency_stats": {
+          "count": 10,
+          "avg": 3.356946,
+          "median": 3.321194,
+          "min": 3.130158,
+          "max": 3.686642,
+          "stdev": 0.193062,
+          "samples": [
+            3.535792,
+            3.13167,
+            3.466733,
+            3.221657,
+            3.130158,
+            3.686642,
+            3.193831,
+            3.20878,
+            3.573459,
+            3.420732
+          ],
+          "cold_latency_sec": 6.300103
+        },
+        "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h06-session-cache-adr",
+        "query": "セッション ローカル キャッシュ ADR 差分取得 cursor 決定",
+        "relevant_sources": [
+          "session-local-cache-adr-2026-11-22.md",
+          "session-local-cache-adr-2026-11-20.md"
+        ],
+        "mode": "dense",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/session-local-cache-adr-2026-11-22.md",
+          "passkey-gateway/docs/session-local-cache-adr-2026-11-20.md",
+          "passkey-gateway/docs/session-local-cache-adr-2026-11-20.md",
+          "passkey-gateway/docs/mobile-storage-utilization-research-2026-11-22.md",
+          "passkey-gateway/docs/jarvis-oci-decommission-assessment.md",
+          "passkey-gateway/docs/session-local-cache-adr-2026-11-22.md",
+          "passkey-gateway/docs/dsh-session-create-failed-2026-11-11.md",
+          "passkey-gateway/docs/battery-drain-dsh-mobile-investigation-2026-11-21.md",
+          "passkey-gateway/docs/session-local-cache-adr-2026-11-22.md",
+          "passkey-gateway/docs/session-local-cache-adr-2026-11-20.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/session-local-cache-adr-2026-11-20.md",
+          "passkey-gateway/docs/session-local-cache-adr-2026-11-22.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.051683,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.051683,
+          "median": 0.05045,
+          "min": 0.04471,
+          "max": 0.062402,
+          "stdev": 0.005077,
+          "samples": [
+            0.062402,
+            0.051997,
+            0.048139,
+            0.04471,
+            0.054848,
+            0.047279,
+            0.048336,
+            0.048903,
+            0.052889,
+            0.057321
+          ],
+          "cold_latency_sec": 0.056557
+        },
+        "call": "search(query=..., mode='dense', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h06-session-cache-adr",
+        "query": "セッション ローカル キャッシュ ADR 差分取得 cursor 決定",
+        "relevant_sources": [
+          "session-local-cache-adr-2026-11-22.md",
+          "session-local-cache-adr-2026-11-20.md"
+        ],
+        "mode": "keyword",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/session-local-cache-adr-2026-11-22.md",
+          "passkey-gateway/docs/session-local-cache-adr-2026-11-20.md",
+          "passkey-gateway/docs/mobile-storage-utilization-research-2026-11-22.md",
+          "passkey-gateway/docs/mobile-storage-utilization-research-2026-11-22.md",
+          "passkey-gateway/docs/session-cache-verification-2026-11-22.md",
+          "passkey-gateway/docs/session-local-cache-adr-2026-11-22.md",
+          "passkey-gateway/docs/session-cache-verification-2026-11-22.md",
+          "passkey-gateway/docs/dsh-home-consolidation-prep-2026-11-25.md",
+          "passkey-gateway/docs/oci-decommission-runbook.md",
+          "passkey-gateway/docs/dsh-home-consolidation-prep-2026-11-25.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/session-local-cache-adr-2026-11-20.md",
+          "passkey-gateway/docs/session-local-cache-adr-2026-11-22.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.063294,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.063294,
+          "median": 0.062254,
+          "min": 0.060517,
+          "max": 0.068005,
+          "stdev": 0.002408,
+          "samples": [
+            0.061852,
+            0.06279,
+            0.061652,
+            0.060517,
+            0.061837,
+            0.061323,
+            0.066528,
+            0.062656,
+            0.068005,
+            0.065781
+          ],
+          "cold_latency_sec": 0.067074
+        },
+        "call": "search(query=..., mode='keyword', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h06-session-cache-adr",
+        "query": "セッション ローカル キャッシュ ADR 差分取得 cursor 決定",
+        "relevant_sources": [
+          "session-local-cache-adr-2026-11-22.md",
+          "session-local-cache-adr-2026-11-20.md"
+        ],
+        "mode": "hybrid",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/session-local-cache-adr-2026-11-22.md",
+          "passkey-gateway/docs/session-local-cache-adr-2026-11-20.md",
+          "passkey-gateway/docs/session-local-cache-adr-2026-11-20.md",
+          "passkey-gateway/docs/session-local-cache-adr-2026-11-20.md",
+          "passkey-gateway/docs/mobile-storage-utilization-research-2026-11-22.md",
+          "passkey-gateway/docs/mobile-storage-utilization-research-2026-11-22.md",
+          "passkey-gateway/docs/mobile-storage-utilization-research-2026-11-22.md",
+          "passkey-gateway/docs/jarvis-oci-decommission-assessment.md",
+          "passkey-gateway/docs/session-cache-verification-2026-11-22.md",
+          "passkey-gateway/docs/session-local-cache-adr-2026-11-22.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/session-local-cache-adr-2026-11-20.md",
+          "passkey-gateway/docs/session-local-cache-adr-2026-11-22.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.117359,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.117359,
+          "median": 0.114589,
+          "min": 0.106039,
+          "max": 0.145476,
+          "stdev": 0.012008,
+          "samples": [
+            0.106039,
+            0.114353,
+            0.120094,
+            0.115415,
+            0.110475,
+            0.114825,
+            0.10707,
+            0.107074,
+            0.132769,
+            0.145476
+          ],
+          "cold_latency_sec": 0.10942
+        },
+        "call": "search(query=..., mode='hybrid', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h06-session-cache-adr",
+        "query": "セッション ローカル キャッシュ ADR 差分取得 cursor 決定",
+        "relevant_sources": [
+          "session-local-cache-adr-2026-11-22.md",
+          "session-local-cache-adr-2026-11-20.md"
+        ],
+        "mode": "hybrid-rerank",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/session-local-cache-adr-2026-11-20.md",
+          "passkey-gateway/docs/mobile-storage-utilization-research-2026-11-22.md",
+          "passkey-gateway/docs/session-local-cache-adr-2026-11-20.md",
+          "passkey-gateway/docs/session-local-cache-adr-2026-11-22.md",
+          "passkey-gateway/docs/session-local-cache-adr-2026-11-20.md",
+          "passkey-gateway/docs/mobile-storage-utilization-research-2026-11-22.md",
+          "passkey-gateway/docs/mobile-storage-utilization-research-2026-11-22.md",
+          "passkey-gateway/docs/jarvis-oci-decommission-assessment.md",
+          "passkey-gateway/docs/session-cache-verification-2026-11-22.md",
+          "passkey-gateway/docs/session-local-cache-adr-2026-11-22.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/session-local-cache-adr-2026-11-20.md",
+          "passkey-gateway/docs/session-local-cache-adr-2026-11-22.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 0.613147,
+          "10": 0.877215
+        },
+        "latency_sec": 3.046642,
+        "latency_stats": {
+          "count": 10,
+          "avg": 3.046642,
+          "median": 2.953766,
+          "min": 2.647536,
+          "max": 3.485379,
+          "stdev": 0.295274,
+          "samples": [
+            2.741323,
+            2.752034,
+            3.013496,
+            2.894036,
+            2.647536,
+            2.890498,
+            3.436879,
+            3.23948,
+            3.36576,
+            3.485379
+          ],
+          "cold_latency_sec": 5.338405
+        },
+        "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h07-network-investigation",
+        "query": "ネットワーク 調査 Tailscale 到達性 結果",
+        "relevant_sources": [
+          "network-investigation-2026-11-21.md"
+        ],
+        "mode": "dense",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/network-investigation-2026-11-21.md",
+          "passkey-gateway/docs/remote-access-and-muse-plan.md",
+          "passkey-gateway/docs/tailscale-exit-study.md",
+          "passkey-gateway/docs/tailscale-exit-study.md",
+          "passkey-gateway/docs/INDEX.md",
+          "passkey-gateway/docs/tailscale-exit-study.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/tailscale-exit-study.md",
+          "passkey-gateway/docs/remote-access-and-muse-plan.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/network-investigation-2026-11-21.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.059566,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.059566,
+          "median": 0.055273,
+          "min": 0.049768,
+          "max": 0.082419,
+          "stdev": 0.010232,
+          "samples": [
+            0.055244,
+            0.055302,
+            0.072722,
+            0.049768,
+            0.082419,
+            0.064937,
+            0.059951,
+            0.053851,
+            0.0514,
+            0.050062
+          ],
+          "cold_latency_sec": 0.068798
+        },
+        "call": "search(query=..., mode='dense', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h07-network-investigation",
+        "query": "ネットワーク 調査 Tailscale 到達性 結果",
+        "relevant_sources": [
+          "network-investigation-2026-11-21.md"
+        ],
+        "mode": "keyword",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/network-investigation-2026-11-21.md",
+          "passkey-gateway/docs/agents-skills-review-2026-11-09.md",
+          "passkey-gateway/docs/session-local-cache-adr-2026-11-20.md",
+          "passkey-gateway/docs/INDEX.md",
+          "passkey-gateway/docs/dsh-client-gpui-migration-2026-11-16.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/mobile-storage-utilization-research-2026-11-22.md",
+          "passkey-gateway/docs/opencode-android-connectivity-research-2026-11-22.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/fudegurume-fudemame-free-alternatives-research-2026-11-22.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/network-investigation-2026-11-21.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.073161,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.073161,
+          "median": 0.073016,
+          "min": 0.066074,
+          "max": 0.081178,
+          "stdev": 0.004807,
+          "samples": [
+            0.074492,
+            0.077215,
+            0.07133,
+            0.070054,
+            0.078995,
+            0.066074,
+            0.066241,
+            0.074322,
+            0.07171,
+            0.081178
+          ],
+          "cold_latency_sec": 0.105002
+        },
+        "call": "search(query=..., mode='keyword', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h07-network-investigation",
+        "query": "ネットワーク 調査 Tailscale 到達性 結果",
+        "relevant_sources": [
+          "network-investigation-2026-11-21.md"
+        ],
+        "mode": "hybrid",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/network-investigation-2026-11-21.md",
+          "passkey-gateway/docs/network-investigation-2026-11-21.md",
+          "passkey-gateway/docs/agents-skills-review-2026-11-09.md",
+          "passkey-gateway/docs/remote-access-and-muse-plan.md",
+          "passkey-gateway/docs/session-local-cache-adr-2026-11-20.md",
+          "passkey-gateway/docs/tailscale-exit-study.md",
+          "passkey-gateway/docs/INDEX.md",
+          "passkey-gateway/docs/tailscale-exit-study.md",
+          "passkey-gateway/docs/dsh-client-gpui-migration-2026-11-16.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/network-investigation-2026-11-21.md"
+        ],
+        "recall_at": {
+          "1": false,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 0.63093,
+          "10": 0.63093
+        },
+        "latency_sec": 0.127377,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.127377,
+          "median": 0.125499,
+          "min": 0.100738,
+          "max": 0.150187,
+          "stdev": 0.016911,
+          "samples": [
+            0.120771,
+            0.127518,
+            0.147838,
+            0.12348,
+            0.103685,
+            0.100738,
+            0.116778,
+            0.147952,
+            0.134827,
+            0.150187
+          ],
+          "cold_latency_sec": 0.167997
+        },
+        "call": "search(query=..., mode='hybrid', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h07-network-investigation",
+        "query": "ネットワーク 調査 Tailscale 到達性 結果",
+        "relevant_sources": [
+          "network-investigation-2026-11-21.md"
+        ],
+        "mode": "hybrid-rerank",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/network-investigation-2026-11-21.md",
+          "passkey-gateway/docs/agents-skills-review-2026-11-09.md",
+          "passkey-gateway/docs/network-investigation-2026-11-21.md",
+          "passkey-gateway/docs/remote-access-and-muse-plan.md",
+          "passkey-gateway/docs/session-local-cache-adr-2026-11-20.md",
+          "passkey-gateway/docs/tailscale-exit-study.md",
+          "passkey-gateway/docs/INDEX.md",
+          "passkey-gateway/docs/tailscale-exit-study.md",
+          "passkey-gateway/docs/dsh-client-gpui-migration-2026-11-16.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/network-investigation-2026-11-21.md"
+        ],
+        "recall_at": {
+          "1": false,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 0.63093,
+          "10": 0.63093
+        },
+        "latency_sec": 3.396457,
+        "latency_stats": {
+          "count": 10,
+          "avg": 3.396457,
+          "median": 3.408909,
+          "min": 3.201296,
+          "max": 3.61868,
+          "stdev": 0.132775,
+          "samples": [
+            3.443822,
+            3.470088,
+            3.447746,
+            3.61868,
+            3.568786,
+            3.222242,
+            3.373997,
+            3.272482,
+            3.201296,
+            3.34543
+          ],
+          "cold_latency_sec": 5.854197
+        },
+        "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h08-health-report",
+        "query": "健康 点検 anomalies journal 検出 異常 HDD pending sectors",
+        "relevant_sources": [
+          "system-health-anomalies-2026-11-09.md"
+        ],
+        "mode": "dense",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/system-health-anomalies-2026-11-09.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/STATUS.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/FINAL-SUMMARY.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/system-health-anomalies-2026-11-09.md"
+        ],
+        "recall_at": {
+          "1": false,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 0.63093,
+          "10": 0.63093
+        },
+        "latency_sec": 0.052689,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.052689,
+          "median": 0.051379,
+          "min": 0.045588,
+          "max": 0.06277,
+          "stdev": 0.005406,
+          "samples": [
+            0.052251,
+            0.050895,
+            0.051713,
+            0.047552,
+            0.051045,
+            0.06277,
+            0.047943,
+            0.061313,
+            0.055824,
+            0.045588
+          ],
+          "cold_latency_sec": 0.073256
+        },
+        "call": "search(query=..., mode='dense', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h08-health-report",
+        "query": "健康 点検 anomalies journal 検出 異常 HDD pending sectors",
+        "relevant_sources": [
+          "system-health-anomalies-2026-11-09.md"
+        ],
+        "mode": "keyword",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/system-health-anomalies-2026-11-09.md",
+          "passkey-gateway/docs/FINAL-SUMMARY.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/system-health-anomalies-2026-11-09.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/system-health-anomalies-2026-11-09.md"
+        ],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.430677
+        },
+        "latency_sec": 0.064138,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.064138,
+          "median": 0.064044,
+          "min": 0.053245,
+          "max": 0.075819,
+          "stdev": 0.007,
+          "samples": [
+            0.070156,
+            0.071047,
+            0.062638,
+            0.058691,
+            0.065008,
+            0.067761,
+            0.075819,
+            0.06308,
+            0.053937,
+            0.053245
+          ],
+          "cold_latency_sec": 0.07266
+        },
+        "call": "search(query=..., mode='keyword', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h08-health-report",
+        "query": "健康 点検 anomalies journal 検出 異常 HDD pending sectors",
+        "relevant_sources": [
+          "system-health-anomalies-2026-11-09.md"
+        ],
+        "mode": "hybrid",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/system-health-anomalies-2026-11-09.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/FINAL-SUMMARY.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/system-health-anomalies-2026-11-09.md",
+          "passkey-gateway/docs/STATUS.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/system-health-anomalies-2026-11-09.md"
+        ],
+        "recall_at": {
+          "1": false,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 0.5,
+          "10": 0.5
+        },
+        "latency_sec": 0.1124,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.1124,
+          "median": 0.10478,
+          "min": 0.097825,
+          "max": 0.145263,
+          "stdev": 0.014676,
+          "samples": [
+            0.097825,
+            0.102061,
+            0.098733,
+            0.113252,
+            0.104862,
+            0.104584,
+            0.104699,
+            0.126508,
+            0.126216,
+            0.145263
+          ],
+          "cold_latency_sec": 0.097169
+        },
+        "call": "search(query=..., mode='hybrid', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h08-health-report",
+        "query": "健康 点検 anomalies journal 検出 異常 HDD pending sectors",
+        "relevant_sources": [
+          "system-health-anomalies-2026-11-09.md"
+        ],
+        "mode": "hybrid-rerank",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/FINAL-SUMMARY.md",
+          "passkey-gateway/docs/system-health-anomalies-2026-11-09.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/system-health-anomalies-2026-11-09.md",
+          "passkey-gateway/docs/STATUS.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/system-health-anomalies-2026-11-09.md"
+        ],
+        "recall_at": {
+          "1": false,
+          "3": false,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 0.0,
+          "10": 0.386853
+        },
+        "latency_sec": 3.287006,
+        "latency_stats": {
+          "count": 10,
+          "avg": 3.287006,
+          "median": 3.268107,
+          "min": 3.132809,
+          "max": 3.618135,
+          "stdev": 0.134007,
+          "samples": [
+            3.328889,
+            3.382311,
+            3.319831,
+            3.132809,
+            3.212358,
+            3.618135,
+            3.283244,
+            3.170126,
+            3.169389,
+            3.252969
+          ],
+          "cold_latency_sec": 6.068555
+        },
+        "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h09-container-tools",
+        "query": "kiri docker コンテナ ツール セットアップ 権限",
+        "relevant_sources": [
+          "container-tools-setup-2026-11-21.md"
+        ],
+        "mode": "dense",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/container-tools-setup-2026-11-21.md",
+          "passkey-gateway/docs/docker-group-separation.md",
+          "passkey-gateway/docs/container-tools-setup-2026-11-21.md",
+          "passkey-gateway/docs/FINAL-SUMMARY.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/container-tools-setup-2026-11-21.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/security-posture.md",
+          "passkey-gateway/docs/docker-group-separation.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/container-tools-setup-2026-11-21.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.049704,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.049704,
+          "median": 0.047593,
+          "min": 0.043921,
+          "max": 0.068562,
+          "stdev": 0.006737,
+          "samples": [
+            0.050846,
+            0.045808,
+            0.051959,
+            0.068562,
+            0.046631,
+            0.045433,
+            0.049381,
+            0.048555,
+            0.045947,
+            0.043921
+          ],
+          "cold_latency_sec": 0.051933
+        },
+        "call": "search(query=..., mode='dense', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h09-container-tools",
+        "query": "kiri docker コンテナ ツール セットアップ 権限",
+        "relevant_sources": [
+          "container-tools-setup-2026-11-21.md"
+        ],
+        "mode": "keyword",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/container-tools-setup-2026-11-21.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/container-tools-setup-2026-11-21.md",
+          "passkey-gateway/docs/container-tools-setup-2026-11-21.md",
+          "passkey-gateway/docs/container-tools-setup-2026-11-21.md",
+          "passkey-gateway/docs/container-tools-setup-2026-11-21.md",
+          "passkey-gateway/docs/docker-group-separation.md",
+          "passkey-gateway/docs/container-tools-setup-2026-11-21.md",
+          "passkey-gateway/docs/agents-skills-review-proposals/README.md",
+          "passkey-gateway/docs/FINAL-SUMMARY.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/container-tools-setup-2026-11-21.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.056679,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.056679,
+          "median": 0.056779,
+          "min": 0.053068,
+          "max": 0.062378,
+          "stdev": 0.002824,
+          "samples": [
+            0.058835,
+            0.062378,
+            0.056509,
+            0.053068,
+            0.053616,
+            0.059044,
+            0.0548,
+            0.057049,
+            0.053609,
+            0.057887
+          ],
+          "cold_latency_sec": 0.076293
+        },
+        "call": "search(query=..., mode='keyword', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h09-container-tools",
+        "query": "kiri docker コンテナ ツール セットアップ 権限",
+        "relevant_sources": [
+          "container-tools-setup-2026-11-21.md"
+        ],
+        "mode": "hybrid",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/container-tools-setup-2026-11-21.md",
+          "passkey-gateway/docs/container-tools-setup-2026-11-21.md",
+          "passkey-gateway/docs/container-tools-setup-2026-11-21.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/FINAL-SUMMARY.md",
+          "passkey-gateway/docs/docker-group-separation.md",
+          "passkey-gateway/docs/docker-group-separation.md",
+          "passkey-gateway/docs/container-tools-setup-2026-11-21.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/container-tools-setup-2026-11-21.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/container-tools-setup-2026-11-21.md"
+        ],
+        "recall_at": {
+          "1": true,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 1.0,
+          "10": 1.0
+        },
+        "latency_sec": 0.096808,
+        "latency_stats": {
+          "count": 10,
+          "avg": 0.096808,
+          "median": 0.093759,
+          "min": 0.090163,
+          "max": 0.111833,
+          "stdev": 0.006502,
+          "samples": [
+            0.111833,
+            0.103414,
+            0.093863,
+            0.101675,
+            0.09695,
+            0.093656,
+            0.090163,
+            0.09348,
+            0.091425,
+            0.091626
+          ],
+          "cold_latency_sec": 0.101764
+        },
+        "call": "search(query=..., mode='hybrid', top_k=10)",
+        "error": null
+      },
+      {
+        "id": "h09-container-tools",
+        "query": "kiri docker コンテナ ツール セットアップ 権限",
+        "relevant_sources": [
+          "container-tools-setup-2026-11-21.md"
+        ],
+        "mode": "hybrid-rerank",
+        "retrieval_k": 10,
+        "hits": 10,
+        "sources": [
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/container-tools-setup-2026-11-21.md",
+          "passkey-gateway/docs/container-tools-setup-2026-11-21.md",
+          "passkey-gateway/docs/container-tools-setup-2026-11-21.md",
+          "passkey-gateway/docs/FINAL-SUMMARY.md",
+          "passkey-gateway/docs/docker-group-separation.md",
+          "passkey-gateway/docs/docker-group-separation.md",
+          "passkey-gateway/docs/container-tools-setup-2026-11-21.md",
+          "passkey-gateway/docs/current-state-2026-11-08.md",
+          "passkey-gateway/docs/container-tools-setup-2026-11-21.md"
+        ],
+        "matched_sources": [
+          "passkey-gateway/docs/container-tools-setup-2026-11-21.md"
+        ],
+        "recall_at": {
+          "1": false,
+          "3": true,
+          "5": true,
+          "10": true
+        },
+        "ndcg_at": {
+          "3": 0.63093,
+          "10": 0.63093
+        },
+        "latency_sec": 3.340598,
+        "latency_stats": {
+          "count": 10,
+          "avg": 3.340598,
+          "median": 3.382996,
+          "min": 2.881724,
+          "max": 3.516436,
+          "stdev": 0.170668,
+          "samples": [
+            3.38637,
+            3.468507,
+            3.378071,
+            3.379623,
+            3.516436,
+            3.388261,
+            3.231505,
+            3.457706,
+            3.317782,
+            2.881724
+          ],
+          "cold_latency_sec": 5.479677
+        },
+        "call": "search(query=..., mode='hybrid-rerank', top_k=10)",
+        "error": null
+      }
+    ]
+  }
+}

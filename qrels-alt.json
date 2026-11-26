@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-11-26T11:25:00+09:00",
+  "author": "lead/swarm-unlimited",
+  "selection_criteria": "work/openrustbooks/docs/decisions/ の ADR 6 ファイル（0001/0002/0003/0004/0005/0007）を別ドメインの第2ベンチマークとして人手で選択。各クエリは ADR 本文に実際に現れる決定・用語から作成し、簡易 eval (q01-q06) と heldout (h01-h06) でトピックが重複しないように割り当てた。",
+  "reviewer": "未レビュー（単一作成者）",
+  "notes": "ラベルはファイル名（basename 照合）。対応コーパスは rag_poc/corpus-alt/ 配下の6ファイル。コーパス更新時に実在確認が必要。",
+  "simple_queries": [
+    {"id": "q01-tauri-webview", "query": "デスクトップ版でOSのWebViewを採用した理由は", "expected": ["Tauri", "WebView", "wry", "WebView2"]},
+    {"id": "q02-ai-markdown", "query": "AIを使ったMarkdown生成・修正パイプライン", "expected": ["rumdl", "markdownlint", "tiktoken-rs"]},
+    {"id": "q03-wasm-split", "query": "WASMターゲットをどう分割したか", "expected": ["wasm32", "target_arch", "tokio", "cfg"]},
+    {"id": "q04-zip-reader", "query": "Zipアーカイブの読み取り方式", "expected": ["zip", "ArchiveReader", "fail-closed", "ArchiveLimits"]},
+    {"id": "q05-epub-body", "query": "EPUB本文の読み出しをどう実装したか", "expected": ["quick-xml", "container.xml", "OPF", "EpubBook"]},
+    {"id": "q06-epub-toc-fragment", "query": "EPUBの目次フラグメント問題", "expected": ["fragment", "EpubTocEntry", "href", "split_fragment"]}
+  ],
+  "heldout_queries": [
+    {"id": "h01-webview-decision", "query": "システム WebView 採用 理由 Tauri wry 配布サイズ CEF", "relevant_sources": ["0001-use-system-webview.md"]},
+    {"id": "h02-markdown-pipeline", "query": "AI Markdown パイプライン rumdl プロンプトレジストリ CodeMirror", "relevant_sources": ["0002-ai-markdown-pipeline.md"]},
+    {"id": "h03-target-split", "query": "共通コア ターゲット別依存 分割 wasm32 cfg tokio Trunk", "relevant_sources": ["0003-native-wasm-target-split.md"]},
+    {"id": "h04-archive-safety", "query": "ZIP アーカイブ 読み取り専用 パス逸脱 過大展開 zip クレート", "relevant_sources": ["0004-zip-archive-reader.md"]},
+    {"id": "h05-epub-body-reading", "query": "EPUB 本文 抽出 container.xml OPF quick-xml 章", "relevant_sources": ["0005-epub-body-reading.md"]},
+    {"id": "h06-toc-fragments", "query": "EPUB 目次 フラグメント 保持 EpubTocEntry 空パス 読み飛ばし", "relevant_sources": ["0007-epub-toc-fragments.md"]}
+  ]
+}

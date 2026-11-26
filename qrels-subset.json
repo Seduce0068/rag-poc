@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-11-26T12:58:00+09:00",
+  "author": "lead/swarm-unlimited",
+  "selection_criteria": "rag_poc/corpus-subset/ の6ファイルに対する正解ラベル。ファイル名・見出しから人手で選定。qwen と ruri の同一条件比較用。",
+  "reviewer": "未レビュー（単一作成者）",
+  "notes": "full コーパス用 qrels.json とは正解ファイルが異なる。embed_model 切替時は対応するコレクションを指定する。",
+  "simple_queries": [
+    {"id": "s01-sudo", "query": "パスキー sudo の使い方", "expected": ["sudo", "passkey"]},
+    {"id": "s02-token", "query": "DSH 起動トークンの取得方法", "expected": ["token", "journalctl"]},
+    {"id": "s03-rag", "query": "RAG の検索モードを比較する方法", "expected": ["rag", "hybrid"]},
+    {"id": "s04-security", "query": "セキュリティ設計の基本方針", "expected": ["security", "posture"]},
+    {"id": "s05-summary", "query": "環境全体の最終サマリー", "expected": ["FINAL", "SUMMARY"]},
+    {"id": "s06-roles", "query": "jarvis と muse と DSH の役割分担", "expected": ["jarvis", "muse"]}
+  ],
+  "heldout_queries": [
+    {"id": "h-s01", "query": "パスキー認証で sudo を使う手順", "relevant_sources": ["passkey-sudo-design.md"]},
+    {"id": "h-s02", "query": "DSH 起動トークンを journalctl から取得する", "relevant_sources": ["dsh-token-rd-fix-2026-11-25.md"]},
+    {"id": "h-s03", "query": "RAG のベクトル検索とハイブリッド検索の選定", "relevant_sources": ["rag-methods-selection-2026-11-26.md"]},
+    {"id": "h-s04", "query": "セキュリティ posture の監査方針", "relevant_sources": ["security-posture.md"]},
+    {"id": "h-s05", "query": "環境全体の構成と最終状態", "relevant_sources": ["FINAL-SUMMARY.md"]},
+    {"id": "h-s06", "query": "jarvis muse DSH の役割分担", "relevant_sources": ["jarvis-muse-dsh-roles.md"]}
+  ]
+}
