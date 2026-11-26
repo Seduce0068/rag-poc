@@ -1,0 +1,31 @@
+name: rag_poc CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rag_poc-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    uses: Seduce0068/workflows/.github/workflows/rust-gates.yml@v1
+    with:
+      manifest-path: ragcore/Cargo.toml
+      extra-gates: |
+        python3 test_rag.py
+        python3 - <<'PY'
+        import json
+        from pathlib import Path
+        for path in Path('.').glob('eval-results-*.json'):
+            data = json.loads(path.read_text(encoding='utf-8'))
+            assert 'schema_version' in data, path
+            assert 'qrels_label' in data, path
+        print('JSON schema/qrels_label OK')
+        PY
