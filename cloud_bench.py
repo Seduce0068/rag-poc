@@ -8,6 +8,8 @@
   RAG_CLOUD_ENABLED=1 python3 rag_poc/cloud_bench.py --repeat 3 --with-generation
   RAG_CLOUD_ENABLED=1 python3 rag_poc/cloud_bench.py --with-generation --generation-model deepseek-v4.1-flash
    RAG_CLOUD_ENABLED=1 python3 rag_poc/cloud_bench.py --with-generation --generation-max-queries 3  # コスト制限時のみ先頭3件
+  RAG_CLOUD_ENABLED=1 python3 rag_poc/cloud_bench.py --with-generation --strict-rank  # 範囲外/重複 rank を generation_error へ昇格
+  RAG_CLOUD_ENABLED=1 python3 rag_poc/cloud_bench.py --with-generation --rerank-file-dedupe  # 同一ファイルの best score チャンクのみ rerank
   RAG_CLOUD_ENABLED=1 python3 rag_poc/cloud_bench.py --list-models  # /v1/models から利用可能 ID を取得
 
 起動時に config.validate_settings() を呼ぶ。RAG_CLOUD_ENABLED=1 では
@@ -219,6 +221,40 @@ def _estimated_cost_usd(
     if tokens is None:
         return None
     return round(price * tokens / 1_000_000, 6)
+
+
+def _usage_cost_source(
+    usage_payload: dict[str, int | float] | None, embed_model: str
+) -> str | None:
+    """usage のコスト出所を 'api' / 'estimated' / None で返す。
+
+    API が cost を返していれば実値（'api'）を優先する。cost が無く、既知の
+    埋め込み単価と total_tokens があれば単価推定（'estimated'）。どちらも
+    無ければ None（判定不能として usage に None を残す）。
+    """
+    if not usage_payload:
+        return None
+    if _usage_cost(usage_payload.get("cost")) is not None:
+        return "api"
+    if (
+        _usage_cost(usage_payload.get("total_tokens")) is not None
+        and embed_model in EMBED_PRICE_USD_PER_MILLION
+    ):
+        return "estimated"
+    return None
+
+
+def _token_cost_usd(total_tokens: object, embed_model: str) -> float | None:
+    """単価 × total_tokens の推定値を返す（単価不明なら None）。
+
+    summary.estimated_cost_usd は 6 桁丸めのため、トークン数が少ないと 0.0 に
+    潰れる。その場合でもトークン由来の見込みを残すため、ここでは 12 桁で丸める。
+    """
+    price = EMBED_PRICE_USD_PER_MILLION.get(embed_model)
+    tokens = _usage_cost(total_tokens)
+    if price is None or tokens is None:
+        return None
+    return round(price * tokens / 1_000_000, 12)
 
 
 def _warn_generation_billing(
@@ -442,6 +478,21 @@ def _rank_diagnostics(ids: list[int], candidate_count: int) -> list[str]:
     return warnings
 
 
+def _dedupe_candidates_by_file(candidates: list) -> list:
+    """同一ファイルの best score チャンクのみを残す（スコア降順を維持）。
+
+    ``candidates`` は (score, source, chunk) のリストを想定する。ファイルごとに
+    最大 score のエントリを1つだけ採用し、スコアの高い順へ並べ直す。既定の
+    挙動を変えず、``--rerank-file-dedupe`` 指定時のみ呼び出す。
+    """
+    best: dict[str, tuple] = {}
+    for score, src, chunk in candidates:
+        current = best.get(src)
+        if current is None or score > current[0]:
+            best[src] = (score, src, chunk)
+    return sorted(best.values(), key=lambda item: item[0], reverse=True)
+
+
 def _embedding_metrics(ranked: list[tuple[str, float]], relevant: set[str]) -> dict:
     """1 クエリの検索指標を evaluate.py と同じ定義で計算する。"""
     hits = [src in relevant for src, _ in ranked]
@@ -599,6 +650,16 @@ def main() -> int:
         help="生成モデルで計測するクエリ数（既定0＝全件、N指定で先頭N件に制限）",
     )
     parser.add_argument(
+        "--strict-rank",
+        action="store_true",
+        help="rerank の範囲外・重複 rank を generation_error へ昇格しスコア算出を見送る（既定は警告のみでスコア算出）",
+    )
+    parser.add_argument(
+        "--rerank-file-dedupe",
+        action="store_true",
+        help="rerank 前に候補をファイル単位で一意化し同一ファイルの best score チャンクのみを残す（既定は現行挙動）",
+    )
+    parser.add_argument(
         "--list-models",
         action="store_true",
         help="cloud_client.fetch_models() で利用可能なモデル ID を表示して終了（既定は通信しない）",
@@ -743,7 +804,11 @@ def main() -> int:
             usage.payload(),
         )
         for qi, record in enumerate(records[:generation_query_count]):
-            candidates = runs[0]["scored"][qi][:RERANK_K]
+            candidates = runs[0]["scored"][qi]
+            if args.rerank_file_dedupe:
+                # ファイル単位で best score チャンクのみを残してから上位 K 件を選択する。
+                candidates = _dedupe_candidates_by_file(candidates)
+            candidates = candidates[:RERANK_K]
             generation_latencies.append(
                 _run_generation(
                     record,
@@ -751,6 +816,7 @@ def main() -> int:
                     candidates,
                     generation_model=generation_model,
                     usage=usage,
+                    strict_rank=args.strict_rank,
                 )
             )
 
@@ -764,6 +830,26 @@ def main() -> int:
     rerank_scores = [
         r["rerank_ndcg_at_5"] for r in records if "rerank_ndcg_at_5" in r
     ]
+    # 警告は record 側の rerank_warnings に埋もれないよう summary にも集約する。
+    # warning_count は警告メッセージ総数、invalid_rank_count は警告が出たクエリ数。
+    rerank_warning_count = sum(
+        len(r.get("rerank_warnings", [])) for r in records
+    )
+    rerank_invalid_rank_count = sum(
+        1 for r in records if r.get("rerank_warnings")
+    )
+    estimated_cost = _estimated_cost_usd(usage_payload, embed_model)
+    cost_source = _usage_cost_source(usage_payload, embed_model)
+    total_tokens = (
+        _usage_cost(usage_payload.get("total_tokens")) if usage_payload else None
+    )
+    # 6 桁丸めで 0.0 に潰れた場合でもトークン由来の見込みを残す。
+    token_cost_applicable = (
+        estimated_cost == 0.0 and total_tokens is not None and total_tokens > 0
+    )
+    token_cost = (
+        _token_cost_usd(total_tokens, embed_model) if token_cost_applicable else None
+    )
     summary = {
         "queries": len(records),
         "repeat": args.repeat,
@@ -778,8 +864,12 @@ def main() -> int:
         "search_latency_sec": search_avg,
         "total_search_latency_sec": round(embed_avg + search_avg, 6),
         "rerank_query_count": len(rerank_scores),  # 実効クエリ数（スコア換算できた件数）
-        "estimated_cost_usd": _estimated_cost_usd(usage_payload, embed_model),
+        "rerank_warning_count": rerank_warning_count,
+        "rerank_invalid_rank_count": rerank_invalid_rank_count,
+        "estimated_cost_usd": estimated_cost,
     }
+    if token_cost_applicable:
+        summary["estimated_cost_from_tokens_usd"] = token_cost
     if generation_latencies:
         summary["generation_latency_sec"] = round(
             sum(generation_latencies) / len(generation_latencies), 6
@@ -812,8 +902,14 @@ def main() -> int:
             "生成呼び出しは外部送信＋トークン課金を伴う。total_tokens には生成呼び出しのトークンも含まれるため estimated_cost_usd は概算（API cost があれば実値を優先）。",
             "生成リクエストのセッション UUID は cloud_client.chat 側で付与し cloud_bench では生成しない。",
             "rerank は JSON の rank 整数配列のみを採用し、パース失敗時は generation_error に記録して nDCG を 0 としない。",
-            "範囲外 rank / 重複 rank は rerank_warnings に記録してスコア算出は従来どおり（strict_rank=True なら generation_error へ昇格しスコアを見送る）。",
+            "範囲外 rank / 重複 rank は rerank_warnings に記録してスコア算出は従来どおり（--strict-rank 指定時は generation_error へ昇格しスコアを見送る）。",
         ])
+    if args.rerank_file_dedupe:
+        notes.append(
+            "rerank 候補は --rerank-file-dedupe によりファイル単位で一意化し、"
+            "同一ファイルの best score チャンクのみを残す（スコア降順で上位 %d 件を再選択）。"
+            % RERANK_K
+        )
     notes.extend(usage.notes)
     if not corpus_sha256:
         notes.append(
@@ -847,6 +943,10 @@ def main() -> int:
     if corpus_sha256:
         payload["corpus_sha256"] = corpus_sha256
     if usage_payload is not None:
+        # API cost / 単価推定 / 判定不能(None) を cost_source で明示する。
+        usage_payload["cost_source"] = cost_source
+        if token_cost_applicable:
+            usage_payload["estimated_cost_from_tokens_usd"] = token_cost
         payload["usage"] = usage_payload
 
     output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")

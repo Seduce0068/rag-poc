@@ -2874,7 +2874,7 @@ class CompareCloudLocalRowTest(unittest.TestCase):
         self.assertEqual(row["source"], "qrels.json")
         self.assertEqual(row["embed_model"], "local-m")
         self.assertEqual(row["corpus_file_count"], 7)
-        self.assertEqual(row["queries"], [{"id": "h1"}])
+        self.assertEqual(row["queries"], 1)
         self.assertEqual(row["repeat"], 2)
 
     def test_cloud_bench_style_uses_top_level_summary(self):
@@ -2897,7 +2897,7 @@ class CompareCloudLocalRowTest(unittest.TestCase):
 
         self.assertEqual(row["source"], "corpus-subset")
         self.assertEqual(row["chunk_count"], 12)
-        self.assertEqual(row["queries"], [{"id": "q1"}])
+        self.assertEqual(row["queries"], 1)
         self.assertEqual(row["embed_model"], "cloud-m")
         self.assertEqual(row["set_recall_at_10"], 0.7)
         self.assertEqual(row["ndcg_at_10"], 0.6)

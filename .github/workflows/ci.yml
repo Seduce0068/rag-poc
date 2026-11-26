@@ -50,11 +50,9 @@ jobs:
             'eval-results-cloud-qwen3-subset.json': CLOUD_BENCH_KEYS,
         }
 
-        # 公開用 cloud 成果物に残してはならないキー（値は stderr へ出さない）。
-        FORBIDDEN_CLOUD_KEYS = {'answer', 'rerank_candidates'}
-        # 既存の未サニタイズ成果物の明示例外。親がサニタイズ方針を決定するまでの
-        # 移行措置として警告に格下げする。新規ファイルはここへ追加しない。
-        LEGACY_UNSANITIZED = {'eval-results-cloud-full.json'}
+        # 公開用成果物に残してはならないキー（値は stderr へ出さない）。
+        # ファイル名の接頭辞に関係なく全 eval-results-*.json へ適用する。
+        FORBIDDEN_CLOUD_KEYS = {'answer', 'rerank_candidates', 'rerank_reply'}
         # RFC3339 date-time かつ UTC オフセット（Z または +00:00 / -00:00）必須。
         RFC3339_UTC_RE = re.compile(
             r'^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]00:00)$'
@@ -87,15 +85,15 @@ jobs:
                 ), file=sys.stderr)
                 failed = True
 
-            # 成果物ごとのサニタイズ検証は cloud-* 成果物のみを対象とする。
-            if not path.name.startswith('eval-results-cloud-'):
-                continue
-            generated_at = data.get('generated_at')
-            if (not isinstance(generated_at, str)
-                    or not RFC3339_UTC_RE.match(generated_at)):
-                print('%s: generated_at requires RFC3339 UTC' % path.name,
-                      file=sys.stderr)
-                failed = True
+            # generated_at の UTC 検証は従来どおり cloud-* 成果物のみを対象とする。
+            # 禁止キー検査はそのまま全 eval-results-*.json へ適用する。
+            if path.name.startswith('eval-results-cloud-'):
+                generated_at = data.get('generated_at')
+                if (not isinstance(generated_at, str)
+                        or not RFC3339_UTC_RE.match(generated_at)):
+                    print('%s: generated_at requires RFC3339 UTC' % path.name,
+                          file=sys.stderr)
+                    failed = True
 
             present = sorted(k for k in FORBIDDEN_CLOUD_KEYS if k in data)
             results = data.get('results')
@@ -106,14 +104,11 @@ jobs:
                             if k in entry and k not in present:
                                 present.append(k)
             if present:
-                message = '%s: forbidden keys present: %s' % (
+                # ファイル名とキー名のみを stderr へ出し、値は一切出さない。
+                print('ERROR: %s: forbidden keys present: %s' % (
                     path.name, ', '.join(sorted(present))
-                )
-                if path.name in LEGACY_UNSANITIZED:
-                    print('WARN: ' + message, file=sys.stderr)
-                else:
-                    print('ERROR: ' + message, file=sys.stderr)
-                    failed = True
+                ), file=sys.stderr)
+                failed = True
 
         print('JSON gate failed' if failed else 'JSON gate OK')
         sys.exit(1 if failed else 0)
