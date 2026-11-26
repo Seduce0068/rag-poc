@@ -22,10 +22,47 @@ jobs:
         python3 test_rag.py
         python3 - <<'PY'
         import json
+        import sys
         from pathlib import Path
-        for path in Path('.').glob('eval-results-*.json'):
-            data = json.loads(path.read_text(encoding='utf-8'))
-            assert 'schema_version' in data, path
-            assert 'qrels_label' in data, path
-        print('JSON schema/qrels_label OK')
+
+        EVALUATE_KEYS = {
+            'generated_at', 'schema_version', 'qrels_schema_version',
+            'qrels_label', 'collection', 'embed_model', 'summary', 'results',
+        }
+        CLOUD_BENCH_KEYS = {
+            'generated_at', 'model', 'corpus', 'qrels_label',
+            'chunk_size', 'summary', 'results', 'notes',
+        }
+        ARTIFACT_KEYS = {
+            'eval-results.json': EVALUATE_KEYS,
+            'eval-results-baseline.json': EVALUATE_KEYS,
+            'eval-results-other-domain.json': EVALUATE_KEYS,
+            'eval-results-ruri-subset.json': EVALUATE_KEYS,
+            'eval-results-ruri-full.json': EVALUATE_KEYS,
+            'eval-results-alt.json': EVALUATE_KEYS,
+            'eval-results-cloud-pipeline.json': EVALUATE_KEYS,
+            'eval-results-cloud-subset.json': CLOUD_BENCH_KEYS,
+            'eval-results-cloud-full.json': CLOUD_BENCH_KEYS,
+            'eval-results-cloud-small-subset.json': CLOUD_BENCH_KEYS,
+            'eval-results-cloud-qwen3-subset.json': CLOUD_BENCH_KEYS,
+        }
+
+        def required_keys(name):
+            if name in ARTIFACT_KEYS:
+                return ARTIFACT_KEYS[name]
+            if name.startswith('eval-results-cloud-'):
+                return CLOUD_BENCH_KEYS
+            return EVALUATE_KEYS
+
+        failed = False
+        for path in sorted(Path('.').rglob('eval-results-*.json')):
+            try:
+                data = json.loads(path.read_text(encoding='utf-8'))
+            except (OSError, ValueError):
+                failed = True
+                continue
+            if any(key not in data for key in required_keys(path.name)):
+                failed = True
+        print('JSON gate failed' if failed else 'JSON gate OK')
+        sys.exit(1 if failed else 0)
         PY

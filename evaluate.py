@@ -78,6 +78,13 @@ HELD_OUT_MAX_K: int = max(HELD_OUT_RECALL_K + HELD_OUT_NDCG_K)
 SEARCH_FN_NAME = "search"
 REPEAT_ENV = "RAG_EVAL_REPEAT"
 
+# samples を欠く旧形式では stdev は集計値として成立しない。数値キーは
+# 後方互換（LegacyLatencyFallbackTest）のため残し、notes で明示する。
+LEGACY_STDEV_NOTE = (
+    "旧形式のため stdev は算出不可"
+    "（samples が無く record 側 stdev の単純平均は統計的な集計値ではない）"
+)
+
 OUTPUT_PATH = os.path.join(HERE, "eval-results.json")
 
 # 評価クエリと正解ラベルは qrels.json を唯一の情報源とする（モジュール内に
@@ -630,6 +637,9 @@ def _aggregate_latency(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
     samples が無い旧形式では record 側の統計の平均にフォールバックする
     （意味は「record 統計の要約」であり全サンプルの統計ではない）。
+    旧形式の stdev は record 値の単純平均にすぎず集計値として成立しないため、
+    ``LEGACY_STDEV_NOTE`` を notes に記録する。数値は後方互換のため保持するが、
+    None / 0 へ置き換えて既存の互換テストを壊すことはしない。
     """
     samples: list[float] = []
     fallback: list[dict[str, Any]] = []
@@ -661,6 +671,7 @@ def _aggregate_latency(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "min": round(min(float(item["min"]) for item in fallback), 6),
         "max": round(max(float(item["max"]) for item in fallback), 6),
         "stdev": round(sum(float(item["stdev"]) for item in fallback) / len(fallback), 6),
+        "notes": [LEGACY_STDEV_NOTE],
     }
 
 
@@ -1703,6 +1714,8 @@ def _evaluate_once(
         "latency_stats": (
             "record / summary の avg / median / min / max / stdev（秒）。"
             "avg_latency_sec は後方互換のため avg と同値。"
+            "samples 欠落の旧形式では stdev は集計不能として notes に記録し、"
+            "数値は後方互換の参考値としてのみ保持する。"
         ),
         "heldout": heldout_definitions,
     }
@@ -1762,6 +1775,12 @@ def _evaluate_once(
             "results": heldout_records,
         },
     }
+    # 旧形式フォールバックの stdev は集計不能なので、その旨を payload の notes へ集約する。
+    for section in (payload["summary"], payload["heldout"]["summary"]):
+        for mode_stats in section.values():
+            for note in (mode_stats.get("latency_stats") or {}).get("notes") or []:
+                if note not in notes:
+                    notes.append(note)
     if args.with_answer:
         payload["with_answer"] = True
 

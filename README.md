@@ -7,6 +7,9 @@
 埋め込みと回答生成を Ollama、ベクトル検索を Qdrant が担い、検索
 モード（dense / keyword / hybrid / hybrid-rerank）の差を評価する。
 
+既定はローカル Ollama + Qdrant で、クラウドは `RAG_CLOUD_ENABLED=1` の
+opt-in（詳細は「クラウドモデル（opencodeGO）」を参照）。
+
 ### 推奨クイックスタート
 
 クラウド RAG 調査の結論（レポート `passkey-gateway/docs/cloud-rag-research-2026-11-26.md`、
@@ -218,6 +221,12 @@ consumer は optional キーの存在を前提にしないこと。参照時は
 | `RAG_EMBED_PREFIX_PASSAGE` | `""`（空。ruri は config テーブルで「文章: 」） |
 | `RAG_RUST_BIN` | `rag_poc/ragcore/target/debug/ragcore` |
 | `RAG_RUST_TIMEOUT` | `30`（秒） |
+| `RAG_ANSWER_TIMEOUT` | `60`（秒。回答生成1回のタイムアウト） |
+| `RAG_CLOUD_ENABLED` | `0`（1 でクラウド有効。既定はローカル Ollama） |
+| `RAG_CLOUD_CHAT_ENABLED` | `0`（1 で生成もクラウド。`RAG_CLOUD_ENABLED=1` が前提） |
+| `RAG_CLOUD_EMBED_MODEL` | 空（有効時は明示指定が必要。既定モデルは `text-embedding-3-small`） |
+| `RAG_CLOUD_BASE_URL` | `https://opencode.ai/inference/go/openai/v1` |
+| `RAG_CLOUD_MODEL` | `deepseek-v4.1-flash` |
 
 リモート endpoint は **オプトイン＋許可ホスト＋https の 3 条件をすべて
 満たす場合だけ**致命問題が警告へ格下げされる。平文 HTTP の外部ホスト、
@@ -230,6 +239,10 @@ consumer は optional キーの存在を前提にしないこと。参照時は
 `RAG_EMBED_PREFIX_PASSAGE` が非空なら config のモデル別 prefix より
 優先される。`RAG_RUST_BIN` の相対パスはリポジトリルート基準で解決し、
 `RAG_RUST_TIMEOUT` は Rust CLI 専用（`OLLAMA_TIMEOUT` は流用しない）。
+クラウド側の補助変数として、未知の埋め込みモデルには
+`RAG_CLOUD_EMBED_DIMENSION`（期待次元を明示。未指定なら fail-closed）、
+HTTP タイムアウトに `RAG_CLOUD_TIMEOUT`（既定 60 秒）、
+`cloud_bench.py` のコーパスハッシュ上書きに `RAG_CLOUD_CORPUS_SHA256` がある。
 
 `RAG_RERANK_TOP_N` は廃止した。実効値は `RAG_RERANK_MAX_DOCS`。
 `eval-results.json` には `embed_model` / `chat_model` / `vector_size` /
@@ -330,20 +343,14 @@ top_source が `jarvis-muse-dsh-roles.md` だった（正解は
 実際に `kun432/cl-nagoya-ruri-base`（768 次元、Apache-2.0、
 クエリ側「クエリ: 」／文章側「文章: 」prefix）を組み込み、
 同一サブセット 6 ファイル・同一 `qrels-subset.json` 6 クエリで
-比較した結果（2026-11-26）:
-
-| モデル | dense recall@1 | dense nDCG@10 |
-| --- | --- | --- |
-| `qwen2.5:3b` | 0.1667 | 0.5384 |
-| `kun432/cl-nagoya-ruri-base` | **1.0** | **1.0** |
-| `text-embedding-3-small`（opencodeGO、2026-11-26） | **1.0** | **1.0** |
+比較した結果（2026-11-26）は「クラウド/ローカル比較」の表へ集約した。
 
 Ruri は正解を rank1 に置けたのに対し、qwen は 6 件中 1 件しか
 rank1 に置けなかった。`recall@10` は両者 1.0 だが、ランキング
 品質は埋め込みモデルで大きく変わることが実証された。
 クラウド埋め込みも同一サブセット・同一 qrels で recall@1 / nDCG@10
 ともに 1.0 だった（`eval-results-cloud-subset.json`）。ローカル Ruri と
-同等の品質だが、外部送信と token 課金が発生する点が異なる。
+同等の品質だが、注意はクラウド章冒頭の警告を参照。
 Ruri は 512 トークンcontextのため `CHUNK_SIZE=300` 前後で投入する
 （800 のままでは HTTP 400 になる）。サブセット結果は
 `rag_poc/eval-results-ruri-subset.json` に退避済み。
@@ -364,8 +371,8 @@ opencodeGO の `text-embedding-3-small` を全量コーパス（87 ファイル/
 `hit@1=0.7778`（query-level）/ `set_recall@1=0.7222`（集合 recall）/
 `hit@10=1.0` / `nDCG@10=0.9034` だった
 （`eval-results-cloud-full.json`）。ローカル qwen の dense（0.0 / 0.0）
-より大幅に良く、Ruri（0.7992）より nDCG が高い。ただし外部送信と
-token 課金が発生する。埋め込みレイテンシ平均 14.0 秒。
+より大幅に良く、Ruri（0.7992）より nDCG が高い。埋め込みレイテンシ
+平均 14.0 秒（外部送信＋token 課金の注意はクラウド章冒頭の警告を参照）。
 生成モデル `deepseek-v4.1-flash` による rerank / 回答生成も
 2 クエリで動作を確認した（`rerank_query_count=2`）。rerank の
 `nDCG@5=1.0` は旧 0.3608 が ideal のファイル重複カウントバグに
@@ -392,12 +399,23 @@ rerank は nDCG を下げた（0.7542）。数値は各 JSON の `heldout.summar
 使える。実装は `cloud_client.py` にあり、**既定は無効**（ローカル Ollama
 を維持）。有効化するには次を設定する。
 
+> **警告**: 有効化すると質問文・チャンク本文・ベクトルが外部 API へ送信され、
+> token 課金が発生する。キーと接続先を確認し、長時間の連続評価は避けること。
+> この注意は本章に集約し、他箇所では繰り返さない。
+
 ```bash
+# dsh.env の認証キーを環境変数へ読み込む（値は表示しない）
+set -a; source ~/.config/opencode/dsh.env; set +a
+
 export RAG_CLOUD_ENABLED=1
 export RAG_CLOUD_BASE_URL=https://opencode.ai/inference/go/openai/v1
 export RAG_CLOUD_MODEL=deepseek-v4.1-flash
-# 認証キーは OPENCODE_API_KEY または OPENCODE_GO_API_KEY に設定する（値は表示しない）
 ```
+
+認証キーは `OPENCODE_GO_API_KEY`（正規。`dsh.env.example` と一致）を使う。
+`OPENCODE_API_KEY` は後方互換の互換名として併記され、両方が設定されて
+いる場合は `OPENCODE_GO_API_KEY` が優先される（値はログ・例外・成果物へ
+出力しない）。
 
 埋め込みモデルも利用できる（[公式 Go ドキュメント](https://opencode.ai/docs/console/go/)、
 2026-11-26 取得）:
@@ -410,12 +428,7 @@ export RAG_CLOUD_MODEL=deepseek-v4.1-flash
 
 同一サブセット（6 ファイル/81 チャンク、`qrels-subset.json` 6 クエリ、
 `ingest.iter_chunks` 既定 CHUNK_SIZE、repeat=1）で日本語埋め込みモデルを
-比較した結果:
-
-| モデル | hit@1 | nDCG@10 | 埋め込みレイテンシ平均 |
-| --- | --- | --- | --- |
-| `text-embedding-3-small` | **1.0** | **1.0** | 8.03 秒 |
-| `qwen3-embedding-8b` | 0.8333 | 0.8978 | 10.04 秒 |
+比較した結果は「クラウド/ローカル比較」の表へ集約した。
 
 単価は `qwen3-embedding-8b` の方が安いが、この日本語コーパスでは
 `text-embedding-3-small` が精度・レイテンシともに上回った
@@ -423,9 +436,11 @@ export RAG_CLOUD_MODEL=deepseek-v4.1-flash
 `eval-results-cloud-qwen3-subset.json`）。
 
 エンドポイントは `https://opencode.ai/inference/go/openai/v1/embeddings` で、
-OpenAI 互換の `/embeddings` API。`dimensions` と `encoding_format` も使える。
-埋め込みリクエストには `x-opencode-session` が不要で、RAG ライブラリから
-直接呼べる（生成/chat 呼び出しには会話単位 UUID ヘッダを付与する）。
+OpenAI 互換の `/embeddings` API。`dimensions` は指定可能。
+`encoding_format` は API 仕様上存在するが本クライアント未対応
+（リクエストへ渡さない）。埋め込みリクエストには `x-opencode-session` が
+不要で、RAG ライブラリから直接呼べる（生成/chat 呼び出しには会話単位
+UUID ヘッダを付与する）。
 
 ```bash
 export RAG_CLOUD_EMBED_MODEL=text-embedding-3-small
@@ -434,10 +449,40 @@ export RAG_CLOUD_EMBED_MODEL=text-embedding-3-small
 重要な制約:
 
 - 認証情報は環境変数名のみを参照し、値はログ・例外・成果物へ出力しない。
-- キーの有効性・レート制限・コストは未検証。実際の課金が発生する可能性が
-  あるため、長時間の連続評価には使用しないこと。
+- キーの有効性・レート制限・コストは未検証。長時間の連続評価は避ける
+  （外部送信＋token 課金の警告は本章冒頭に集約済み）。
 - 既定は埋め込みも生成もローカル Ollama。クラウドを使う場合は
   `RAG_CLOUD_ENABLED=1` を明示する。
+
+### 簡易計測と正式パイプラインの使い分け
+
+| 観点 | 簡易: `cloud_bench.py` | 正式: `cloud_ingest.py` → `evaluate.py` |
+| --- | --- | --- |
+| 検索 | 埋め込みコサイン類似度のみ（Qdrant を使わない） | Qdrant 投入後に `dense` / `keyword` / `hybrid` / `hybrid-rerank` の 4 モード |
+| コーパス | 既定 `corpus-subset`（`--corpus` で変更可） | `RAG_CORPUS_DIR` / `RAG_COLLECTION`（全量は `rag_poc_cloud_full`） |
+| 成果物 | `eval-results-cloud-*.json`（`schema_version` なし） | `eval-results-cloud-pipeline.json`（`schema_version` あり） |
+| 生成 | `--with-generation` で先頭 3 クエリの rerank / 回答 | `--with-answer` で回答生成（`RAG_ANSWER_TIMEOUT` が適用） |
+| 用途 | 埋め込みモデルの簡易比較。Token 消費を抑えて確認する | 本番相当の 4 モード評価と退避済み成果物の更新 |
+
+### クラウド/ローカル比較（2026-11-26）
+
+評価章のサブセット・全量の結果を 1 表へ集約した。`hit@1` は query-level、
+`set_recall@1` は集合 recall。ローカルの `recall@1` は `hit@1` に相当する。
+
+| モデル | コーパス | チャンク数 | クエリ数 | hit@1 | set_recall@1 | nDCG@10 | rerank nDCG@5(n=2) | レイテンシ |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `qwen2.5:3b`（ローカル） | `corpus-subset`（6 ファイル） | 81 | 6 | 0.1667 | — | 0.5384（dense） | — | — |
+| `kun432/cl-nagoya-ruri-base`（ローカル） | `corpus-subset`（6 ファイル） | 81 | 6 | 1.0 | — | 1.0（dense） | — | — |
+| `text-embedding-3-small`（クラウド） | `corpus-subset`（6 ファイル） | 81 | 6 | 1.0 | — | 1.0 | — | 8.03 秒（埋め込み平均） |
+| `qwen3-embedding-8b`（クラウド） | `corpus-subset`（6 ファイル） | 81 | 6 | 0.8333 | — | 0.8978 | — | 10.04 秒（埋め込み平均） |
+| `qwen2.5:3b`（ローカル） | `passkey-gateway/docs`（88 ファイル） | 2200 | 9 | — | — | 0.0（dense）/ 0.6243（hybrid-rerank） | — | 6.22 秒（hybrid-rerank 平均） |
+| `kun432/cl-nagoya-ruri-base`（ローカル） | `passkey-gateway/docs`（88 ファイル） | 2200 | 9 | — | — | 0.7992（dense）/ 0.7542（hybrid-rerank） | — | 3.32 秒（hybrid-rerank 平均） |
+| `text-embedding-3-small`（クラウド） | `passkey-gateway/docs`（87 ファイル） | 214 | 9 | 0.7778 | 0.7222 | 0.9034 | 1.0 | 14.0 秒（埋め込み平均） |
+| `text-embedding-3-small`（クラウド・Qdrant 正式） | `passkey-gateway/docs`（87 ファイル） | 214 | 9 | — | — | 0.8681（hybrid） | — | — |
+
+`—` は当該構成で未計測の指標。レイテンシは計測対象が異なる（クラウドは埋め込み平均、
+ローカルは hybrid-rerank の検索平均）ため単純比較しないこと。
+rerank nDCG@5 は 2 クエリのみの計測値。
 
 ## 既知の制限
 
@@ -713,7 +758,7 @@ cp rag_poc/eval-results.json rag_poc/eval-results-other-domain.json
 | `eval-results-other-domain.json` | `python3 rag_poc/evaluate.py --qrels rag_poc/qrels-alt.json`（`RAG_CORPUS_DIR=rag_poc/corpus-alt` / `RAG_COLLECTION=rag_poc_other_domain`） | 退避済み。`evaluate.py` の直接出力先ではないため上書きされない |
 | `eval-results-ruri-subset.json` | `python3 rag_poc/evaluate.py --qrels rag_poc/qrels-subset.json`（`RAG_COLLECTION=rag_poc_ruri`） | 退避済み。再計測時は `eval-results.json` から `cp` で更新する |
 | `eval-results-ruri-full.json` | `python3 rag_poc/evaluate.py --qrels rag_poc/qrels.json`（`RAG_CORPUS_DIR=passkey-gateway/docs` / `RAG_COLLECTION=rag_poc_ruri_full`） | 退避済み。再計測時は `eval-results.json` から `cp` で更新する |
-| `eval-results-cloud-full.json` | `RAG_CLOUD_ENABLED=1 python3 rag_poc/cloud_bench.py --corpus ../passkey-gateway/docs --qrels rag_poc/qrels.json --output rag_poc/eval-results-cloud-full.json --with-generation` | 退避済み。外部送信と token 課金が発生する |
+| `eval-results-cloud-full.json` | `RAG_CLOUD_ENABLED=1 python3 rag_poc/cloud_bench.py --corpus ../passkey-gateway/docs --qrels rag_poc/qrels.json --output rag_poc/eval-results-cloud-full.json --with-generation` | 退避済み（注意はクラウド章冒頭の警告を参照） |
 | `eval-results-cloud-pipeline.json` | `RAG_CLOUD_ENABLED=1 RAG_VECTOR_SIZE=1536 RAG_COLLECTION=rag_poc_cloud_full python3 rag_poc/evaluate.py`（投入は `cloud_ingest.py`） | 退避済み。4モードの正式パイプライン評価 |
 | `embedding-comparison.json` | `python3 rag_poc/compare_embeddings.py` | 実行ごとに上書き。必要なら `cp` で退避する |
 | `qrels.json` / `qrels-subset.json` / `qrels-alt.json` | 人手で作成・管理（生成コマンドなし） | `evaluate.py` は読み取り専用で上書きしない。コーパス更新時に内容を見直す |
@@ -721,3 +766,8 @@ cp rag_poc/eval-results.json rag_poc/eval-results-other-domain.json
 `eval-results.json` の `qrels_label` に指定した qrels ファイル名が記録される。
 退避ファイルを比較するときは `collection` / `embed_model` / `vector_size` /
 `corpus_sha256` / `qrels_label` も揃っているか確認する。
+
+公開用に成果物をコミットする際は `generated_at` を日付精度
+（例: `2026-11-26T00:00:00+00:00`）へ丸める。コード変更は不要で、
+`.gitignore` の `eval-results-cloud-*` 名示例外は維持したまま運用で対応する。
+丸めは `generated_at` だけに適用し、比較条件のキーは変更しない。
