@@ -9,8 +9,9 @@
 
 ### 推奨クイックスタート
 
-クラウド RAG 調査の結論（[レポート](../passkey-gateway/docs/cloud-rag-research-2026-11-26.md)）
-に従い、日本語特化埋め込み `kun432/cl-nagoya-ruri-base` の利用を推奨する。
+クラウド RAG 調査の結論（レポート `passkey-gateway/docs/cloud-rag-research-2026-11-26.md`、
+リポジトリ外のため相対リンクではなくパス表記）に従い、
+日本語特化埋め込み `kun432/cl-nagoya-ruri-base` の利用を推奨する。
 同一条件下で dense の `recall@10` / `nDCG@10` がともに 1.0 / 0.7992 を
 達成している（qwen2.5:3b は両方 0.0）。ただし **config 既定は後方互換のため
 `qwen2.5:3b` のまま**で、何も設定せず `evaluate.py` を走らせると旧ベースライン
@@ -363,6 +364,45 @@ rerank は nDCG を下げた（0.7542）。数値は各 JSON の `heldout.summar
 一般の RAG 方式の優劣を示すものではない。
 `hybrid-rerank` は `RAG_RERANK_MAX_DOCS=5` により
 再ランク前の約 11 秒から約 5.4 秒へ短縮した。
+
+## クラウドモデル（opencodeGO）
+
+ユーザー承認により、opencodeGO の OpenAI 互換 API を生成モデルとして
+使える。実装は `cloud_client.py` にあり、**既定は無効**（ローカル Ollama
+を維持）。有効化するには次を設定する。
+
+```bash
+export RAG_CLOUD_ENABLED=1
+export RAG_CLOUD_BASE_URL=https://opencode.ai/inference/go/openai/v1
+export RAG_CLOUD_MODEL=deepseek-v4.1-flash
+# 認証キーは OPENCODE_API_KEY または OPENCODE_GO_API_KEY に設定する（値は表示しない）
+```
+
+埋め込みモデルも利用できる（[公式 Go ドキュメント](https://opencode.ai/docs/console/go/)、
+2026-11-26 取得）:
+
+| モデル ID | 1M 入力トークン単価 |
+| --- | --- |
+| `text-embedding-3-small` | $0.02 |
+| `qwen3-embedding-8b` | $0.01 |
+| `gemini-embedding-2` | $0.20 |
+
+エンドポイントは `https://opencode.ai/inference/go/openai/v1/embeddings` で、
+OpenAI 互換の `/embeddings` API。`dimensions` と `encoding_format` も使える。
+埋め込みリクエストには `x-opencode-session` が不要で、RAG ライブラリから
+直接呼べる（生成/chat 呼び出しには会話単位 UUID ヘッダを付与する）。
+
+```bash
+export RAG_CLOUD_EMBED_MODEL=text-embedding-3-small
+```
+
+重要な制約:
+
+- 認証情報は環境変数名のみを参照し、値はログ・例外・成果物へ出力しない。
+- キーの有効性・レート制限・コストは未検証。実際の課金が発生する可能性が
+  あるため、長時間の連続評価には使用しないこと。
+- 既定は埋め込みも生成もローカル Ollama。クラウドを使う場合は
+  `RAG_CLOUD_ENABLED=1` を明示する。
 
 ## 既知の制限
 
