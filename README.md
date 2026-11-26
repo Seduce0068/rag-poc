@@ -428,9 +428,11 @@ rerank は nDCG を下げた（0.7542）。数値は各 JSON の `heldout.summar
 > token 課金が発生する。キーと接続先を確認し、長時間の連続評価は避けること。
 > この注意は本章に集約し、他箇所では繰り返さない。
 
+共有 `dsh.env` 全体を `set -a; source ...; set +a` で export すると他サービスのキーまで子プロセスへ継承されるリスクがあるため、必要なキーだけを明示的に読み込む。
+
 ```bash
-# dsh.env の認証キーを環境変数へ読み込む（値は表示しない）
-set -a; source ~/.config/opencode/dsh.env; set +a
+# dsh.env から必要なキー（OPENCODE_GO_API_KEY）だけを読み込む（値は表示しない）
+export OPENCODE_GO_API_KEY="$(grep '^OPENCODE_GO_API_KEY=' ~/.config/opencode/dsh.env | cut -d= -f2-)"
 
 export RAG_CLOUD_ENABLED=1
 export RAG_CLOUD_BASE_URL=https://opencode.ai/inference/go/openai/v1
@@ -459,6 +461,9 @@ export RAG_CLOUD_MODEL=deepseek-v4.1-flash
 `text-embedding-3-small` が精度・レイテンシともに上回った
 （`eval-results-cloud-small-subset.json` /
 `eval-results-cloud-qwen3-subset.json`）。
+`gemini-embedding-2`（3072 次元、1M 入力トークン $0.20）も同一サブセットで
+計測し、`hit@1=1.0` / `nDCG@10=1.0` だった
+（`eval-results-cloud-gemini-subset.json`、比較表も参照）。
 
 エンドポイントは `https://opencode.ai/inference/go/openai/v1/embeddings` で、
 OpenAI 互換の `/embeddings` API。`dimensions` は指定可能。
@@ -525,6 +530,7 @@ RAG_CLOUD_ENABLED=1 RAG_CLOUD_CHAT_ENABLED=1 \
 | `kun432/cl-nagoya-ruri-base`（ローカル） | `corpus-subset`（6 ファイル） | 81 | 6 | 1.0 | — | 1.0（dense） | — | — |
 | `text-embedding-3-small`（クラウド） | `corpus-subset`（6 ファイル） | 81 | 6 | 1.0 | — | 1.0 | — | 8.03 秒（埋め込み平均） |
 | `qwen3-embedding-8b`（クラウド） | `corpus-subset`（6 ファイル） | 81 | 6 | 0.8333 | — | 0.8978 | — | 10.04 秒（埋め込み平均） |
+| `gemini-embedding-2`（クラウド） | `corpus-subset`（6 ファイル） | 81 | 6 | 1.0 | — | 1.0 | — | — |
 | `qwen2.5:3b`（ローカル） | `passkey-gateway/docs`（88 ファイル） | 2200 | 9 | — | — | 0.0（dense）/ 0.6243（hybrid-rerank） | — | 6.22 秒（hybrid-rerank 平均） |
 | `kun432/cl-nagoya-ruri-base`（ローカル） | `passkey-gateway/docs`（88 ファイル） | 2200 | 9 | — | — | 0.7992（dense）/ 0.7542（hybrid-rerank） | — | 3.32 秒（hybrid-rerank 平均） |
 | `text-embedding-3-small`（クラウド） | `passkey-gateway/docs`（91 ファイル） | 1380 | 9 | 0.7778 | 0.7222 | 0.8597 | 0.8819 | 42.3 秒（埋め込み平均） |
@@ -827,6 +833,7 @@ cp rag_poc/eval-results.json rag_poc/eval-results-other-domain.json
 | `eval-results-cloud-subset.json` | `RAG_CLOUD_ENABLED=1 RAG_CLOUD_EMBED_MODEL=text-embedding-3-small python3 rag_poc/cloud_bench.py --corpus rag_poc/corpus-subset --qrels rag_poc/qrels-subset.json --output rag_poc/eval-results-cloud-subset.json`（当時は `CHUNK_SIZE=300`） | 退避済み（[クラウド章冒頭の警告](#クラウドモデルopencodego-how-to)を参照） |
 | `eval-results-cloud-small-subset.json` | 同上を `ingest.iter_chunks` 既定の `CHUNK_SIZE` で計測し `--output rag_poc/eval-results-cloud-small-subset.json` | 退避済み。`text-embedding-3-small` のサブセット結果 |
 | `eval-results-cloud-qwen3-subset.json` | 同上を `RAG_CLOUD_EMBED_MODEL=qwen3-embedding-8b` で計測し `--output rag_poc/eval-results-cloud-qwen3-subset.json` | 退避済み。`qwen3-embedding-8b` のサブセット結果 |
+| `eval-results-cloud-gemini-subset.json` | 同上を `RAG_CLOUD_EMBED_MODEL=gemini-embedding-2` で計測し `--output rag_poc/eval-results-cloud-gemini-subset.json`（3072 次元、`repeat=1`） | 退避済み。`gemini-embedding-2` のサブセット結果（ファイルは実在） |
 | `embedding-comparison.json` | `python3 rag_poc/compare_embeddings.py` | 実行ごとに上書き。必要なら `cp` で退避する |
 | `cloud-local-comparison.json` | `python3 rag_poc/compare_cloud_local.py --output rag_poc/cloud-local-comparison.json` | 実行ごとに上書き。新規 API 呼び出しなしで既存 `eval-results*.json` から生成 |
 | `qrels.json` / `qrels-subset.json` / `qrels-alt.json` | 人手で作成・管理（生成コマンドなし） | `evaluate.py` は読み取り専用で上書きしない。コーパス更新時に内容を見直す |

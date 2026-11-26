@@ -37,6 +37,7 @@ if "requests" not in sys.modules:
 
 import cloud_bench
 import cloud_client
+import cloud_ingest
 import compare_cloud_local
 import config
 import evaluate
@@ -1500,6 +1501,25 @@ class LastSearchErrorsContractTest(unittest.TestCase):
             self._clear_via_search()
             self.assertEqual(query.last_search_errors(), [])
 
+    def test_bogus_mode_returns_no_hits_and_records_validation_stage(self) -> None:
+        # 未知 mode は hybrid へ黙ってフォールバックせず、空ヒットと
+        # mode-validation エラーを残す（dense/keyword を呼ばない）。
+        with mock.patch.object(
+            query, "search_dense", side_effect=AssertionError("dense called")
+        ), mock.patch.object(
+            query, "search_keyword", side_effect=AssertionError("keyword called")
+        ):
+            hits = query.search("短い質問", mode="bogus")
+
+        errors = query.last_search_errors()
+        self.assertEqual(hits, [])
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(errors[0]["stage"], "mode-validation")
+        self.assertEqual(errors[0]["mode"], "bogus")
+        self.assertIn("type", errors[0])
+        self.assertIn("message", errors[0])
+        self._clear_via_search()
+
 
 class EvaluateMainTest(unittest.TestCase):
     """evaluate.main() の分岐を mock で検証する（実検索・実通信なし）。
@@ -2214,6 +2234,42 @@ class CloudClientTest(unittest.TestCase):
 
         self.assertEqual(calls, [])
 
+    def test_embed_true_batch_size_is_cloud_unavailable(self):
+        # bool は int の部分クラスだが件数として不正。CloudUnavailable で拒否し、
+        # HTTP リクエストを一切送らない（マスク済み例外の契約も維持）。
+        calls = []
+
+        def handler(url, **kwargs):
+            calls.append(kwargs)
+            return self._response({"data": [{"embedding": [0.0]}]})
+
+        with self._cloud_env(), \
+                mock.patch.object(
+                    cloud_client, "requests", self._fake_requests(handler)
+                ):
+            with self.assertRaises(cloud_client.CloudUnavailable) as ctx:
+                cloud_client.embed(["a"], batch_size=True)
+
+        self.assertIn("batch_size", str(ctx.exception))
+        self.assertEqual(calls, [])
+
+    def test_embed_false_batch_size_is_cloud_unavailable(self):
+        calls = []
+
+        def handler(url, **kwargs):
+            calls.append(kwargs)
+            return self._response({"data": [{"embedding": [0.0]}]})
+
+        with self._cloud_env(), \
+                mock.patch.object(
+                    cloud_client, "requests", self._fake_requests(handler)
+                ):
+            with self.assertRaises(cloud_client.CloudUnavailable) as ctx:
+                cloud_client.embed(["a"], batch_size=False)
+
+        self.assertIn("batch_size", str(ctx.exception))
+        self.assertEqual(calls, [])
+
     def test_embed_retries_429_then_succeeds(self):
         state = {"count": 0}
 
@@ -2650,6 +2706,54 @@ class ResolveDimensionsTest(unittest.TestCase):
         self.assertIn("positive integer", message)
 
 
+class CloudIngestDimensionTest(unittest.TestCase):
+    """cloud_ingest の次元解決が config の単数形優先・複数形互換に従うこと。
+
+    実通信なしで環境変数だけを差し替える。RAG_VECTOR_SIZE は毎回 unset し、
+    既存のグローバル設定に結果が左右されないようにする。
+    """
+
+    SINGULAR = config.ENV_CLOUD_EMBED_DIMENSION
+    PLURAL = config.ENV_CLOUD_DIMENSIONS
+
+    @contextlib.contextmanager
+    def _dimension_env(self, **values):
+        settings = {self.SINGULAR: None, self.PLURAL: None, "RAG_VECTOR_SIZE": None}
+        settings.update(values)
+        with _temporary_env(**settings):
+            yield
+
+    def test_expected_dim_prefers_singular_env_over_plural(self):
+        with self._dimension_env(**{self.SINGULAR: "1024", self.PLURAL: "1536"}):
+            self.assertEqual(
+                cloud_ingest._expected_dim("text-embedding-3-small"), 1024
+            )
+
+    def test_expected_dim_accepts_plural_env_as_compat(self):
+        with self._dimension_env(**{self.PLURAL: "1536"}):
+            self.assertEqual(cloud_ingest._expected_dim("qwen3-embedding-8b"), 1536)
+
+    def test_expected_dim_uses_model_table_without_env(self):
+        model = "text-embedding-3-small"
+        with self._dimension_env():
+            self.assertEqual(
+                cloud_ingest._expected_dim(model),
+                config.CLOUD_EMBED_DIMENSIONS[model],
+            )
+
+    def test_resolve_dimensions_prefers_singular_env_over_plural(self):
+        with self._dimension_env(**{self.SINGULAR: "1024", self.PLURAL: "1536"}):
+            self.assertEqual(
+                cloud_ingest._resolve_dimensions("text-embedding-3-small"), 1024
+            )
+
+    def test_resolve_dimensions_accepts_plural_env_as_compat(self):
+        with self._dimension_env(**{self.PLURAL: "3072"}):
+            self.assertEqual(
+                cloud_ingest._resolve_dimensions("gemini-embedding-2"), 3072
+            )
+
+
 class GenerationMaxQueriesTest(unittest.TestCase):
     """cloud_bench.main() の --generation-max-queries 境界を fake で検証する。"""
 
@@ -2944,6 +3048,9 @@ class ExtractRankIdsTest(unittest.TestCase):
         record = self._run_with_rank('{"rank": [0, 99, 2]}')
 
         self.assertNotIn("generation_error", record)
+        self.assertTrue(
+            any("rank out of range" in w for w in record["rerank_warnings"])
+        )
         self.assertAlmostEqual(record["rerank_ndcg_at_5"], 1.0, places=4)
 
     def test_duplicate_rank_does_not_double_count(self):
@@ -2951,6 +3058,48 @@ class ExtractRankIdsTest(unittest.TestCase):
         record = self._run_with_rank('{"rank": [2, 2, 2]}')
 
         self.assertNotIn("generation_error", record)
+        self.assertTrue(
+            any("duplicate rank" in w for w in record["rerank_warnings"])
+        )
+        self.assertAlmostEqual(record["rerank_ndcg_at_5"], 1.0, places=4)
+
+    def test_rank_json_embedded_in_explanatory_text_is_accepted(self):
+        # rank の無い JSON が先に出ても、rank を持つ方を拾う（説明文混在）。
+        reply = (
+            "候補を比較した結果、関連度順は {\"comment\": \"判定\"} "
+            "のうえで {\"rank\": [2, 1]} です。以上です。"
+        )
+        self.assertEqual(cloud_bench._extract_rank_ids(reply), [2, 1])
+
+    def test_bool_rank_embedded_in_explanatory_text_is_rejected(self):
+        # 説明文に囲まれていても bool rank は受け付けない。
+        reply = '判定結果: {"rank": [true]} 以上です。'
+        with self.assertRaises(ValueError):
+            cloud_bench._extract_rank_ids(reply)
+
+    def test_rank_diagnostics_reports_out_of_range_ranks(self):
+        warnings = cloud_bench._rank_diagnostics([0, 99, 2], 3)
+        self.assertEqual(
+            warnings, [config.mask_secrets("rank out of range: 0, 99")]
+        )
+
+    def test_rank_diagnostics_reports_duplicate_ranks(self):
+        warnings = cloud_bench._rank_diagnostics([2, 2, 1, 1], 3)
+        self.assertEqual(warnings, [config.mask_secrets("duplicate rank: 2, 1")])
+
+    def test_rank_diagnostics_reports_both_kinds(self):
+        warnings = cloud_bench._rank_diagnostics([0, 2, 2, 4], 3)
+        self.assertEqual(len(warnings), 2)
+        self.assertIn("rank out of range", warnings[0])
+        self.assertIn("duplicate rank", warnings[1])
+
+    def test_run_generation_records_range_and_duplicate_warnings(self):
+        record = self._run_with_rank('{"rank": [0, 2, 2, 99]}')
+
+        self.assertNotIn("generation_error", record)
+        warnings = record["rerank_warnings"]
+        self.assertTrue(any("rank out of range" in w for w in warnings))
+        self.assertTrue(any("duplicate rank" in w for w in warnings))
         self.assertAlmostEqual(record["rerank_ndcg_at_5"], 1.0, places=4)
 
 

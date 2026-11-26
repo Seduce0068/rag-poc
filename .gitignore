@@ -15,5 +15,6 @@ eval-results-*.json
 !eval-results-cloud-pipeline.json
 !eval-results-cloud-small-subset.json
 !eval-results-cloud-qwen3-subset.json
+!eval-results-cloud-gemini-subset.json
 eval-results.json
 .betterleaksignore
