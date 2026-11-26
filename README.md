@@ -341,7 +341,7 @@ RAG_REQUIRE_RUST=1 python3 rag_poc/test_rag.py
 
 外部サービスへ接続せず、`unittest` のみで設定・RRF・JSON 解析・
 チャンク分割・評価クエリ・held-out 指標・rerank のフォールバックを
-検証する（全 184 件）。Rust 同等性テスト 9+8件（`ragcore` 側 9 件と
+検証する（全 221 件）。Rust 同等性テスト 9+8件（`ragcore` 側 9 件と
 Python 側 8 件）のうち、Rust バイナリを要する 8 件は未ビルド時に
 理由付きで skip される。第2のコマンドはこの skip を失敗へ切り替え、
 Rust 未ビルドを green で通さないためのゲートである。なお

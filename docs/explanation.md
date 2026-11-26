@@ -25,14 +25,15 @@ status: "stable"
 詳細仕様と実測データは `docs/reference.md` 等へ順次分離する予定である。
 本文書はそのうち「なぜこの構成か」を説明する背景ドキュメントである。
 
-根拠とした README の章は次の 6 つ。
+根拠は分割前 README スナップショット（`/tmp/README-full-backup.md`）の次の 6 章。
+現行 README では章の再編があるため、行番号ではなく見出し名で示す。
 
-- `## 構成図（テキスト）`（30 行付近）
-- `## 検索モード`（211 行付近、設計背景のみ）
-- `## 既知の制限`（578 行付近）
-- `## モデル比較実験`（639 行付近）
-- `## 別ドメインベンチマーク`（731 行付近）
-- `## 入力と設定の検証`（802 行付近）
+- `## 構成図（テキスト）`
+- `## 検索モード`（設計背景のみ）
+- `## 既知の制限`
+- `## モデル比較実験`
+- `## 別ドメインベンチマーク`
+- `## 入力と設定の検証`
 
 数値・相対パス・コマンドは README の記載を変更せず転記する。
 
@@ -175,7 +176,101 @@ Ruri は 512 トークン context のため `CHUNK_SIZE=300` /
 
 `hybrid` が最良で、rerank は nDCG を下げた（0.7542）。
 他構成の `hybrid-rerank` 平均は ruri 全量 3.32 秒
-（中央値 3.33 / 標準偏差 0.18, `eval-results-ruri-full.json`）。
+（中央値 3.33 / 標準偏差 0.18, `eval-results-ruri-full.json`）、
+別ドメイン 7.17 秒（中央値 7.05 / 標準偏差 0.45,
+`eval-results-alt.json`）。Ruri は埋め込みが高速な分だけ rerank も速い。
+
+### モデル比較実験（2026-11-26 時点）
+
+2026-11-26 時点のベースラインでは `dense` の recall@10 が 0.0 で、
+日本語技術文書に対する汎用埋め込みの限界が見えた。候補モデルに
+入れ替えて同じ held-out 9 クエリで比較する手順を記す。候補は
+`qwen2.5:7b` と日本語特化モデルを想定し、取得可能なモデルを選ぶ。
+
+```bash
+# リポジトリルートで実行。比較条件を先に固定する（2026-11-26 時点）。
+export RAG_CORPUS_DIR=passkey-gateway/docs
+export CHUNK_SIZE=800 CHUNK_OVERLAP=100
+export RAG_TOP_K=10 RAG_RERANK_MAX_DOCS=5
+export RAG_EVAL_REPEAT=1
+export RAG_COLLECTION=rag_poc_qwen25_7b
+
+# 候補モデルの埋め込み次元を実測し、変数に設定してから実行する。
+: "${NEW_VECTOR_SIZE:?候補モデルの埋め込み次元を設定}"
+export EMBED_MODEL=qwen2.5:7b RAG_VECTOR_SIZE="$NEW_VECTOR_SIZE"
+
+ollama pull "$EMBED_MODEL"
+python3 rag_poc/ingest.py
+
+# 簡易 6 クエリと held-out 9 クエリを同一条件で実行する。
+RAG_COLLECTION=rag_poc_qwen25_7b python3 rag_poc/evaluate.py
+
+# eval-results.json は上書きされるためモデル別に退避する。
+cp rag_poc/eval-results.json \
+  rag_poc/eval-results-qwen25-7b-20261126.json
+```
+
+`RAG_VECTOR_SIZE` は候補モデルの埋め込み次元（実測値）に合わせる。
+既定の 2048 は `qwen2.5:3b` の値なので、そのまま使うと `ingest.py` は
+次元不一致で停止する。`ensure_collection()` は既存コレクションを
+作り直さないので、比較用は専用名（`rag_poc_qwen25_7b`）へ切り替え、
+`rag_poc_full`（88 ファイル／2200 チャンク）のベースラインは残す。
+回答生成と再ランクの `CHAT_MODEL` は既定のまま変えず、
+埋め込みモデルだけを比較対象にする。
+
+結果の記録先は `rag_poc/eval-results.json`。`collection` /
+`embed_model` / `chat_model` / `vector_size` / `corpus_sha256` /
+`repeat` / `schema_version` が記録されるため、評価時も投入時と
+同じ `EMBED_MODEL` を指定すること。既定のままだと実際のベクトルと
+記録が食い違う。比較条件はコーパス（`RAG_CORPUS_DIR` と
+`corpus_sha256`）、チャンク（`CHUNK_SIZE` / `CHUNK_OVERLAP`）、
+取得件数（`RAG_TOP_K`、held-out は `max(10, RAG_TOP_K)`）、
+再ランク件数（`RAG_RERANK_MAX_DOCS`）、プロンプト（`query.py` の
+system / user プロンプト）、計測回数（`RAG_EVAL_REPEAT`）を揃える。
+1 つでも変わると既存の 5.38 秒などの数値と直接比較できない。
+
+### Ruri での再現手順
+
+日本語特化モデル `kun432/cl-nagoya-ruri-base` でサブセットの結果を
+再現する手順。Ruri は 512 トークン context のため
+`CHUNK_SIZE=300` / `CHUNK_OVERLAP=50` を使う（800 のままでは HTTP 400
+になる）。
+
+```bash
+# リポジトリルートで実行（2026-11-26 時点の再現条件）。
+export RAG_CORPUS_DIR=rag_poc/corpus-subset
+export RAG_COLLECTION=rag_poc_ruri
+export EMBED_MODEL=kun432/cl-nagoya-ruri-base
+export RAG_VECTOR_SIZE=768
+export CHUNK_SIZE=300
+export CHUNK_OVERLAP=50
+export RAG_TOP_K=10
+export RAG_RERANK_MAX_DOCS=5
+export RAG_EVAL_REPEAT=1
+
+# クエリ側 / 文章側の prefix（config のテーブル値と同じ値を明示）。
+export RAG_EMBED_PREFIX_QUERY='クエリ: '
+export RAG_EMBED_PREFIX_PASSAGE='文章: '
+
+ollama pull "$EMBED_MODEL"
+python3 rag_poc/ingest.py
+python3 rag_poc/evaluate.py --qrels rag_poc/qrels-subset.json
+
+# eval-results.json は上書きされるため退避する。
+cp rag_poc/eval-results.json rag_poc/eval-results-ruri-subset.json
+```
+
+`kun432/cl-nagoya-ruri-base` は config の `_EMBED_PREFIX_TABLE` /
+`_EXPECTED_VECTOR_SIZE_TABLE` に登録済みの既知モデル。そのため prefix
+（`クエリ:` / `文章:` の後ろに半角スペース）と期待次元 768 は config の
+テーブル値が優先され、
+`RAG_VECTOR_SIZE` の不一致は `ingest.py` の警告どまり（期待次元 768 を
+採用）となる。ただし `query.py` の設定検証は ruri に 768 を要求するため、
+上の例のように明示的に 768 を指定する。全量コーパスで再現する場合は
+`RAG_CORPUS_DIR=passkey-gateway/docs` /
+`RAG_COLLECTION=rag_poc_ruri_full` /
+`--qrels rag_poc/qrels.json` に切り替える（結果は
+`rag_poc/eval-results-ruri-full.json` に退避済み）。
 
 ### なぜクラウドを比較したか
 
@@ -223,6 +318,77 @@ rerank の `nDCG@5` は旧 0.3608 が ideal のファイル重複カウントバ
 両者の nDCG に優劣は付けられない。レイテンシも計測対象が異なる
 （クラウドは埋め込み平均 42.3 秒、ローカルは hybrid-rerank の検索平均）
 ため、単純比較しない。
+
+## 別ドメインベンチマーク（2026-11-26 時点）
+
+2026-11-26 時点のベースラインは簡易 6 クエリ＋held-out 9 クエリの
+計 15 クエリで、いずれも `passkey-gateway/docs` のドメイン内コーパスと
+その中の実在ファイル名を正解ラベルに使う。ドメイン内 15 クエリだけでは
+分野内の傾向しか見えず、他ドメインや一般の RAG 方式への一般化は
+示せない。別ドメイン（openrustbooks の ADR）で `dense` / `keyword` /
+`hybrid` / `hybrid-rerank` の優劣が変わるかを検証するため、
+コーパスと正解ラベルを切り替えて同一モードで再計測する。
+
+2026-11-26 時点の別ドメイン用アセットは
+`rag_poc/corpus-alt/`（openrustbooks の ADR 6 ファイル）と
+`rag_poc/qrels-alt.json`（`simple_queries` 6 件 / `heldout_queries` 6 件）
+である。既存の `rag_poc/qrels.json`（ドメイン内 15 クエリ）は変更しない。
+`corpus-alt/` の ADR は openrustbooks 由来で AGPL-3.0 の下にある。
+本リポジトリも AGPL-3.0-or-later とし、出典をここに明記する。
+
+```bash
+# リポジトリルートで実行（2026-11-26 時点）。
+# コーパスとコレクションを別ドメイン用へ切り替える。
+export RAG_CORPUS_DIR=rag_poc/corpus-alt
+export RAG_COLLECTION=rag_poc_other_domain
+
+# 別コーパスを埋め込みして専用コレクションへ投入する。
+python3 rag_poc/ingest.py
+
+# ラベルは --qrels オプションで切り替える（2026-11-26 時点で実装済み）。
+python3 rag_poc/evaluate.py --qrels rag_poc/qrels-alt.json
+
+# eval-results.json は上書きされるため別ファイルへ退避する。
+cp rag_poc/eval-results.json rag_poc/eval-results-other-domain.json
+```
+
+`RAG_CORPUS_DIR` がコーパスの切り替え口で、`ingest.py` と
+`evaluate.py` は同じ `config.CORPUS_DIR` を参照する。相対パスは
+リポジトリルート基準で解決されるため cwd に依存しない。
+`RAG_COLLECTION` は専用名（`rag_poc_other_domain`）にして、
+`rag_poc_full`（88 ファイル／2200 チャンク）のベースラインと
+旧ポイントが混在しないようにする。`RAG_TOP_K` と
+`RAG_RERANK_MAX_DOCS` はベースラインと揃え、4 モードを比較する。
+出力 JSON の `corpus_file_count` / `corpus_sha256` が旧コーパスと
+異なることを確認する。
+
+`--qrels` は qrels ファイルを指定するオプション（2026-11-26 時点で
+実装済み、省略時は `rag_poc/qrels.json`）。出力 JSON の `qrels_label` に
+指定したファイル名が記録される。
+ラベルは別コーパス側のファイル名で用意する。旧ラベルのままだと
+`notes` に「held-out 正解ファイルがコーパスに不在」と記録される。
+`evaluate.py` の preflight は `RAG_CORPUS_DIR` 配下に各
+`relevant_sources` が実在するかを確認する。
+
+### 実測結果（2026-11-26、ADR 6 ファイル／50 チャンク）
+
+| モード | recall@10 | nDCG@10 |
+| --- | --- | --- |
+| `dense` | 0.8333 | 0.5774 |
+| `keyword` | 1.0 | 1.0 |
+| `hybrid` | 1.0 | 0.8552 |
+| `hybrid-rerank` | 1.0 | 0.7936 |
+
+ドメイン内（passkey docs）でも keyword が最良だったが、ADR では
+`keyword` が `recall@1` から 1.0 / `nDCG` も 1.0 と明確に最良。
+`dense` は 0.83 まで改善したが、ファイル名・見出しの語が一致しやすい
+構造のため keyword が有利な点は共通している。結果は
+`rag_poc/eval-results-other-domain.json` に退避済み。
+
+結果の解釈には注意が必要である。正解ラベルも人手で作成している
+ため完全な客観性は無く、作成者の選択バイアスが残る。数値の差は
+「ドメイン内 15 クエリでは見えなかった順位の入れ替わり」を示す
+仮説であり、一般の RAG 方式の優劣を確定させるものではない。
 
 ## 制限と解釈の注意
 
@@ -296,11 +462,13 @@ rerank の `nDCG@5` は旧 0.3608 が ideal のファイル重複カウントバ
 
 ## 検証のヒント
 
-本文書は子エージェントが作成し、shell 実行を禁止されているため
-lint は未実行である。親が次のコマンドで確認する。
+親エージェントが lint と OKF 検証を実行済み（lint 0 / OKF valid）。
+子エージェントは shell 実行を禁止されているため、ここでは再確認用の
+コマンドのみを示す。
 
 ```bash
-markdownlint-cli2 rag_poc/docs/explanation.md
+markdownlint-cli2 rag_poc/docs/*.md
+rust-script /home/koppe/.agents/skills/okf/scripts/okf_validate.rs rag_poc/docs/explanation.md
 ```
 
 あわせてフロントマターの `verified[0].at >= generated.at` と、
@@ -308,10 +476,9 @@ markdownlint-cli2 rag_poc/docs/explanation.md
 
 ## 参照
 
-- [rag_poc/README.md](../README.md) — 本文書の根拠元
-- `## 構成図（テキスト）`（30 行付近）
-- `## 検索モード`（211 行付近、設計背景のみ）
-- `## 既知の制限`（578 行付近）
-- `## モデル比較実験`（639 行付近）
-- `## 別ドメインベンチマーク`（731 行付近）
-- `## 入力と設定の検証`（802 行付近）
+- [rag_poc/README.md](../README.md) — 本文書の根拠元（現行 README）
+- [rag_poc/docs/index.md](index.md) — 詳細ドキュメントの索引
+- 分割前 README スナップショット（`/tmp/README-full-backup.md`）:
+  `## 構成図（テキスト）` / `## 検索モード`（設計背景のみ） /
+  `## 既知の制限` / `## モデル比較実験` / `## 別ドメインベンチマーク` /
+  `## 入力と設定の検証`

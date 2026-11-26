@@ -3430,6 +3430,422 @@ class CloudIngestRunIngestTest(unittest.TestCase):
         self.assertIn("upsert に失敗しました", err)
 
 
+class UsageCostSourceTest(unittest.TestCase):
+    """cloud_bench._usage_cost_source の api / estimated / None 3 分岐（R2-B）。"""
+
+    MODEL = "text-embedding-3-small"
+
+    def test_api_cost_is_prioritized(self):
+        value = cloud_bench._usage_cost_source(
+            {"cost": 0.5, "total_tokens": 100}, self.MODEL
+        )
+        self.assertEqual(value, "api")
+
+    def test_estimated_from_known_model_and_tokens(self):
+        value = cloud_bench._usage_cost_source(
+            {"total_tokens": 100}, self.MODEL
+        )
+        self.assertEqual(value, "estimated")
+
+    def test_none_for_unknown_model_without_cost(self):
+        self.assertIsNone(
+            cloud_bench._usage_cost_source({"total_tokens": 100}, "unknown-model")
+        )
+
+    def test_none_when_usage_or_tokens_are_missing(self):
+        self.assertIsNone(cloud_bench._usage_cost_source({"calls": 2}, self.MODEL))
+        self.assertIsNone(cloud_bench._usage_cost_source(None, self.MODEL))
+
+
+class EstimatedCostUsdTest(unittest.TestCase):
+    """_estimated_cost_usd の API 実値／単価推定／不明モデル境界（R2-B）。"""
+
+    MODEL = "text-embedding-3-small"
+
+    def test_api_cost_value_is_used(self):
+        self.assertEqual(
+            cloud_bench._estimated_cost_usd({"cost": 0.1234567}, self.MODEL),
+            0.123457,
+        )
+
+    def test_unit_price_estimate_from_tokens(self):
+        self.assertEqual(
+            cloud_bench._estimated_cost_usd({"total_tokens": 1_000_000}, self.MODEL),
+            0.02,
+        )
+
+    def test_unknown_model_has_no_estimate(self):
+        self.assertIsNone(
+            cloud_bench._estimated_cost_usd({"total_tokens": 1000}, "unknown-model")
+        )
+
+    def test_zero_cost_is_kept(self):
+        self.assertEqual(
+            cloud_bench._estimated_cost_usd({"cost": 0.0}, self.MODEL), 0.0
+        )
+
+
+class ConfiguredCorpusSha256Test(unittest.TestCase):
+    """_configured_corpus_sha256 の env / config / computed / 両方なし（R2-B）。"""
+
+    ENV = cloud_bench.CORPUS_SHA256_ENV
+
+    @staticmethod
+    def _files(tmp):
+        root = Path(tmp)
+        paths = []
+        for name, body in (("a.md", "A"), ("b.md", "B")):
+            path = root / name
+            path.write_bytes(body.encode("utf-8"))
+            paths.append(path)
+        return paths
+
+    def test_env_value_wins_with_config_source(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = self._files(tmp)
+            config_path = Path(tmp) / "missing-config.json"
+            with mock.patch.object(cloud_bench, "CORPUS_SHA256_CONFIG", config_path), \
+                    _temporary_env(**{self.ENV: "a" * 64}):
+                result = cloud_bench._configured_corpus_sha256(files=paths)
+        self.assertIsNotNone(result)
+        self.assertEqual(str(result), "a" * 64)
+        self.assertEqual(result.source, "config")
+
+    def test_config_file_value_used_with_config_source(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = self._files(tmp)
+            config_path = Path(tmp) / "cloud-bench-config.json"
+            config_path.write_text(
+                json.dumps({"corpus_sha256": "b" * 64}), encoding="utf-8"
+            )
+            with mock.patch.object(cloud_bench, "CORPUS_SHA256_CONFIG", config_path), \
+                    _temporary_env(**{self.ENV: None}):
+                result = cloud_bench._configured_corpus_sha256(files=paths)
+        self.assertIsNotNone(result)
+        self.assertEqual(str(result), "b" * 64)
+        self.assertEqual(result.source, "config")
+
+    def test_computed_from_files_when_no_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = self._files(tmp)
+            config_path = Path(tmp) / "missing-config.json"
+            with mock.patch.object(cloud_bench, "CORPUS_SHA256_CONFIG", config_path), \
+                    _temporary_env(**{self.ENV: None}):
+                result = cloud_bench._configured_corpus_sha256(files=paths)
+                expected = cloud_bench._compute_corpus_sha256(paths)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.source, "computed")
+        self.assertEqual(len(str(result)), 64)
+        self.assertEqual(str(result), expected)
+
+    def test_none_when_no_config_and_no_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "missing-config.json"
+            with mock.patch.object(cloud_bench, "CORPUS_SHA256_CONFIG", config_path), \
+                    _temporary_env(**{self.ENV: None}):
+                result = cloud_bench._configured_corpus_sha256(files=None)
+        self.assertIsNone(result)
+
+
+class StrictRankGenerationTest(unittest.TestCase):
+    """_run_generation(strict_rank=True) が不正 rank を error 化すること（R2-B）。"""
+
+    @staticmethod
+    def _run(reply, strict=True):
+        candidates = [
+            (0.9, "a.md", "A"),
+            (0.8, "b.md", "B"),
+            (0.7, "c.md", "C"),
+        ]
+        record = {}
+        query = {"query": "q", "relevant_sources": ["b.md"]}
+        with mock.patch.object(cloud_bench, "_chat", return_value=reply):
+            cloud_bench._run_generation(record, query, candidates, strict_rank=strict)
+        return record
+
+    def test_out_of_range_rank_becomes_error_without_ndcg(self):
+        record = self._run('{"rank": [0, 2]}')
+        self.assertIn("generation_error", record)
+        self.assertIn("rank out of range", record["generation_error"])
+        self.assertNotIn("rerank_ndcg_at_5", record)
+
+    def test_duplicate_rank_becomes_error_without_ndcg(self):
+        record = self._run('{"rank": [2, 2]}')
+        self.assertIn("generation_error", record)
+        self.assertIn("duplicate rank", record["generation_error"])
+        self.assertNotIn("rerank_ndcg_at_5", record)
+
+    def test_valid_rank_keeps_ndcg_and_no_error(self):
+        record = self._run('{"rank": [2, 1]}')
+        self.assertNotIn("generation_error", record)
+        self.assertAlmostEqual(record["rerank_ndcg_at_5"], 1.0, places=4)
+
+
+class DedupeCandidatesByFileTest(unittest.TestCase):
+    """_dedupe_candidates_by_file の best score 選択と順序（R2-B）。"""
+
+    def test_best_score_per_file_and_descending_order(self):
+        candidates = [
+            (0.5, "b.md", "b-low"),
+            (0.9, "a.md", "a-high"),
+            (0.7, "b.md", "b-mid"),
+            (0.8, "a.md", "a-low"),
+            (0.6, "c.md", "c-only"),
+        ]
+        result = cloud_bench._dedupe_candidates_by_file(candidates)
+        self.assertEqual(
+            result,
+            [
+                (0.9, "a.md", "a-high"),
+                (0.7, "b.md", "b-mid"),
+                (0.6, "c.md", "c-only"),
+            ],
+        )
+
+    def test_ties_keep_first_and_sort_by_score(self):
+        candidates = [
+            (0.8, "x.md", "first"),
+            (0.8, "x.md", "second"),
+            (0.5, "y.md", "y"),
+        ]
+        result = cloud_bench._dedupe_candidates_by_file(candidates)
+        self.assertEqual(result[0][2], "first")
+        self.assertEqual([item[1] for item in result], ["x.md", "y.md"])
+
+
+class CompareCloudLocalModeTest(unittest.TestCase):
+    """compare_cloud_local._row の mode 保持と definition 引数（R2-B）。"""
+
+    def test_hybrid_mode_is_preserved(self):
+        data = {
+            "heldout": {"summary": {"hybrid": {"recall_at": {"10": 0.9}}}},
+            "summary": {},
+        }
+        row = compare_cloud_local._row("n", "d", data)
+        self.assertEqual(row["mode"], "hybrid")
+
+    def test_dense_only_mode_is_preserved(self):
+        data = {
+            "heldout": {"summary": {"dense": {"ndcg_at": {"10": 0.5}}}},
+            "summary": {},
+        }
+        row = compare_cloud_local._row("n", "d", data)
+        self.assertEqual(row["mode"], "dense")
+
+    def test_cloud_bench_style_has_null_mode(self):
+        row = compare_cloud_local._row("n", "d", {"summary": {"set_recall_at_10": 0.7}})
+        self.assertIsNone(row["mode"])
+
+    def test_definition_argument_is_recorded(self):
+        row = compare_cloud_local._row("name", "custom definition", {"summary": {}})
+        self.assertEqual(row["definition"], "custom definition")
+
+
+class CompareCloudLocalQueryCountTest(unittest.TestCase):
+    """compare_cloud_local._query_count の int/list/bool/欠損/優先順（R2-B）。"""
+
+    @staticmethod
+    def _count(data):
+        return compare_cloud_local._query_count(data, data.get("summary") or {})
+
+    def test_int_from_summary(self):
+        self.assertEqual(self._count({"summary": {"queries": 5}}), 5)
+
+    def test_list_from_heldout_queries(self):
+        data = {"heldout": {"queries": [{"id": "a"}, {"id": "b"}]}}
+        self.assertEqual(self._count(data), 2)
+
+    def test_list_from_top_level_queries(self):
+        self.assertEqual(self._count({"queries": [1, 2, 3]}), 3)
+
+    def test_missing_returns_none(self):
+        self.assertIsNone(self._count({}))
+
+    def test_bool_is_skipped_and_fallback_is_used(self):
+        data = {"summary": {"queries": True}, "queries": [1, 2]}
+        self.assertEqual(self._count(data), 2)
+
+    def test_priority_summary_over_heldout_over_top_level(self):
+        data = {
+            "summary": {"queries": 4},
+            "heldout": {"queries": [1, 2]},
+            "queries": [1, 2, 3],
+        }
+        self.assertEqual(self._count(data), 4)
+
+    def test_mode_summary_queries_is_last_fallback(self):
+        data = {"heldout": {"summary": {"hybrid": {"queries": 6}}}}
+        self.assertEqual(self._count(data), 6)
+
+    def test_false_bool_does_not_mask_valid_int(self):
+        data = {
+            "summary": {"queries": False},
+            "heldout": {"summary": {"dense": {"queries": 8}}},
+        }
+        self.assertEqual(self._count(data), 8)
+
+
+class CloudBenchPayloadTest(unittest.TestCase):
+    """cloud_bench.main() の payload 集約を fake で検証する（実通信なし、R2-B）。"""
+
+    def _invoke(self, *, usage_samples=None, generation_fn=None, argv_extra=None,
+                embed_model="text-embedding-3-small", corpus_sha_env=None,
+                sha_config_value=None):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            corpus = root / "corpus"
+            corpus.mkdir()
+            for name in ("a.md", "b.md", "c.md"):
+                (corpus / name).write_text(
+                    "# %s\n本文 %s\n" % (name, name), encoding="utf-8"
+                )
+            qrels = {
+                "schema_version": 1,
+                "heldout_queries": [
+                    {
+                        "id": "q%d" % index,
+                        "query": "質問%d" % index,
+                        "relevant_sources": ["%s.md" % "abc"[index]],
+                    }
+                    for index in range(3)
+                ],
+            }
+            qrels_path = root / "qrels.json"
+            qrels_path.write_text(
+                json.dumps(qrels, ensure_ascii=False), encoding="utf-8"
+            )
+            output = root / "out.json"
+            argv = [
+                "cloud_bench.py",
+                "--corpus", str(corpus),
+                "--qrels", str(qrels_path),
+                "--output", str(output),
+                "--with-generation",
+            ]
+            if argv_extra:
+                argv.extend(argv_extra)
+            config_path = root / "cloud-bench-config.json"
+            if sha_config_value is not None:
+                config_path.write_text(
+                    json.dumps({"corpus_sha256": sha_config_value}), encoding="utf-8"
+                )
+            samples = list(usage_samples or [])
+
+            def fake_last_usage():
+                return samples.pop(0) if samples else None
+
+            def default_generation(record, query, candidates, **kwargs):
+                record["rerank_ndcg_at_5"] = 1.0
+                return 0.01
+
+            patchers = (
+                mock.patch.object(sys, "argv", argv),
+                mock.patch.object(cloud_client, "enabled", return_value=True),
+                mock.patch.object(
+                    cloud_client, "embed",
+                    lambda texts, **kwargs: [[1.0, 0.0] for _ in texts],
+                ),
+                mock.patch.object(
+                    cloud_client, "last_usage", side_effect=fake_last_usage
+                ),
+                mock.patch.object(
+                    cloud_client, "embed_model", return_value=embed_model
+                ),
+                mock.patch.object(
+                    cloud_bench, "_run_generation", generation_fn or default_generation
+                ),
+                mock.patch.object(cloud_bench, "CORPUS_SHA256_CONFIG", config_path),
+                mock.patch.object(config, "validate_settings", return_value=[]),
+                mock.patch("sys.stdout", new_callable=io.StringIO),
+                mock.patch("sys.stderr", new_callable=io.StringIO),
+            )
+            with contextlib.ExitStack() as stack:
+                for patcher in patchers:
+                    stack.enter_context(patcher)
+                stack.enter_context(
+                    _temporary_env(**{cloud_bench.CORPUS_SHA256_ENV: corpus_sha_env})
+                )
+                code = cloud_bench.main()
+            payload = json.loads(output.read_text(encoding="utf-8"))
+        return code, payload
+
+    def test_payload_usage_cost_source_api(self):
+        code, payload = self._invoke(usage_samples=[{
+            "calls": 1, "cost": 0.5, "total_tokens": 1000,
+        }])
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["usage"]["cost_source"], "api")
+
+    def test_payload_usage_cost_source_estimated(self):
+        code, payload = self._invoke(usage_samples=[{
+            "calls": 1, "total_tokens": 1000,
+        }])
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["usage"]["cost_source"], "estimated")
+        self.assertAlmostEqual(
+            payload["summary"]["estimated_cost_usd"], 0.00002, places=6
+        )
+
+    def test_payload_usage_cost_source_none(self):
+        code, payload = self._invoke(usage_samples=[{"calls": 1}])
+        self.assertEqual(code, 0)
+        self.assertIsNone(payload["usage"]["cost_source"])
+        self.assertIsNone(payload["summary"]["estimated_cost_usd"])
+
+    def test_estimated_cost_from_tokens_usd_at_zero_boundary(self):
+        code, payload = self._invoke(usage_samples=[{
+            "calls": 1, "total_tokens": 1,
+        }])
+        self.assertEqual(code, 0)
+        summary = payload["summary"]
+        self.assertEqual(summary["estimated_cost_usd"], 0.0)
+        self.assertIn("estimated_cost_from_tokens_usd", summary)
+        self.assertAlmostEqual(
+            summary["estimated_cost_from_tokens_usd"], 2e-8, places=12
+        )
+        self.assertAlmostEqual(
+            payload["usage"]["estimated_cost_from_tokens_usd"], 2e-8, places=12
+        )
+
+    def test_unknown_embed_model_omits_token_cost_key(self):
+        code, payload = self._invoke(
+            usage_samples=[{"calls": 1, "total_tokens": 1}],
+            embed_model="unknown-model",
+        )
+        self.assertEqual(code, 0)
+        self.assertNotIn("estimated_cost_from_tokens_usd", payload["summary"])
+        self.assertNotIn("estimated_cost_from_tokens_usd", payload["usage"])
+
+    def test_summary_rerank_warning_counts(self):
+        def gen(record, query, candidates, **kwargs):
+            if query["id"] == "q0":
+                record["rerank_warnings"] = [
+                    "rank out of range: 0", "duplicate rank: 1",
+                ]
+            elif query["id"] == "q1":
+                record["rerank_warnings"] = ["rank out of range: 99"]
+            record["rerank_ndcg_at_5"] = 1.0
+            return 0.01
+
+        code, payload = self._invoke(generation_fn=gen)
+        self.assertEqual(code, 0)
+        summary = payload["summary"]
+        self.assertEqual(summary["rerank_warning_count"], 3)
+        self.assertEqual(summary["rerank_invalid_rank_count"], 2)
+
+    def test_payload_corpus_sha256_source_config(self):
+        code, payload = self._invoke(corpus_sha_env="c" * 64)
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["corpus_sha256_source"], "config")
+        self.assertEqual(payload["corpus_sha256"], "c" * 64)
+
+    def test_payload_corpus_sha256_source_computed(self):
+        code, payload = self._invoke()
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["corpus_sha256_source"], "computed")
+        self.assertEqual(len(payload["corpus_sha256"]), 64)
+
+
 if __name__ == "__main__":
     _result = unittest.main(exit=False)
     if not getattr(_result, "result", _result).wasSuccessful():

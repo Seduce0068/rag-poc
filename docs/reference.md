@@ -17,8 +17,9 @@ verified:
 status: "stable"
 ---
 
-> 出典は `rag_poc/README.md` の「検索モード」（211-219 行）、「設定（環境変数）」
-> （220-285 行）、「成果物一覧」（846 行以降）および評価章。数値・相対パス・
+> 出典は分割前 README スナップショット（`/tmp/README-full-backup.md`）の
+> 「検索モード」「設定（環境変数）」「評価」「成果物一覧」の各章である。
+> 現行 README では章の再編があるため行番号は示さない。数値・相対パス・
 > コマンドは元 README の記述をそのまま転記している。表内の `#...` アンカーは
 > 元 README 内の見出しを指す。
 
@@ -121,6 +122,53 @@ status: "stable"
 - `RAG_VECTOR_SIZE` の実効値には優先順位がある。`EMBED_MODEL` が `config._EXPECTED_VECTOR_SIZE_TABLE` に登録済みの既知モデル（例: `kun432/cl-nagoya-ruri-base` は 768、`qwen2.5:3b` は 2048）ではテーブル値が優先され、環境変数の不一致は `ingest.py` の警告どまり（期待次元を採用）となる。未知モデルの場合だけ `RAG_VECTOR_SIZE` が実効値になる。ただし `query.py` の設定検証は ruri に 768 を要求するため、ruri を使う場合は環境変数も 768 に揃えること。
 - 認証キーは `OPENCODE_GO_API_KEY`（正規）を使い、`OPENCODE_API_KEY` は後方互換。両方が設定されている場合は正規が優先され、値はログ・例外・成果物へ出力しない。
 
+## qrels ファイルの使い分け
+
+評価ラベルは 3 種類の qrels ファイルで切り替える。`evaluate.py` の
+`--qrels` 省略時は `rag_poc/qrels.json`。投入時と評価時で
+`RAG_CORPUS_DIR` / `RAG_COLLECTION` を揃えること。
+
+| qrels ファイル | コーパス（`RAG_CORPUS_DIR`） | コレクション（`RAG_COLLECTION`） | クエリ数 |
+| --- | --- | --- | --- |
+| `rag_poc/qrels.json` | `passkey-gateway/docs` | `rag_poc_full` | 簡易 6 + held-out 9 |
+| `rag_poc/qrels-subset.json` | `rag_poc/corpus-subset` | `rag_poc_docs` | 簡易 6 + held-out 6 |
+| `rag_poc/qrels-alt.json` | `rag_poc/corpus-alt` | `rag_poc_other_domain` | 簡易 6 + held-out 6 |
+
+```bash
+# qrels.json（既定。全量 passkey docs / rag_poc_full）
+export RAG_CORPUS_DIR=passkey-gateway/docs
+export RAG_COLLECTION=rag_poc_full
+python3 rag_poc/evaluate.py --qrels rag_poc/qrels.json
+
+# qrels-subset.json（6 ファイルのサブセット / rag_poc_docs）
+export RAG_CORPUS_DIR=rag_poc/corpus-subset
+export RAG_COLLECTION=rag_poc_docs
+python3 rag_poc/evaluate.py --qrels rag_poc/qrels-subset.json
+
+# qrels-alt.json（ADR 6 ファイル / rag_poc_other_domain）
+export RAG_CORPUS_DIR=rag_poc/corpus-alt
+export RAG_COLLECTION=rag_poc_other_domain
+python3 rag_poc/evaluate.py --qrels rag_poc/qrels-alt.json
+```
+
+出力 JSON の `corpus_file_count` / `corpus_sha256` / `qrels_label` を確認し、
+ラベルとコーパスが対応していることを確かめる。既に投入済みなら
+`python3 rag_poc/ingest.py` は不要だが、コーパス切替時は先に投入する。
+
+## 評価指標の計算定義
+
+held-out は 9 クエリに正解ファイル名ラベルを付け、次をモード別に集計する。
+
+- `recall@1/3/5/10`: 上位 k 件の `source` に正解が 1 件でもあれば 1、
+  なければ 0 をクエリ平均（query-level hit@k）。正解ファイル全体の
+  回収割合を測る集合 recall ではない。
+- `nDCG@3/10`: gain=1 / discount=log2(rank+1) の DCG を IDCG で割り、
+  クエリ平均する。同一ファイルの複数チャンクは最上位の 1 回だけ計上。
+
+正解は `passkey-gateway/docs` 内の実在ファイル名。完全一致・相対パス
+suffix・basename で照合し、検索失敗ケースは 0 として分母に残す。
+recall@10 / nDCG@10 のため取得件数は最大 10 まで引き上げる。
+
 ## 代表的な実測値
 
 元 README の評価章に記載された数値を変更せず転記する。
@@ -174,11 +222,13 @@ status: "stable"
 
 ## 検証
 
-本ドキュメントは子エージェントが作成した。子は shell 実行権限を持たないため
-lint は未実行である。親エージェントが次のコマンドで確認する。
+親エージェントが lint と OKF 検証を実行済み（lint 0 / OKF valid）。
+子エージェントは shell 実行権限を持たないため、ここでは再確認用の
+コマンドのみを示す。
 
 ```bash
-markdownlint-cli2 rag_poc/docs/reference.md
+markdownlint-cli2 rag_poc/docs/*.md
+rust-script /home/koppe/.agents/skills/okf/scripts/okf_validate.rs rag_poc/docs/reference.md
 ```
 
 転記漏れの確認には次を用いる。
@@ -189,7 +239,8 @@ grep -nE "0\.6243|0\.7542|0\.8681|0\.8597|0\.8819|0\.8978|6\.22" rag_poc/docs/re
 
 ## 参照元
 
-- `rag_poc/README.md`: 「検索モード」（211-219 行）、「設定（環境変数）」（220-285 行）、「成果物一覧」（846 行以降）、評価章（338-424 行、551-576 行）
+- 分割前 README スナップショット（`/tmp/README-full-backup.md`）: 「検索モード」「設定（環境変数）」「評価」「成果物一覧」の各章
+- [rag_poc/docs/index.md](index.md): 詳細ドキュメントの索引
 - `rag_poc/config.py`: 設定の既定値、優先順位、endpoint・クラウド設定の検証
 - `rag_poc/cloud_client.py` / `rag_poc/cloud_bench.py` / `rag_poc/cloud_ingest.py`: クラウド設定とキー名の参照
 - `rag_poc/rust_bridge.py`: Rust バイナリとタイムアウトの参照
