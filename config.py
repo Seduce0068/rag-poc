@@ -36,6 +36,26 @@ QDRANT_TIMEOUT = float(os.environ.get("QDRANT_TIMEOUT", "300"))
 # 放置すると 60 × 300 秒になる最悪ケースを防ぐ。タイムアウトを長くはしない。
 RAG_ANSWER_TIMEOUT = float(os.environ.get("RAG_ANSWER_TIMEOUT", "60"))
 
+# rerank プロンプト样式（R2-A）。'strict'=新方式（候補数・1-based・スコア基準・
+# 全件出力・説明文/余計なキー禁止を明示）、'legacy'=現行文字列。既定は strict。
+ENV_RERANK_PROMPT_STYLE = "RAG_RERANK_PROMPT_STYLE"
+RERANK_PROMPT_STYLE_STRICT = "strict"
+RERANK_PROMPT_STYLE_LEGACY = "legacy"
+RAG_RERANK_PROMPT_STYLE = os.environ.get(
+    ENV_RERANK_PROMPT_STYLE, RERANK_PROMPT_STYLE_STRICT
+)
+
+# 現行（legacy）の指示文。切替テストで「従来文字列」として完全一致を固定する。
+LEGACY_RANK_INSTRUCTION = (
+    "最も関連する候補番号を JSON {\"rank\": [番号,...]} で返してください。"
+)
+LEGACY_SCORE_INSTRUCTION = (
+    "質問と各チャンクの関連度を 0.0〜1.0 の数値で判定してください。\n"
+    "index は 0 から %(last)d まで必ず全件出力してください。\n"
+    "JSON 以外の文章は一切出力しないでください。\n"
+    '出力形式: {"scores":[%(example)s]}'
+)
+
 # クラウド（opencodeGO）設定。既定はすべて無効／ローカル Ollama を維持する。
 ENV_CLOUD_ENABLED = "RAG_CLOUD_ENABLED"
 ENV_CLOUD_CHAT_ENABLED = "RAG_CLOUD_CHAT_ENABLED"
@@ -119,6 +139,71 @@ def expected_vector_size(model: str) -> int:
         if key in lowered:
             return value
     return VECTOR_SIZE
+
+
+# ---------------------------------------------------------------------------
+# rerank プロンプト样式の切替（R2-A）
+# ---------------------------------------------------------------------------
+
+
+def rerank_prompt_style() -> str:
+    """実効の rerank プロンプト样式を返す（未知値は strict へフォールバック）。
+
+    モジュール読み込み後に環境変数を差し替えても反映するため、呼び出し時に
+    環境変数を再読する（既定値は RAG_RERANK_PROMPT_STYLE 定数）。
+    """
+    raw = os.environ.get(ENV_RERANK_PROMPT_STYLE, RAG_RERANK_PROMPT_STYLE)
+    value = str(raw or "").strip().lower()
+    if value in (RERANK_PROMPT_STYLE_STRICT, RERANK_PROMPT_STYLE_LEGACY):
+        return value
+    return RERANK_PROMPT_STYLE_STRICT
+
+
+def rerank_rank_instruction(count: int, style: str | None = None) -> str:
+    """cloud_bench 用 rank 形式の rerank 指示文を样式別に返す。
+
+    legacy は既存文字列（LEGACY_RANK_INSTRUCTION）をそのまま返し、パース契約
+    ``{"rank": [整数, ...]}`` を変えない。strict は候補数・1-based 採番・
+    スコア基準（relevant=1 / not relevant=0）・全件出力・説明文/余計なキー禁止を明示する。
+    """
+    chosen = style or rerank_prompt_style()
+    if chosen == RERANK_PROMPT_STYLE_LEGACY:
+        return LEGACY_RANK_INSTRUCTION
+    return (
+        "候補は全 %(n)d 件です。候補番号は 1 から %(n)d までの 1-based です。\n"
+        "各候補の関連度を判定してください（関連する候補=1、関連しない候補=0）。\n"
+        "関連する候補（1）を優先し、全 %(n)d 件の候補番号を関連度の高い順に並べてください。\n"
+        'JSON のみを {"rank": [番号, ...]} で返し、'
+        "説明文や rank 以外のキーは一切出力しないでください。"
+        % {"n": count}
+    )
+
+
+def rerank_score_instruction(count: int, style: str | None = None) -> str:
+    """query 用 score 形式の rerank 指示文を样式別に返す（出力例を含む）。
+
+    legacy は既存文字列（LEGACY_SCORE_INSTRUCTION、0-based）をそのまま返す。
+    strict は候補数・1-based 採番・スコア基準（relevant=1 / not relevant=0）・
+    全件出力・説明文/余計なキー禁止を明示する。いずれも ``{"scores": [...]}``
+    のパース契約は維持する。
+    """
+    chosen = style or rerank_prompt_style()
+    if chosen == RERANK_PROMPT_STYLE_LEGACY:
+        example = ", ".join(
+            '{"index":%d,"score":0.5}' % index for index in range(count)
+        )
+        return LEGACY_SCORE_INSTRUCTION % {"last": count - 1, "example": example}
+    example = ", ".join(
+        '{"index":%d,"score":1}' % index for index in range(1, count + 1)
+    )
+    return (
+        "質問と各チャンクの関連度を判定してください"
+        "（関連するチャンク=1、関連しないチャンク=0）。\n"
+        "候補は全 %(n)d 件です。index は 1 から %(n)d までの 1-based です。\n"
+        "全 %(n)d 件について必ず出力し、説明文や scores 以外のキーは一切出力しないでください。\n"
+        'JSON のみを {"scores":[%(example)s]} で返してください。'
+        % {"n": count, "example": example}
+    )
 
 
 # ---------------------------------------------------------------------------

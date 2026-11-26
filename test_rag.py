@@ -3951,6 +3951,19 @@ class CloudBenchPayloadTest(unittest.TestCase):
         self.assertEqual(summary["rerank_warning_count"], 3)
         self.assertEqual(summary["rerank_invalid_rank_count"], 2)
 
+    def test_summary_rerank_unchanged_count_keeps_existing_keys(self):
+        def gen(record, query, candidates, **kwargs):
+            record["rerank_unchanged"] = query["id"] != "q2"
+            record["rerank_ndcg_at_5"] = 1.0
+            return 0.01
+
+        code, payload = self._invoke(generation_fn=gen)
+        self.assertEqual(code, 0)
+        summary = payload["summary"]
+        self.assertEqual(summary["rerank_unchanged_count"], 2)
+        self.assertIn("rerank_warning_count", summary)
+        self.assertIn("rerank_invalid_rank_count", summary)
+
     def test_payload_corpus_sha256_source_config(self):
         code, payload = self._invoke(corpus_sha_env="c" * 64)
         self.assertEqual(code, 0)
@@ -4235,6 +4248,183 @@ class CompareCloudLocalGateTest(unittest.TestCase):
         self.assertTrue(payload["rows"])
         self.assertTrue(payload["notes"])
         self.assertTrue(payload["generated_at"])
+
+
+class RerankPromptStyleTest(unittest.TestCase):
+    """RAG_RERANK_PROMPT_STYLE の切替と legacy の従来文字列を固定（R2-A）。"""
+
+    STYLE_ENV = config.ENV_RERANK_PROMPT_STYLE
+
+    def test_default_style_is_strict(self):
+        with _temporary_env(**{self.STYLE_ENV: None}):
+            self.assertEqual(config.RERANK_PROMPT_STYLE_STRICT, "strict")
+            self.assertEqual(config.rerank_prompt_style(), "strict")
+
+    def test_env_switches_legacy_and_unknown_falls_back(self):
+        with _temporary_env(**{self.STYLE_ENV: "legacy"}):
+            self.assertEqual(config.rerank_prompt_style(), "legacy")
+        with _temporary_env(**{self.STYLE_ENV: "bogus"}):
+            self.assertEqual(config.rerank_prompt_style(), "strict")
+
+    def test_legacy_rank_instruction_is_traditional_string(self):
+        self.assertEqual(
+            config.rerank_rank_instruction(5, style="legacy"),
+            "最も関連する候補番号を JSON {\"rank\": [番号,...]} で返してください。",
+        )
+
+    def test_legacy_score_instruction_is_traditional_string(self):
+        self.assertEqual(
+            config.rerank_score_instruction(3, style="legacy"),
+            "質問と各チャンクの関連度を 0.0〜1.0 の数値で判定してください。\n"
+            "index は 0 から 2 まで必ず全件出力してください。\n"
+            "JSON 以外の文章は一切出力しないでください。\n"
+            '出力形式: {"scores":[{"index":0,"score":0.5}, '
+            '{"index":1,"score":0.5}, {"index":2,"score":0.5}]}',
+        )
+
+    def test_strict_instructions_state_all_rules(self):
+        rank = config.rerank_rank_instruction(4, style="strict")
+        score = config.rerank_score_instruction(4, style="strict")
+        for text in (rank, score):
+            with self.subTest(text=text[:20]):
+                self.assertIn("4", text)
+                self.assertIn("1-based", text)
+                self.assertIn("=1", text)
+                self.assertIn("=0", text)
+                self.assertIn("全 4 件", text)
+                self.assertIn("説明文", text)
+                self.assertIn("キー", text)
+
+
+class CloudBenchRerankPromptTest(unittest.TestCase):
+    """cloud_bench の rerank プロンプトと unchanged 記録（R2-A）。"""
+
+    CANDIDATES = [
+        (0.9, "a.md", "A"),
+        (0.8, "b.md", "B"),
+        (0.7, "c.md", "C"),
+    ]
+
+    def _run(self, reply, *, style):
+        record = {}
+        q = {"query": "q", "relevant_sources": ["b.md"]}
+        captured = []
+
+        def fake_chat(messages, model=None, **kwargs):
+            captured.append(messages)
+            return reply if len(captured) == 1 else "回答"
+
+        with _temporary_env(**{config.ENV_RERANK_PROMPT_STYLE: style}), \
+                mock.patch.object(cloud_bench, "_chat", side_effect=fake_chat):
+            cloud_bench._run_generation(record, q, self.CANDIDATES)
+        return record, captured[0][1]["content"]
+
+    def test_strict_prompt_exposes_rules_and_one_based_listing(self):
+        _, prompt = self._run('{"rank": [1, 2, 3]}', style="strict")
+        self.assertIn("1-based", prompt)
+        self.assertIn("関連する候補=1", prompt)
+        self.assertIn("関連しない候補=0", prompt)
+        self.assertIn("全 3 件", prompt)
+        self.assertIn("説明文", prompt)
+        self.assertIn("rank 以外のキー", prompt)
+        self.assertIn("[1] a.md", prompt)
+        self.assertIn("[3] c.md", prompt)
+
+    def test_legacy_prompt_keeps_traditional_instruction(self):
+        _, prompt = self._run('{"rank": [1, 2, 3]}', style="legacy")
+        self.assertIn(config.LEGACY_RANK_INSTRUCTION, prompt)
+        self.assertNotIn("1-based", prompt)
+
+    def test_unchanged_recorded_when_order_matches(self):
+        record, _ = self._run('{"rank": [1, 2, 3]}', style="strict")
+        self.assertIs(record["rerank_unchanged"], True)
+
+    def test_changed_recorded_when_order_differs(self):
+        record, _ = self._run('{"rank": [3, 2, 1]}', style="strict")
+        self.assertIs(record["rerank_unchanged"], False)
+
+
+class QueryRerankUnchangedTest(unittest.TestCase):
+    """query.rerank の contextvar 記録と 1-based パース契約（R2-A）。"""
+
+    def setUp(self):
+        self._prev_max_docs = query.RERANK_MAX_DOCS
+        query.RERANK_MAX_DOCS = 3
+
+    def tearDown(self):
+        query.RERANK_MAX_DOCS = self._prev_max_docs
+
+    @staticmethod
+    def _points():
+        return [
+            {
+                "id": "p%d" % index,
+                "score": 1.0 - index / 10.0,
+                "text": "本文%d" % index,
+                "source": "d%d.md" % index,
+            }
+            for index in range(3)
+        ]
+
+    def _run(self, content, *, style):
+        captured = {}
+
+        def fake_post(url, payload):
+            captured["system"] = payload["messages"][0]["content"]
+            return {"message": {"content": content}}
+
+        with _temporary_env(**{config.ENV_RERANK_PROMPT_STYLE: style}), \
+                mock.patch.object(query, "_post", fake_post), \
+                mock.patch.object(query, "_warn", lambda message: None):
+            hits = query.rerank("q", self._points())
+        return hits, captured["system"]
+
+    def test_strict_prompt_states_rules_and_one_based_index(self):
+        content = json.dumps(
+            {"scores": [{"index": index, "score": 0.5} for index in range(1, 4)]}
+        )
+        _, system = self._run(content, style="strict")
+        self.assertIn("1-based", system)
+        self.assertIn("関連するチャンク=1", system)
+        self.assertIn("関連しないチャンク=0", system)
+        self.assertIn("全 3 件", system)
+        self.assertIn("説明文", system)
+        self.assertIn('{"index":1,"score":1}', system)
+
+    def test_legacy_prompt_keeps_traditional_instruction(self):
+        content = json.dumps(
+            {"scores": [{"index": index, "score": 0.5} for index in range(3)]}
+        )
+        _, system = self._run(content, style="legacy")
+        self.assertIn("index は 0 から 2 まで", system)
+        self.assertNotIn("1-based", system)
+
+    def test_one_based_scores_parse_and_unchanged_is_true(self):
+        content = json.dumps({"scores": [
+            {"index": 1, "score": 0.9},
+            {"index": 2, "score": 0.8},
+            {"index": 3, "score": 0.7},
+        ]})
+        hits, _ = self._run(content, style="strict")
+        self.assertEqual([hit["id"] for hit in hits[:3]], ["p0", "p1", "p2"])
+        self.assertIs(query.last_rerank_unchanged(), True)
+
+    def test_changed_order_is_recorded(self):
+        content = json.dumps({"scores": [
+            {"index": 1, "score": 0.1},
+            {"index": 2, "score": 0.5},
+            {"index": 3, "score": 0.9},
+        ]})
+        hits, _ = self._run(content, style="strict")
+        self.assertEqual([hit["id"] for hit in hits[:3]], ["p2", "p1", "p0"])
+        self.assertIs(query.last_rerank_unchanged(), False)
+
+    def test_fallback_marks_unchanged_and_keeps_original_order(self):
+        with mock.patch.object(query, "_post", side_effect=RuntimeError("no llm")), \
+                mock.patch.object(query, "_warn", lambda message: None):
+            hits = query.rerank("q", self._points())
+        self.assertEqual([hit["id"] for hit in hits], ["p0", "p1", "p2"])
+        self.assertIs(query.last_rerank_unchanged(), True)
 
 
 if __name__ == "__main__":

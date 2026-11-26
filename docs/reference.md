@@ -1,7 +1,7 @@
 ---
 type: Reference
 title: "rag_poc 設定・検索モード・成果物リファレンス"
-description: "rag_poc の検索モード、全環境変数（既定値・単位）、評価成果物一覧と代表的な実測値を集約した参照ドキュメント"
+description: "rag_poc の検索モード、CLI オプション、hits スキーマ、全環境変数（既定値・単位）、埋め込み単価、評価成果物一覧と代表的な実測値を集約した参照ドキュメント"
 tags:
   - rag
   - configuration
@@ -9,11 +9,11 @@ tags:
   - artifacts
   - reference
 generated:
-  by: "dsh-subagent/eg-reference"
-  at: "2026-11-26T21:41:25+09:00"
+  by: "dsh-subagent/jb-readme"
+  at: "2026-11-26T22:47:35+09:00"
 verified:
-  - by: "dsh-subagent/eg-reference"
-    at: "2026-11-26T21:41:25+09:00"
+  - by: "dsh-subagent/jb-readme"
+    at: "2026-11-26T22:47:35+09:00"
 status: "stable"
 stale_after: "2026-12-26"
 ---
@@ -23,6 +23,8 @@ stale_after: "2026-12-26"
 > 現行 README では章の再編があるため行番号は示さない。数値・相対パス・
 > コマンドは元 README の記述をそのまま転記している。表内の `#...` アンカーは
 > 元 README 内の見出しを指す。
+> R2 で README から集約した章（CLI オプション / hits スキーマ / 埋め込み単価 /
+> 比較表の指標定義と注記 / 簡易計測と正式パイプラインの使い分け）は現行 README を出典とする。
 
 ## 概要
 
@@ -44,6 +46,55 @@ stale_after: "2026-12-26"
 指定すること。`RAG_RERANK_MAX_DOCS` は LLM に再ランクさせる件数（既定 5）。
 上位 5 件のみを再評価し、残りは元のスコアを保持するため、返却件数は
 `--top-k` のまま変わらない。
+
+## hits スキーマ
+
+`query.py --json` の出力対象は `mode` / `hits` / `answer` / `sources` で、
+`hits` の各要素は次のキーを持つ。全モードで必ず現れる共通キーと、
+モードや実行状態によって欠落し得る optional キーを分けて記載する。
+
+| キー | 種別 | 内容 | 現れる条件 |
+| --- | --- | --- | --- |
+| `id` | 共通 | Qdrant の point ID | 全モード |
+| `score` | 共通 | 検索スコア。`dense` はコサイン類似度、`keyword` は一致語数、`hybrid` 以降は RRF スコア。`hybrid-rerank` では `final_score` と同値 | 全モード |
+| `source` | 共通 | 出典（ファイル名など。取得できない場合は `point:<id>`） | 全モード |
+| `text` | 共通 | チャンク本文（空文字の可能性あり） | 全モード |
+| `reranked_by_llm` | optional | LLM 再ランクが適用されたか（`true` / `false`） | `hybrid-rerank` のみ |
+| `base_score` | optional | 再ランク前の元スコア | `hybrid-rerank` のみ |
+| `llm_score` | optional | LLM が返した 0..1 のスコア（欠損時は `null`） | `hybrid-rerank` のみ |
+| `final_score` | optional | 並び替え用の 0..1 正規化スコア | `hybrid-rerank` のみ |
+| `truncated` | optional | scroll が `MAX_SCROLL_PAGES` に到達し結果が切れたことを示す `true` | `keyword` / `hybrid` / `hybrid-rerank` で keyword 側 scroll が上限到達時のみ |
+
+consumer は optional キーの存在を前提にしないこと。参照時は
+`hit.get("reranked_by_llm")` のように既定値を与えるか、`"key" in hit` で
+有無を確認する。また共通キーも `id` / `score` はソース次第で `null`
+になり得るため、型を決め打ちしないこと。
+
+## CLI オプション
+
+`ingest.py`:
+
+| オプション | 動作 |
+| --- | --- |
+| `--help` | ヘルプを表示して終了（設定検証より前に処理される） |
+| `--corpus-dir DIR` | コーパスディレクトリ（リポジトリ配下。既定 `RAG_CORPUS_DIR`） |
+| `--collection NAME` | Qdrant コレクション名（既定 `RAG_COLLECTION`） |
+| `--recreate` | コレクションを削除して再作成。**`--yes` を同時指定しない限り削除せず終了コード 2 で停止する**（破壊的操作のため実 DELETE は明示承認が必要） |
+| `--yes` | `--recreate` と併用してコレクション削除（実 DELETE）を実行する。単独指定では削除しない |
+
+`evaluate.py`:
+
+| オプション | 動作 |
+| --- | --- |
+| `--qrels PATH` | 正解ラベルファイル（3 種類の使い分けは[qrels ファイルの使い分け](#qrels-ファイルの使い分け)を参照） |
+| `--heldout-only` | 簡易指標を既存 JSON から再利用し held-out のみ再計測 |
+| `--collections a,b,c` | 複数コレクションを一括評価し `eval-results-<collection>.json` へ個別保存。**`--output` と併用不可（終了コード 2）** |
+| `--with-answer` | 回答生成を実行し `answer` / `sources` / `answer_error` / `answer_latency_sec` を記録（既定は検索指標のみ） |
+| `--output PATH` | 指定パスへ書き出す。未指定時は上書き前に `eval-results-<UTC>.json` へ自動退避 |
+
+`query.py` は `--mode` / `--top-k` / `--json` に加え、`--help` が設定不正時も
+先に表示される。生成失敗は検索指標を汚さず `answer_error` へ分離される。
+`--mode` は[検索モード](#検索モード)の 4 種、`--top-k` は `RAG_TOP_K`（既定 10）を参照。
 
 ## 設定（環境変数）
 
@@ -170,6 +221,14 @@ held-out は 9 クエリに正解ファイル名ラベルを付け、次をモ�
 suffix・basename で照合し、検索失敗ケースは 0 として分母に残す。
 recall@10 / nDCG@10 のため取得件数は最大 10 まで引き上げる。
 
+## 公開成果物の answer 除外理由
+
+`eval-results-cloud-full.json` は公開対象だが `answer` / `rerank_candidates` /
+`rerank_reply` を保持しない。生成テキストにはコーパス由来の内部識別子が混入し得て、
+マスクを通しても完全なサニタイズを保証できないためである。指標（recall / nDCG /
+レイテンシ）と `metric_definition` は再現可能。生成テキストを検証したい場合は、
+ローカルで `--with-answer` を付けて再生成し、追跡外の成果物で確認する。
+
 ## 代表的な実測値
 
 元 README の評価章に記載された数値を変更せず転記する。比較条件が表だけ
@@ -202,6 +261,43 @@ definition 列と併せて読むこと。
 
 8.03 / 10.04 秒の成果物単位の照合は `compare_cloud_local.py --run-ab` で
 条件を揃えてから行うこと（[A/B 比較の手順](../README.md#ab-比較の手順--run-ab)）。
+
+### 比較表の指標定義と注記
+
+[代表的な実測値](#代表的な実測値)の定義列と併せて読む。`—` は未計測を表す。
+
+- `hit@1` は query-level、`set_recall@1` は集合 recall。ローカルの `recall@1` は
+  `hit@1` に相当する（[評価指標の計算定義](#評価指標の計算定義)も参照）。
+- 定義は 3 種。`evaluate query-level`（`evaluate.py`: query-level hit@1 と集合
+  set_recall@1、nDCG@10 は上位 10 件・ファイル 1 回）、`cloud_bench top10`
+  （`cloud_bench.py`: nDCG@10 は上位 10 件・ファイル 1 回）、`legacy 全順位`
+  （旧 `ndcg_at_10`、全順位ベースで現行定義と直接比較不可）。
+- レイテンシは計測対象が異なるため単純比較しない（詳細は
+  [代表的な実測値](#代表的な実測値)の冒頭を参照）。
+- 計測回数はクラウド `repeat=1`、ローカル全量 `RAG_EVAL_REPEAT=10`
+  （ウォームアップ 1 回＋10 回計測＝60 サンプル）で混在する。rerank nDCG@5 は
+  9 クエリ（`rerank_query_count=9`、n=9）の値。
+- 全量ファイル数は成果物ごとに異なる。`passkey-gateway/docs` の実体は 91 ファイル、
+  `eval-results-cloud-pipeline.json` は 88 ファイル／214 チャンク
+  （旧比較表の 87 ファイル／214 チャンクは旧値）。
+- 全量クラウドは 91 ファイル／1380 チャンク（`ingest.iter_chunks` 委譲後）、
+  全量 Ruri は 88 ファイル／2200 チャンクでコーパスとチャンク条件が異なるため、
+  両者の nDCG に優劣は付けられない。
+
+## 簡易計測と正式パイプラインの使い分け
+
+| 観点 | 簡易: `cloud_bench.py` | 正式: `cloud_ingest.py` → `evaluate.py` |
+| --- | --- | --- |
+| 検索 | 埋め込みコサイン類似度のみ（Qdrant を使わない） | Qdrant 投入後に `dense` / `keyword` / `hybrid` / `hybrid-rerank` の 4 モード |
+| コーパス | 既定 `corpus-subset`（`--corpus` で変更可） | `RAG_CORPUS_DIR` / `RAG_COLLECTION`（全量は `rag_poc_cloud_full`） |
+| 成果物 | `eval-results-cloud-*.json`（`schema_version` なし） | `eval-results-cloud-pipeline.json`（`schema_version` あり） |
+| 生成 | `--with-generation` で rerank / 回答（既定は全件、`--generation-max-queries N` で先頭 N 件に制限） | `--with-answer` で回答生成（`RAG_ANSWER_TIMEOUT` が適用） |
+| 用途 | 埋め込みモデルの簡易比較。Token 消費を抑えて確認する | 本番相当の 4 モード評価と退避済み成果物の更新 |
+
+`--with-generation` の既定は全件で、全量コーパスでは 9 クエリ
+（`rerank_query_count=9`、n=9）を計測した。実測値は
+[代表的な実測値](#代表的な実測値)を参照。成果物の詳細は
+[成果物一覧](#成果物一覧)を参照。
 
 ## 成果物一覧
 
@@ -259,6 +355,31 @@ min/max/mean/stdev を求める。Rust が無い／失敗した場合は Python 
 のパスだけを Rust へ渡し、成果物のキー検証をゲートする（Python の検索・評価
 経路では呼ばない）。
 
+## 埋め込み単価
+
+opencodeGO の OpenAI 互換 `/embeddings` API で利用できる埋め込みモデルの
+1M 入力トークン単価（[公式 Go ドキュメント](https://opencode.ai/docs/console/go/)、
+2026-11-26 取得）。実コストは API 応答に依存し未検証である。
+
+| モデル ID | 1M 入力トークン単価 |
+| --- | --- |
+| `text-embedding-3-small` | $0.02 |
+| `qwen3-embedding-8b` | $0.01 |
+| `gemini-embedding-2` | $0.20 |
+
+単価は `qwen3-embedding-8b` の方が安いが、日本語コーパスでは
+`text-embedding-3-small` が精度・レイテンシともに上回った
+（`eval-results-cloud-small-subset.json` / `eval-results-cloud-qwen3-subset.json`）。
+`gemini-embedding-2` は 3072 次元で、`eval-results-cloud-gemini-subset.json` に
+計測値がある。実測値は[代表的な実測値](#代表的な実測値)を参照。
+エンドポイントは `https://opencode.ai/inference/go/openai/v1/embeddings` で、
+`dimensions` 指定が可能。`encoding_format` は API 仕様上存在するが本クライアント
+未対応（リクエストへ渡さない）。埋め込みリクエストには `x-opencode-session` が
+不要で、RAG ライブラリから直接呼べる（生成/chat 呼び出しには会話単位 UUID ヘッダを付与する）。
+
+本章はモデルごとの公表単価であり、成果物に記録される実コストの出所とは別である。
+後者は[コストと token 推定キー](#コストと-token-推定キー)を参照。
+
 ## コストと token 推定キー
 
 `cloud_bench.py` が出力する `eval-results-cloud-*.json` の `usage` / `summary`
@@ -282,12 +403,11 @@ min/max/mean/stdev を求める。Rust が無い／失敗した場合は Python 
 
 ## 検証
 
-親エージェントが lint と OKF 検証を実行済み（lint 0 / OKF valid）。
-子エージェントは shell 実行権限を持たないため、ここでは再確認用の
-コマンドのみを示す。
+R2 で README から章を集約したため、親エージェントが lint と OKF 検証を再実行する。
+子エージェントは shell 実行権限を持たないため、ここでは再確認用のコマンドのみを示す。
 
 ```bash
-markdownlint-cli2 rag_poc/docs/*.md
+markdownlint-cli2 rag_poc/README.md rag_poc/docs/reference.md
 rust-script /home/koppe/.agents/skills/okf/scripts/okf_validate.rs rag_poc/docs/reference.md
 ```
 
@@ -295,11 +415,13 @@ rust-script /home/koppe/.agents/skills/okf/scripts/okf_validate.rs rag_poc/docs/
 
 ```bash
 grep -nE "0\.6243|0\.7542|0\.8681|0\.8597|0\.8819|0\.8978|6\.22" rag_poc/docs/reference.md
+grep -nE '^#{2,3} (hits スキーマ|CLI オプション|埋め込み単価|比較表の指標定義と注記|簡易計測と正式パイプラインの使い分け)' rag_poc/docs/reference.md
 ```
 
 ## 参照元
 
 - 分割前 README スナップショット（`/tmp/README-full-backup.md`）: 「検索モード」「設定（環境変数）」「評価」「成果物一覧」の各章
+- [rag_poc/README.md](../README.md): R2 で集約した章（CLI オプション / hits スキーマ / 埋め込み単価 / 比較表の指標定義と注記 / 簡易計測と正式パイプラインの使い分け）の出典
 - [rag_poc/docs/index.md](index.md): 詳細ドキュメントの索引
 - `rag_poc/config.py`: 設定の既定値、優先順位、endpoint・クラウド設定の検証
 - `rag_poc/cloud_client.py` / `rag_poc/cloud_bench.py` / `rag_poc/cloud_ingest.py`: クラウド設定とキー名の参照

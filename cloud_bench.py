@@ -620,11 +620,10 @@ def _run_generation(
         "[%d] %s: %s" % (i + 1, src, chunk[:300])
         for i, (_, src, chunk) in enumerate(candidates)
     )
-    prompt = (
-        "質問: %s\n\n候補:\n%s\n\n"
-        "最も関連する候補番号を JSON {\"rank\": [番号,...]} で返してください。"
-        % (query["query"], listing)
-    )
+    # 指示文は config の样式切替に委譲する。legacy は既存文字列を返すため
+    # 既存の rank / score パース契約・テストはそのまま成立する（R2-A）。
+    instruction = config.rerank_rank_instruction(len(candidates))
+    prompt = "質問: %s\n\n候補:\n%s\n\n%s" % (query["query"], listing, instruction)
     started = time.perf_counter()
 
     # --- rerank フェーズ: 失敗しても answer を続行する。 ---
@@ -650,6 +649,11 @@ def _run_generation(
                     for i in ids
                     if 1 <= i <= len(record["rerank_candidates"])
                 ))
+                # hybrid-rerank が元順位を変えなかったことを検出する（R2-A）。
+                # 元順位は候補のファイル重複を一意化した順序（listing と同じ
+                # 1-based 採番順）で比較する。パース契約・既存キーは変更しない。
+                original_order = list(dict.fromkeys(record["rerank_candidates"]))
+                record["rerank_unchanged"] = ordered == original_order
                 rel = set(query["relevant_sources"])
                 dcg = sum(
                     1.0 / math.log2(i + 2)
@@ -899,6 +903,11 @@ def main() -> int:
     rerank_invalid_rank_count = sum(
         1 for r in records if r.get("rerank_warnings")
     )
+    # 再ランク結果が元順位と同一だったクエリ数（R2-A）。スコア算出できた
+    # クエリだけが rerank_unchanged を持つため、欠損は count に数えない。
+    rerank_unchanged_count = sum(
+        1 for r in records if r.get("rerank_unchanged") is True
+    )
     estimated_cost = _estimated_cost_usd(usage_payload, embed_model)
     cost_source = _usage_cost_source(usage_payload, embed_model)
     total_tokens = (
@@ -927,6 +936,7 @@ def main() -> int:
         "rerank_query_count": len(rerank_scores),  # 実効クエリ数（スコア換算できた件数）
         "rerank_warning_count": rerank_warning_count,
         "rerank_invalid_rank_count": rerank_invalid_rank_count,
+        "rerank_unchanged_count": rerank_unchanged_count,
         "estimated_cost_usd": estimated_cost,
     }
     if token_cost_applicable:
@@ -973,6 +983,9 @@ def main() -> int:
             "生成リクエストのセッション UUID は cloud_client.chat 側で付与し cloud_bench では生成しない。",
             "rerank は JSON の rank 整数配列のみを採用し、パース失敗時は generation_error に記録して nDCG を 0 としない。",
             "範囲外 rank / 重複 rank は rerank_warnings に記録してスコア算出は従来どおり（--strict-rank 指定時は generation_error へ昇格しスコアを見送る）。",
+            "RAG_RERANK_PROMPT_STYLE=%s: strict は候補数・1-based 採番・スコア基準（relevant=1 / not relevant=0）・全件出力・説明文/余計なキー禁止を明示し、legacy は従来文字列を使用する（rank / score のパース契約は不変）。"
+            % config.rerank_prompt_style(),
+            "rerank_unchanged_count は再ランク後の順序が元の候補順（ファイル単位一意順）と同一だったクエリ数（元順位のままなら 1 件として計上）。",
         ])
     if args.rerank_file_dedupe:
         notes.append(
