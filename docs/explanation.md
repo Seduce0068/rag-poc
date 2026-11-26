@@ -447,6 +447,9 @@ cp rag_poc/eval-results.json rag_poc/eval-results-other-domain.json
 
 ### 外部送信とコストの限界
 
+警告の正本は [README のクラウド章冒頭](../README.md#クラウドモデルopencodego) に集約されている。
+ここでは ARID（意図的な要約の重複）に従い要点のみ再掲する。
+
 - クラウド有効化時は質問文・チャンク本文・ベクトルが外部 API へ送信され、
   token 課金が発生する。キーの有効性・レート制限・コストは未検証で、
   長時間の連続評価は避ける。
