@@ -1,0 +1,103 @@
+{
+  "generated_at": "2026-11-26T09:43:25.674565+00:00",
+  "model": "text-embedding-3-small",
+  "corpus": "corpus-subset",
+  "qrels_label": "qrels-subset.json",
+  "chunk_size": 300,
+  "summary": {
+    "recall_at_1": 1.0,
+    "recall_at_10": 1.0,
+    "ndcg_at_10": 1.0
+  },
+  "results": [
+    {
+      "id": "h-s01",
+      "top_source": "passkey-sudo-design.md",
+      "relevant_sources": [
+        "passkey-sudo-design.md"
+      ],
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "ndcg_at_10": 1.0
+    },
+    {
+      "id": "h-s02",
+      "top_source": "dsh-token-rd-fix-2026-11-25.md",
+      "relevant_sources": [
+        "dsh-token-rd-fix-2026-11-25.md"
+      ],
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "ndcg_at_10": 1.0
+    },
+    {
+      "id": "h-s03",
+      "top_source": "rag-methods-selection-2026-11-26.md",
+      "relevant_sources": [
+        "rag-methods-selection-2026-11-26.md"
+      ],
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "ndcg_at_10": 1.0
+    },
+    {
+      "id": "h-s04",
+      "top_source": "security-posture.md",
+      "relevant_sources": [
+        "security-posture.md"
+      ],
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "ndcg_at_10": 1.0
+    },
+    {
+      "id": "h-s05",
+      "top_source": "FINAL-SUMMARY.md",
+      "relevant_sources": [
+        "FINAL-SUMMARY.md"
+      ],
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "ndcg_at_10": 1.0
+    },
+    {
+      "id": "h-s06",
+      "top_source": "jarvis-muse-dsh-roles.md",
+      "relevant_sources": [
+        "jarvis-muse-dsh-roles.md"
+      ],
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "ndcg_at_10": 1.0
+    }
+  ],
+  "notes": [
+    "埋め込みは opencodeGO の OpenAI 互換 /embeddings API を使用。",
+    "スコアはコサイン類似度、ファイル単位の best score でランク付け。",
+    "秘密情報の値は出力・保存していない。"
+  ]
+}

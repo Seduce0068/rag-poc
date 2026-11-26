@@ -336,10 +336,14 @@ top_source が `jarvis-muse-dsh-roles.md` だった（正解は
 | --- | --- | --- |
 | `qwen2.5:3b` | 0.1667 | 0.5384 |
 | `kun432/cl-nagoya-ruri-base` | **1.0** | **1.0** |
+| `text-embedding-3-small`（opencodeGO、2026-11-26） | **1.0** | **1.0** |
 
 Ruri は正解を rank1 に置けたのに対し、qwen は 6 件中 1 件しか
 rank1 に置けなかった。`recall@10` は両者 1.0 だが、ランキング
 品質は埋め込みモデルで大きく変わることが実証された。
+クラウド埋め込みも同一サブセット・同一 qrels で recall@1 / nDCG@10
+ともに 1.0 だった（`eval-results-cloud-subset.json`）。ローカル Ruri と
+同等の品質だが、外部送信と token 課金が発生する点が異なる。
 Ruri は 512 トークンcontextのため `CHUNK_SIZE=300` 前後で投入する
 （800 のままでは HTTP 400 になる）。サブセット結果は
 `rag_poc/eval-results-ruri-subset.json` に退避済み。
