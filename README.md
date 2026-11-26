@@ -1,6 +1,9 @@
 # rag_poc — ローカル RAG 検証
 
-> この README は入口（how-to）です。背景は `docs/explanation`、仕様は `docs/reference` へ分離する。
+> **TL;DR / まず読む順**: [目的](#目的) → [セットアップ](#セットアップ) → [使い方](#使い方) →
+> [検索モード](#検索モード) → [評価](#評価) → [既知の制限](#既知の制限)。
+> 背景は `docs/explanation.md`、詳細仕様と実測データは `docs/reference.md` 等へ順次分離する予定で、この README は入口に限定する（新規ファイル作成は未着手）。
+> 当面は [クラウド/ローカル比較](#クラウドローカル比較2026-11-26) 等を参照すること。
 > 日付表記: 本文は `YYYY-MM-DD`、メタデータは RFC 3339、ファイル名は `YYYYMMDD`。
 
 ## 目的
@@ -624,7 +627,7 @@ RAG_REQUIRE_RUST=1 python3 rag_poc/test_rag.py
 
 外部サービスへ接続せず、`unittest` のみで設定・RRF・JSON 解析・
 チャンク分割・評価クエリ・held-out 指標・rerank のフォールバックを
-検証する（全 176 件）。Rust 同等性テスト 9+8件（`ragcore` 側 9 件と
+検証する（全 184 件）。Rust 同等性テスト 9+8件（`ragcore` 側 9 件と
 Python 側 8 件）のうち、Rust バイナリを要する 8 件は未ビルド時に
 理由付きで skip される。第2のコマンドはこの skip を失敗へ切り替え、
 Rust 未ビルドを green で通さないためのゲートである。なお

@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-26T10:54:59.884950+00:00",
+  "generated_at": "2026-11-26T12:34:42.669876+00:00",
   "model": "text-embedding-3-small",
   "generation_model": "deepseek-v4.1-flash",
   "corpus": "corpus-subset",
@@ -10,8 +10,8 @@
   "repeat": 1,
   "latency_runs": [
     {
-      "embedding_sec": 8.031641,
-      "search_sec": 0.083286
+      "embedding_sec": 3.663945,
+      "search_sec": 0.083819
     }
   ],
   "summary": {
@@ -24,10 +24,14 @@
     "set_recall_at_1": 1.0,
     "set_recall_at_10": 1.0,
     "ndcg_at_10": 1.0,
-    "embedding_latency_sec": 8.031641,
-    "search_latency_sec": 0.083286,
-    "total_search_latency_sec": 8.114927,
-    "rerank_query_count": 0
+    "embedding_latency_sec": 3.663945,
+    "search_latency_sec": 0.083819,
+    "total_search_latency_sec": 3.747764,
+    "rerank_query_count": 0,
+    "rerank_warning_count": 0,
+    "rerank_invalid_rank_count": 0,
+    "estimated_cost_usd": 0.0,
+    "estimated_cost_from_tokens_usd": 0.00036772
   },
   "results": [
     {
@@ -187,20 +191,37 @@
       "ndcg_at_10": 1.0
     }
   ],
+  "metric_definition": {
+    "ndcg_at_10": "上位10件のみを採用し、同一ファイルは最上位の1回だけ計上（gain=1 / discount=log2(rank+1)、IDCG は relevant_sources 数）。evaluate.py 準拠。",
+    "hit_at": "query-level hit@k（上位 k に正解が1件でもあれば1）。evaluate.py 準拠。",
+    "set_recall_at": "集合 recall（上位 k の正解数 / relevant_sources 数）。recall_at は互換キーとして同一値。",
+    "rerank_ndcg_at_5": "生成モデルが返した rank の上位5件、qrels の relevant_sources を母集団。",
+    "legacy_ndcg_full_ranking": true,
+    "legacy_ndcg_at_10": "旧値 0.9034 は全順位ベース（現行定義と直接比較不可）。"
+  },
+  "legacy_ndcg_full_ranking": true,
   "notes": [
     "埋め込みは opencodeGO の OpenAI 互換 /embeddings API を使用。",
     "スコアはコサイン類似度、ファイル単位の best score でランク付け。",
     "チャンク分割は ingest.iter_chunks に委譲（chunk_size は ingest.CHUNK_SIZE の実効値）。",
     "指標定義: set_recall_at は集合 recall、hit_at は evaluate.py と同じ query-level hit@k、ndcg_at_10 は上位10件ベース（ファイル単位1回で計上）。",
+    "metric_definition は現行定義（ndcg_at_10 は上位10件・ファイル1回、hit_at は query-level、set_recall_at は集合 recall）を payload に記録する。",
+    "旧 ndcg_at_10=0.9034 は全順位ベースで算出した値です。現行の ndcg_at_10 は上位10件・ファイル1回の定義であり、evaluate.py の同名指標と直接比較できません（比較表では legacy_ndcg_full_ranking=true を参照）。",
+    "埋め込み単価は README の単価表（opencode.ai/docs/console/go/） を採用（単価出典日: 2026-11-26）。API が cost を返さない場合は単価 × total_tokens で summary.estimated_cost_usd を推定する。",
     "互換のため recall_at には set_recall_at（集合 recall）と同一値を残す。",
     "generation_model は --generation-model の指定値を記録し、未指定なら cloud_client.model() を実効値とする。",
     "レイテンシは time.perf_counter で計測し repeat 回の平均を summary に記録。",
-    "秘密情報の値は出力・保存しない（生成テキストは mask_secrets を通過）。"
+    "秘密情報の値は出力・保存しない（生成テキストは mask_secrets を通過）。",
+    "corpus_sha256 の出典: 実コーパス（対象 .md ファイルの生バイトをパス順に連結）から計算（corpus_sha256_source=computed）。"
   ],
-  "corpus_sha256": "fd5b9f857eb1a98755b42ff44dc65dac0afbc37fc39585b6d80da1c04be8a811",
+  "corpus_sha256": "4fdb69c9dc0407900deef57acd1b91ec6a893f58316b6793089661a0d1ca7e89",
+  "corpus_sha256_source": "computed",
   "usage": {
     "prompt_tokens": 18386,
     "total_tokens": 18386,
-    "calls": 2
+    "cost": 0.0,
+    "calls": 2,
+    "cost_source": "api",
+    "estimated_cost_from_tokens_usd": 0.00036772
   }
 }

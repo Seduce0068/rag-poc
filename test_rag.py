@@ -3203,6 +3203,233 @@ class ExtractRankIdsTest(unittest.TestCase):
         self.assertAlmostEqual(record["rerank_ndcg_at_5"], 1.0, places=4)
 
 
+class CloudIngestDryRunTest(unittest.TestCase):
+    """cloud_ingest.main(['--dry-run']) の検証挙動を外部通信ゼロで固定する。"""
+
+    MODEL = "text-embedding-3-small"
+
+    def _invoke(self, argv, *, env=None, vector_size=None):
+        settings = {
+            config.ENV_CLOUD_EMBED_MODEL: None,
+            config.ENV_CLOUD_EMBED_DIMENSION: None,
+            config.ENV_CLOUD_DIMENSIONS: None,
+            "RAG_VECTOR_SIZE": None,
+        }
+        settings.update(env or {})
+        out, err = io.StringIO(), io.StringIO()
+
+        def _forbidden(*args, **kwargs):
+            raise AssertionError("dry-run が外部通信 / 投入処理を呼び出しました")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            corpus = root / "corpus"
+            corpus.mkdir()
+            for name in ("a.md", "b.md"):
+                (corpus / name).write_text(
+                    "# %s\n本文 %s\n" % (name, name), encoding="utf-8"
+                )
+            with contextlib.ExitStack() as stack:
+                stack.enter_context(_temporary_env(**settings))
+                if vector_size is not None:
+                    stack.enter_context(
+                        mock.patch.object(config, "VECTOR_SIZE", vector_size)
+                    )
+                    os.environ["RAG_VECTOR_SIZE"] = str(vector_size)
+                stack.enter_context(
+                    mock.patch.object(ingest, "resolve_corpus_dir", return_value=corpus)
+                )
+                stack.enter_context(
+                    mock.patch.object(ingest, "_project_root", return_value=root)
+                )
+                for target, name in (
+                    (cloud_client, "embed"),
+                    (cloud_client, "_request"),
+                    (ingest, "_make_session"),
+                    (ingest, "ensure_collection"),
+                    (ingest, "upsert_points"),
+                ):
+                    stack.enter_context(mock.patch.object(target, name, _forbidden))
+                stack.enter_context(contextlib.redirect_stdout(out))
+                stack.enter_context(contextlib.redirect_stderr(err))
+                code = cloud_ingest.main(argv)
+        return code, out.getvalue(), err.getvalue()
+
+    def test_default_reports_plan_and_returns_ok(self):
+        code, out, err = self._invoke(
+            ["--dry-run"],
+            env={config.ENV_CLOUD_EMBED_MODEL: self.MODEL},
+        )
+
+        self.assertEqual(code, cloud_ingest.EXIT_OK)
+        self.assertIn("[cloud-ingest] dry-run:", out)
+        self.assertIn("model_source=explicit", out)
+        self.assertIn("validation=ok", out)
+        self.assertIn("embed_calls=1", out)
+        self.assertEqual(err, "")
+
+    def test_default_reports_implicit_default_model_and_returns_ok(self):
+        code, out, err = self._invoke(["--dry-run"])
+
+        self.assertEqual(code, cloud_ingest.EXIT_OK)
+        self.assertIn("model_source=implicit-default", out)
+        self.assertIn("validation=failed", out)
+        self.assertIn("RAG_CLOUD_EMBED_MODEL", err)
+        self.assertIn("暗黙既定モデル", err)
+
+    def test_strict_missing_model_returns_validation(self):
+        code, out, err = self._invoke(
+            ["--dry-run", "--strict"]
+        )
+
+        self.assertEqual(code, 2)
+        self.assertEqual(code, cloud_ingest.EXIT_VALIDATION)
+        self.assertIn("validation=failed", out)
+        self.assertIn("RAG_CLOUD_EMBED_MODEL", err)
+
+    def test_strict_unresolved_dimension_returns_validation(self):
+        argv = ["--dry-run", "--strict"]
+        env = {config.ENV_CLOUD_EMBED_MODEL: "unknown-embed-model"}
+
+        code, out, err = self._invoke(argv, env=env)
+        self.assertEqual(code, cloud_ingest.EXIT_VALIDATION)
+        self.assertIn("dim=unknown", out)
+        self.assertIn("埋め込み次元を解決できませんでした", err)
+
+        default_code, _, default_err = self._invoke(
+            ["--dry-run"], env=env
+        )
+        self.assertEqual(default_code, cloud_ingest.EXIT_OK)
+        self.assertIn("埋め込み次元を解決できませんでした", default_err)
+
+    def test_strict_vector_size_mismatch_returns_validation(self):
+        argv = ["--dry-run", "--strict"]
+        env = {config.ENV_CLOUD_EMBED_MODEL: self.MODEL}
+        mismatched = config.CLOUD_EMBED_DIMENSIONS[self.MODEL] + 1
+
+        code, out, err = self._invoke(argv, env=env, vector_size=mismatched)
+        self.assertEqual(code, cloud_ingest.EXIT_VALIDATION)
+        self.assertIn("validation=failed", out)
+        self.assertIn("RAG_VECTOR_SIZE", err)
+        self.assertIn(str(config.CLOUD_EMBED_DIMENSIONS[self.MODEL]), err)
+
+        default_code, _, _ = self._invoke(
+            ["--dry-run"],
+            env=env,
+            vector_size=mismatched,
+        )
+        self.assertEqual(default_code, cloud_ingest.EXIT_OK)
+
+    def test_strict_all_valid_returns_ok(self):
+        code, out, err = self._invoke(
+            ["--dry-run", "--strict"],
+            env={config.ENV_CLOUD_EMBED_MODEL: self.MODEL},
+        )
+
+        self.assertEqual(code, cloud_ingest.EXIT_OK)
+        self.assertIn("validation=ok", out)
+        self.assertEqual(err, "")
+
+
+class CloudIngestRunIngestTest(unittest.TestCase):
+    """_run_ingest() が解決次元を embed / ensure_collection の両方へ渡すこと。"""
+
+    SIZE = 777  # _resolve_dimensions を固定値で差し替え、両呼び出しを突き合わせる。
+    MODEL = "text-embedding-3-small"
+
+    def _run(self, *, fail_upsert=False):
+        embed_calls: list[dict] = []
+        ensure_calls: list[tuple] = []
+        upsert_calls: list[list[dict]] = []
+        session = object()
+        out, err = io.StringIO(), io.StringIO()
+
+        def fake_embed(texts, **kwargs):
+            embed_calls.append(dict(kwargs))
+            return [[0.0] * self.SIZE for _ in texts]
+
+        def fake_ensure(sess, dim):
+            ensure_calls.append((sess, dim))
+            return False
+
+        def fake_upsert(sess, points, **kwargs):
+            upsert_calls.append(list(points))
+            callback = kwargs.get("on_batch_done")
+            if callback is not None:
+                callback(1)
+            if fail_upsert:
+                raise RuntimeError("upsert failed")
+            return len(points)
+
+        def _no_http(*args, **kwargs):
+            raise AssertionError("_run_ingest が外部通信を呼び出しました")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            corpus = root / "corpus"
+            corpus.mkdir()
+            (corpus / "a.md").write_text("# a\n本文です\n", encoding="utf-8")
+            with contextlib.ExitStack() as stack:
+                stack.enter_context(
+                    mock.patch.object(ingest, "resolve_corpus_dir", return_value=corpus)
+                )
+                stack.enter_context(
+                    mock.patch.object(ingest, "_project_root", return_value=root)
+                )
+                stack.enter_context(
+                    mock.patch.object(
+                        cloud_client, "embed_model", return_value=self.MODEL
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.object(
+                        cloud_ingest, "_resolve_dimensions", return_value=self.SIZE
+                    )
+                )
+                stack.enter_context(mock.patch.object(cloud_client, "embed", fake_embed))
+                stack.enter_context(mock.patch.object(cloud_client, "_request", _no_http))
+                stack.enter_context(
+                    mock.patch.object(ingest, "_make_session", return_value=session)
+                )
+                stack.enter_context(
+                    mock.patch.object(ingest, "ensure_collection", fake_ensure)
+                )
+                stack.enter_context(
+                    mock.patch.object(ingest, "upsert_points", fake_upsert)
+                )
+                stack.enter_context(contextlib.redirect_stdout(out))
+                stack.enter_context(contextlib.redirect_stderr(err))
+                code = cloud_ingest._run_ingest()
+        return (
+            code,
+            session,
+            embed_calls,
+            ensure_calls,
+            upsert_calls,
+            out.getvalue(),
+            err.getvalue(),
+        )
+
+    def test_resolved_dimension_is_passed_to_embed_and_collection(self):
+        code, session, embed_calls, ensure_calls, upsert_calls, out, err = self._run()
+
+        self.assertEqual(code, cloud_ingest.EXIT_OK)
+        self.assertEqual(embed_calls, [{"dimensions": self.SIZE}])
+        self.assertEqual(ensure_calls, [(session, self.SIZE)])
+        self.assertEqual(upsert_calls[0][0]["vector"], [0.0] * self.SIZE)
+        self.assertIn("dim=%d" % self.SIZE, out)
+
+    def test_partial_upsert_keeps_same_resolved_dimension(self):
+        code, session, embed_calls, ensure_calls, _upsert_calls, _out, err = self._run(
+            fail_upsert=True
+        )
+
+        self.assertEqual(code, cloud_ingest.EXIT_PARTIAL)
+        self.assertEqual(embed_calls, [{"dimensions": self.SIZE}])
+        self.assertEqual(ensure_calls, [(session, self.SIZE)])
+        self.assertIn("upsert に失敗しました", err)
+
+
 if __name__ == "__main__":
     _result = unittest.main(exit=False)
     if not getattr(_result, "result", _result).wasSuccessful():

@@ -67,7 +67,9 @@ echo '{"op":"recall","relevant":["doc.md"],"retrieved":["dir/doc.md"],"k":1}' \
   | cargo run --quiet --manifest-path rag_poc/ragcore/Cargo.toml
 ```
 
-## 検証コマンド (親エージェントが実行)
+## 検証コマンド
+
+以下のコマンドを親エージェントが実行する。
 
 ```bash
 cargo fmt --manifest-path rag_poc/ragcore/Cargo.toml -- --check

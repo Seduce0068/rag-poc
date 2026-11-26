@@ -9,6 +9,9 @@
   # 外部 API / Qdrant を呼ばずに投入計画だけを表示する
   python3 rag_poc/cloud_ingest.py --dry-run
 
+  # 次元未解決 / モデル未指定 / RAG_VECTOR_SIZE 不一致を検証エラー(2)にする
+  python3 rag_poc/cloud_ingest.py --dry-run --strict
+
 ingest.py のチャンク分割・point ID・アップサートを再利用し、埋め込み呼び出し
 だけを cloud_client.embed に差し替える。チェックポイントは使用しない
 （クラウド投入は都度フル投入）。認証情報の値は出力・保存しない。
@@ -291,13 +294,18 @@ def _run_ingest() -> int:
     return EXIT_OK
 
 
-def _dry_run() -> int:
+def _dry_run(strict: bool = False) -> int:
     """外部 API / Qdrant を呼ばずに投入計画だけを表示する（--dry-run）。
 
     ローカルのチャンク化と config / 環境変数の解決だけを行い、files / chunks /
     model / dim / target collection と推定埋め込み呼び出し数
-    （ceil(chunks / cloud_client.MAX_BATCH_SIZE)、既定 64）を表示して EXIT_OK。
-    次元が解決できない場合も警告を出して表示を続け、終了コード 0 を返す。
+    （ceil(chunks / cloud_client.MAX_BATCH_SIZE)、既定 64）を表示する。
+    出力には検証結果（validation=ok/failed）と、RAG_CLOUD_EMBED_MODEL 未指定時に
+    暗黙既定モデルを使用する旨（model_source=implicit-default）を明示する。
+
+    strict=False（既定）は従来どおり警告を出して EXIT_OK を返す（後方互換）。
+    strict=True は次元未解決 / モデル未指定 / RAG_VECTOR_SIZE 不一致を検証エラー
+    として EXIT_VALIDATION(2) を返す。警告文は config.mask_secrets を通す。
     """
     corpus = ingest.resolve_corpus_dir()
     files = sorted(ingest.iter_source_files(corpus))
@@ -307,29 +315,77 @@ def _dry_run() -> int:
         points.extend(ingest.iter_chunks(path, root))
 
     model = cloud_client.embed_model()
+    model_explicit = config.cloud_embed_model_explicit()
+    size: int | None
+    resolution_error: Exception | None = None
     try:
-        size: int | None = _resolve_dimensions(model)
+        size = _resolve_dimensions(model)
     except Exception as exc:
-        _warn(f"埋め込み次元を解決できませんでした（dry-run は続行）: {exc}")
+        resolution_error = exc
         size = None
+
+    problems: list[str] = []
+    if resolution_error is not None:
+        problems.append("埋め込み次元を解決できませんでした")
+    if not model_explicit:
+        problems.append(
+            "RAG_CLOUD_EMBED_MODEL が未指定です（暗黙の既定モデル %s を使用）"
+            % config.CLOUD_DEFAULT_EMBED_MODEL
+        )
+    # config.VECTOR_SIZE は import 時固定のため、一時的な env 差し替えを
+    # 正しく反映させるには RAG_VECTOR_SIZE を呼び出し時に読む。
+    configured_raw = os.environ.get("RAG_VECTOR_SIZE")
+    configured_value: int | None = None
+    if configured_raw is not None and str(configured_raw).strip() != "":
+        try:
+            configured_value = int(str(configured_raw).strip())
+        except (TypeError, ValueError):
+            configured_value = config.VECTOR_SIZE
+    if (
+        configured_value is not None
+        and size is not None
+        and configured_value != size
+    ):
+        problems.append(
+            "RAG_VECTOR_SIZE=%d はモデル %r の期待次元 %d と不一致です"
+            % (configured_value, model, size)
+        )
 
     chunks = len(points)
     batch_size = cloud_client.MAX_BATCH_SIZE
     embed_calls = (chunks + batch_size - 1) // batch_size
     print(
-        "[cloud-ingest] dry-run: files=%d chunks=%d model=%s dim=%s "
-        "collection=%s embed_calls=%d (batch_size=%d)"
+        "[cloud-ingest] dry-run: files=%d chunks=%d model=%s model_source=%s "
+        "dim=%s collection=%s embed_calls=%d (batch_size=%d) validation=%s"
         % (
             len(files),
             chunks,
             model,
+            "explicit" if model_explicit else "implicit-default",
             size if size is not None else "unknown",
             ingest.COLLECTION,
             embed_calls,
             batch_size,
+            "ok" if not problems else "failed",
         ),
         flush=True,
     )
+
+    # 検証結果と暗黙既定モデルの使用を明示する（値ではなく環境変数名のみ）。
+    if not model_explicit:
+        _warn(
+            "RAG_CLOUD_EMBED_MODEL が未指定のため暗黙既定モデル %s を使用します"
+            % config.CLOUD_DEFAULT_EMBED_MODEL
+        )
+    for problem in problems:
+        _warn(f"dry-run 検証: {problem}")
+    if problems:
+        _warn(
+            "dry-run は検証問題を検出しました（--strict 指定時は終了コード %d）"
+            % EXIT_VALIDATION
+        )
+        if strict:
+            return EXIT_VALIDATION
     return EXIT_OK
 
 
@@ -341,16 +397,26 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help=(
             "外部 API / Qdrant を呼ばずに files / chunks / model / dim / "
-            "collection / embed_calls を表示して終了"
+            "collection / embed_calls / validation を表示して終了"
+        ),
+    )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help=(
+            "--dry-run と併用時、次元未解決 / RAG_CLOUD_EMBED_MODEL 未指定 / "
+            "RAG_VECTOR_SIZE 不一致を検証エラー（終了コード 2）として扱う。"
+            "既定は警告のみで終了コード 0（後方互換）"
         ),
     )
     args = parser.parse_args(argv)
 
     # dry-run は起動時検証より前に処理する。RAG_CLOUD_ENABLED 等の環境変数を
-    # 要求せず、外部通信なしで計画だけを表示して終了コード 0 を返す。
+    # 要求せず、外部通信なしで計画だけを表示する。--strict 指定時のみ検証問題を
+    # EXIT_VALIDATION として扱い、既定は警告＋EXIT_OK を維持する。
     if args.dry_run:
         try:
-            return _dry_run()
+            return _dry_run(strict=args.strict)
         except Exception as exc:
             _warn(f"dry-run に失敗しました: {exc}")
             return EXIT_FAILURE
