@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import uuid
 from typing import Any
 
@@ -136,18 +137,28 @@ def _embed_batch(
         "Authorization": "Bearer %s" % os.environ.get(key_name, ""),
         "Content-Type": "application/json",
     }
-    try:
-        response = requests.post(
-            url, json=payload, headers=headers, timeout=timeout()
-        )
-        response.raise_for_status()
-        data = response.json()
-        vectors = [item["embedding"] for item in data["data"]]
-        if len(vectors) != len(texts):
-            raise ValueError("embedding count mismatch")
-        return vectors
-    except (requests.RequestException, ValueError, KeyError, TypeError) as exc:
-        raise _fail(exc) from exc
+    last_error: Exception | None = None
+    for attempt in range(3):
+        try:
+            response = requests.post(
+                url, json=payload, headers=headers, timeout=timeout()
+            )
+            response.raise_for_status()
+            data = response.json()
+            vectors = [item["embedding"] for item in data["data"]]
+            if len(vectors) != len(texts):
+                raise ValueError("embedding count mismatch")
+            return vectors
+        except (requests.RequestException, ValueError, KeyError, TypeError) as exc:
+            last_error = exc
+            # SSL の一時的な不調（RECORD_LAYER_FAILURE / hostname mismatch）と
+            # 5xx は短いバックオフで再試行する。4xx は即座に失敗扱い。
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            retryable = status is None or status >= 500
+            if not retryable or attempt == 2:
+                raise _fail(exc) from exc
+            time.sleep(1.5 * (attempt + 1))
+    raise _fail(last_error or "unknown error")
 
 
 # 1 リクエストあたりの入力上限（リクエストサイズとトークン制限を避ける）。

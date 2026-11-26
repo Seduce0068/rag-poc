@@ -120,6 +120,30 @@ def main() -> int:
                     {"role": "user", "content": prompt},
                 ])
                 record["rerank_reply"] = reply[:500]
+                record["rerank_candidates"] = [src for _, src, _ in candidates]
+                try:
+                    import re
+
+                    ids = [int(x) for x in re.findall(r"\d+", reply)]
+                    ordered = list(dict.fromkeys(
+                        record["rerank_candidates"][i - 1]
+                        for i in ids
+                        if 1 <= i <= len(record["rerank_candidates"])
+                    ))
+                    rel = set(q["relevant_sources"])
+                    dcg = sum(
+                        1 / math.log2(i + 2)
+                        for i, src in enumerate(ordered[:5])
+                        if src in rel
+                    )
+                    available = sum(1 for src in record["rerank_candidates"] if src in rel)
+                    ideal = sum(
+                        1 / math.log2(i + 2)
+                        for i in range(min(available, 5))
+                    )
+                    record["rerank_ndcg_at_5"] = round(dcg / ideal, 4) if ideal else 0.0
+                except (ValueError, TypeError):
+                    record["rerank_ndcg_at_5"] = 0.0
                 answer_prompt = "質問: %s\n\n参考文書:\n%s\n\n参考文書のみに基づき短く回答してください。" % (
                     q["query"],
                     "\n".join(chunk[:500] for _, _, chunk in candidates),
@@ -137,6 +161,13 @@ def main() -> int:
         "recall_at_10": round(sum(r["recall_at"]["10"] for r in results) / len(results), 4),
         "ndcg_at_10": round(sum(r["ndcg_at_10"] for r in results) / len(results), 4),
     }
+    rerank_scores = [
+        r["rerank_ndcg_at_5"] for r in results if "rerank_ndcg_at_5" in r
+    ]
+    if rerank_scores:
+        summary["rerank_ndcg_at_5"] = round(
+            sum(rerank_scores) / len(rerank_scores), 4
+        )
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "model": cloud_client.embed_model(),

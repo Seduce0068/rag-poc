@@ -450,6 +450,14 @@ def _eval_metadata(settings: dict[str, Any] | None = None) -> dict[str, Any]:
         vector_size = int(raw_vector)
     except (TypeError, ValueError):
         vector_size = 0
+    # クラウド埋め込みが有効な場合は実際のモデル ID を記録する（誤解防止）。
+    try:
+        import cloud_client
+
+        if cloud_client.enabled():
+            embed_model = "opencode-go/" + cloud_client.embed_model()
+    except ImportError:
+        pass
     return {
         "embed_model": embed_model,
         "chat_model": chat_model,

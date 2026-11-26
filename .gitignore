@@ -12,5 +12,6 @@ eval-results-*.json
 !eval-results-alt.json
 !eval-results-cloud-subset.json
 !eval-results-cloud-full.json
+!eval-results-cloud-pipeline.json
 eval-results.json
 .betterleaksignore

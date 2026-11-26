@@ -60,6 +60,14 @@ try:
 except ImportError:  # 共通クライアント未導入でも --help / 設定確認は動かす
     _ollama_embed = None  # type: ignore[assignment]
 
+try:
+    # クラウド埋め込み（opencodeGO、opt-in）。既定はローカル Ollama を維持。
+    from cloud_client import embed as _cloud_embed
+    from cloud_client import enabled as _cloud_enabled
+except ImportError:
+    _cloud_embed = None  # type: ignore[assignment]
+    _cloud_enabled = lambda: False  # type: ignore[assignment]
+
 # RRF_K / SCROLL_PAGE_SIZE / MAX_SCROLL_PAGES / RERANK_MAX_CHARS は config を
 # 唯一の情報源とし、上記 import でモジュール名として公開する（後方互換）。
 DEFAULT_MODE = "hybrid"
@@ -351,7 +359,7 @@ def _to_hits(points: list[dict[str, Any]]) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 def embed_query(question: str) -> list[float]:
-    """Ollama 埋め込みを ollama_client.embed 経由で取得する。
+    """埋め込みベクトルを取得する（既定 Ollama、opt-in でクラウド）。
 
     Ruri 等の検索特化モデルには ``embedding_prefixes(EMBED_MODEL)`` の
     query prefix を埋め込み入力に付与する（例: ``"クエリ: "``）。
@@ -359,6 +367,11 @@ def embed_query(question: str) -> list[float]:
     戻り値のベクトルは加工せずそのまま返す。prefix は埋め込み用であり、
     rerank / generate_answer の LLM プロンプトへは混入させない。
     """
+    if _cloud_enabled() and _cloud_embed is not None:
+        vectors = _cloud_embed([question])
+        if vectors and vectors[0]:
+            return [float(value) for value in vectors[0]]
+        raise RuntimeError("クラウドから埋め込みベクトルを取得できませんでした")
     if _ollama_embed is None:
         raise RuntimeError("ollama_client.embed を import できませんでした")
     query_prefix, _passage_prefix = embedding_prefixes(EMBED_MODEL)
