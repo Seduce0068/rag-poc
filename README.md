@@ -408,6 +408,20 @@ export RAG_CLOUD_MODEL=deepseek-v4.1-flash
 | `qwen3-embedding-8b` | $0.01 |
 | `gemini-embedding-2` | $0.20 |
 
+同一サブセット（6 ファイル/81 チャンク、`qrels-subset.json` 6 クエリ、
+`ingest.iter_chunks` 既定 CHUNK_SIZE、repeat=1）で日本語埋め込みモデルを
+比較した結果:
+
+| モデル | hit@1 | nDCG@10 | 埋め込みレイテンシ平均 |
+| --- | --- | --- | --- |
+| `text-embedding-3-small` | **1.0** | **1.0** | 8.03 秒 |
+| `qwen3-embedding-8b` | 0.8333 | 0.8978 | 10.04 秒 |
+
+単価は `qwen3-embedding-8b` の方が安いが、この日本語コーパスでは
+`text-embedding-3-small` が精度・レイテンシともに上回った
+（`eval-results-cloud-small-subset.json` /
+`eval-results-cloud-qwen3-subset.json`）。
+
 エンドポイントは `https://opencode.ai/inference/go/openai/v1/embeddings` で、
 OpenAI 互換の `/embeddings` API。`dimensions` と `encoding_format` も使える。
 埋め込みリクエストには `x-opencode-session` が不要で、RAG ライブラリから

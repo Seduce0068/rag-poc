@@ -1,0 +1,206 @@
+{
+  "generated_at": "2026-11-26T10:54:39.546493+00:00",
+  "model": "qwen3-embedding-8b",
+  "generation_model": "deepseek-v4.1-flash",
+  "corpus": "corpus-subset",
+  "corpus_file_count": 6,
+  "chunk_count": 81,
+  "qrels_label": "qrels-subset.json",
+  "chunk_size": 800,
+  "repeat": 1,
+  "latency_runs": [
+    {
+      "embedding_sec": 10.041649,
+      "search_sec": 0.223809
+    }
+  ],
+  "summary": {
+    "queries": 6,
+    "repeat": 1,
+    "hit_at_1": 0.8333,
+    "hit_at_10": 1.0,
+    "recall_at_1": 0.8333,
+    "recall_at_10": 1.0,
+    "set_recall_at_1": 0.8333,
+    "set_recall_at_10": 1.0,
+    "ndcg_at_10": 0.8978,
+    "embedding_latency_sec": 10.041649,
+    "search_latency_sec": 0.223809,
+    "total_search_latency_sec": 10.265458,
+    "rerank_query_count": 0
+  },
+  "results": [
+    {
+      "id": "h-s01",
+      "top_source": "passkey-sudo-design.md",
+      "relevant_sources": [
+        "passkey-sudo-design.md"
+      ],
+      "hit_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "set_recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "ndcg_at_10": 1.0
+    },
+    {
+      "id": "h-s02",
+      "top_source": "dsh-token-rd-fix-2026-11-25.md",
+      "relevant_sources": [
+        "dsh-token-rd-fix-2026-11-25.md"
+      ],
+      "hit_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "set_recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "ndcg_at_10": 1.0
+    },
+    {
+      "id": "h-s03",
+      "top_source": "rag-methods-selection-2026-11-26.md",
+      "relevant_sources": [
+        "rag-methods-selection-2026-11-26.md"
+      ],
+      "hit_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "set_recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "ndcg_at_10": 1.0
+    },
+    {
+      "id": "h-s04",
+      "top_source": "security-posture.md",
+      "relevant_sources": [
+        "security-posture.md"
+      ],
+      "hit_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "set_recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "ndcg_at_10": 1.0
+    },
+    {
+      "id": "h-s05",
+      "top_source": "rag-methods-selection-2026-11-26.md",
+      "relevant_sources": [
+        "FINAL-SUMMARY.md"
+      ],
+      "hit_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "set_recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "recall_at": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "ndcg_at_10": 0.3869
+    },
+    {
+      "id": "h-s06",
+      "top_source": "jarvis-muse-dsh-roles.md",
+      "relevant_sources": [
+        "jarvis-muse-dsh-roles.md"
+      ],
+      "hit_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "set_recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "recall_at": {
+        "1": 1.0,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "ndcg_at_10": 1.0
+    }
+  ],
+  "notes": [
+    "埋め込みは opencodeGO の OpenAI 互換 /embeddings API を使用。",
+    "スコアはコサイン類似度、ファイル単位の best score でランク付け。",
+    "チャンク分割は ingest.iter_chunks に委譲（chunk_size は ingest.CHUNK_SIZE の実効値）。",
+    "指標定義: set_recall_at は集合 recall、hit_at は evaluate.py と同じ query-level hit@k、ndcg_at_10 は上位10件ベース（ファイル単位1回で計上）。",
+    "互換のため recall_at には set_recall_at（集合 recall）と同一値を残す。",
+    "generation_model は --generation-model の指定値を記録し、未指定なら cloud_client.model() を実効値とする。",
+    "レイテンシは time.perf_counter で計測し repeat 回の平均を summary に記録。",
+    "秘密情報の値は出力・保存しない（生成テキストは mask_secrets を通過）。"
+  ],
+  "corpus_sha256": "fd5b9f857eb1a98755b42ff44dc65dac0afbc37fc39585b6d80da1c04be8a811",
+  "usage": {
+    "prompt_tokens": 15878,
+    "total_tokens": 15878,
+    "calls": 2
+  }
+}
