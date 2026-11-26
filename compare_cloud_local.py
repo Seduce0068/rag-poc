@@ -7,12 +7,15 @@
 
 使い方:
   python3 rag_poc/compare_cloud_local.py --output rag_poc/cloud-local-comparison.json
+  python3 rag_poc/compare_cloud_local.py --filter cloud --sort ndcg
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -81,9 +84,58 @@ def _row(name: str, definition: str, data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _filtered_rows(rows: list[dict[str, Any]], needle: str | None) -> list[dict[str, Any]]:
+    """name / embed_model / definition の部分一致で行を絞り込む（大小文字無視）。"""
+    if not needle or not needle.strip():
+        return rows
+    lowered = needle.strip().lower()
+    return [
+        row
+        for row in rows
+        if any(
+            lowered in str(row.get(field) or "").lower()
+            for field in ("name", "embed_model", "definition")
+        )
+    ]
+
+
+def _sort_number(row: dict[str, Any], field: str) -> float | None:
+    """ソート対象の数値を返す（bool / 非数値 / 欠損は None＝末尾へ）。"""
+    value = row.get(field)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _sorted_rows(rows: list[dict[str, Any]], sort_key: str | None) -> list[dict[str, Any]]:
+    """ndcg / hit は降順、latency は昇順。欠損値は末尾、同値は現行順を維持。"""
+    if sort_key is None:
+        return rows
+    field = {"ndcg": "ndcg_at_10", "hit": "hit_at_1", "latency": "latency_sec"}[sort_key]
+
+    def key(row: dict[str, Any]) -> tuple[bool, float]:
+        value = _sort_number(row, field)
+        missing = value is None
+        number = value if value is not None else 0.0
+        return (missing, number if sort_key == "latency" else -number)
+
+    return sorted(rows, key=key)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", default=None, help="比較 JSON の出力先")
+    parser.add_argument(
+        "--filter",
+        default=None,
+        help="名前 / embed_model / definition の部分一致で行を絞り込む",
+    )
+    parser.add_argument(
+        "--sort",
+        choices=("ndcg", "latency", "hit"),
+        default=None,
+        help="並び順: ndcg は ndcg_at_10 降順、latency は latency_sec 昇順、hit は hit_at_1 降順（既定は現行順）",
+    )
     args = parser.parse_args()
 
     rows: list[dict[str, Any]] = []
@@ -94,13 +146,16 @@ def main() -> int:
         data = json.loads(path.read_text(encoding="utf-8"))
         rows.append(_row(label, definition, data))
 
+    rows = _filtered_rows(rows, args.filter)
+    rows = _sorted_rows(rows, args.sort)
+
     payload = {
-        "generated_at": None,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "notes": [
             "既存の eval-results*.json を読み取った比較であり、新たな API 呼び出しは無い。",
             "set_recall_at_10 は集合 recall、hit_at_1 は evaluate.py と同じ query-level hit@1。",
             "ndcg_at_10 は成果物ごとの定義（evaluate は上位10件・ファイル1回、cloud_bench は top10）に依存するため定義列を参照。",
-            "コーパス / チャンク数 / クエリ数が異なる行は直接比較しないこと。",
+            "コーパス / チャンク数 / クエリ数 / repeat が異なる行は直接比較不可であるため、比較条件を揃えてから判定すること。",
         ],
         "rows": rows,
     }
@@ -108,8 +163,8 @@ def main() -> int:
     if args.output:
         out = Path(args.output).resolve()
         out.write_text(text, encoding="utf-8")
-        print("[compare] wrote", out)
-        return 0
+        # ログは stderr へ。stdout は常に JSON のみにする。
+        print("[compare] wrote", out, file=sys.stderr, flush=True)
     print(text)
     return 0
 

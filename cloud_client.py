@@ -277,23 +277,37 @@ def chat(
     *,
     temperature: float = 0.2,
     session_id: str | None = None,
+    isolated: bool = False,
 ) -> str:
     """OpenAI 互換 chat completions を呼び、本文文字列を返す（後方互換）。
 
     x-opencode-session には呼び出し単位の UUID を付与する。session_id を明示
     すればその値を使う（呼び出し側で相関 ID を渡せる）。省略時は uuid4。
     戻り値は従前どおり str。usage は last_usage() から参照する。
+
+    1 呼び出しごとに usage をリセットし、セッション ID も生成するため、ある
+    呼び出しの失敗は別の呼び出しの状態へ波及しない。``isolated=True`` を指定
+    すると、想定外の例外まで CloudUnavailable に変換して個別失敗を呼び出し
+    単位へ閉じ込める（既定 False は従来どおり例外をそのまま再送出）。
     """
-    _reset_usage()
-    sid = str(uuid.uuid4()) if session_id is None else str(session_id)
-    data = _request(
-        "/chat/completions",
-        {"model": model(), "messages": messages, "temperature": temperature},
-        session_id=sid,
-    )
     try:
-        return str(data["choices"][0]["message"]["content"])
-    except (KeyError, IndexError, TypeError) as exc:
+        _reset_usage()
+        sid = str(uuid.uuid4()) if session_id is None else str(session_id)
+        data = _request(
+            "/chat/completions",
+            {"model": model(), "messages": messages, "temperature": temperature},
+            session_id=sid,
+        )
+        try:
+            return str(data["choices"][0]["message"]["content"])
+        except (KeyError, IndexError, TypeError) as exc:
+            raise _fail(exc) from exc
+    except CloudUnavailable:
+        # 既にマスク済みの CloudUnavailable はそのまま再送出（二重変換しない）。
+        raise
+    except Exception as exc:  # noqa: BLE001 - isolated 指定時のみ閉じ込める
+        if not isolated:
+            raise
         raise _fail(exc) from exc
 
 
@@ -382,7 +396,8 @@ def embed(
 
     埋め込みリクエストには x-opencode-session を付けない（公式仕様）。
     大量入力は batch_size（既定 MAX_BATCH_SIZE）で分割し、入力順序どおりに
-    結合する。batch_size=0 は明示的に拒否する。
+    結合する。batch_size=0 / 負値 / bool は明示的に拒否する（bool は int の
+    部分クラスだが、バッチ件数としては不正な値として扱う）。
     dimensions は明示引数 > RAG_CLOUD_EMBED_DIMENSION（互換
     RAG_CLOUD_DIMENSIONS）> モデル既定（送らない）の順で解決する。バッチ途中で
     失敗した場合は、成功済みバッチ数をマスク済みの CloudUnavailable メッセージ
@@ -390,6 +405,10 @@ def embed(
     戻り値は従前どおり list[list[float]]。usage は全バッチの合計が last_usage()
     から参照できる（呼び出し直後に読み取ること）。認証情報の値は出さない。
     """
+    # bool は int の部分クラスなので True が size=1 として通るのを明示的に防ぐ。
+    # 0 / 負値の拒否は従来どおり size < 1 で行う。
+    if isinstance(batch_size, bool):
+        raise _fail("batch_size must be a positive integer")
     size = MAX_BATCH_SIZE if batch_size is None else batch_size
     if size < 1:
         raise _fail("batch_size must be positive")

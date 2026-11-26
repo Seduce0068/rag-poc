@@ -8,6 +8,7 @@
   RAG_CLOUD_ENABLED=1 python3 rag_poc/cloud_bench.py --repeat 3 --with-generation
   RAG_CLOUD_ENABLED=1 python3 rag_poc/cloud_bench.py --with-generation --generation-model deepseek-v4.1-flash
    RAG_CLOUD_ENABLED=1 python3 rag_poc/cloud_bench.py --with-generation --generation-max-queries 3  # コスト制限時のみ先頭3件
+  RAG_CLOUD_ENABLED=1 python3 rag_poc/cloud_bench.py --list-models  # /v1/models から利用可能 ID を取得
 
 起動時に config.validate_settings() を呼ぶ。RAG_CLOUD_ENABLED=1 では
 RAG_CLOUD_EMBED_MODEL の明示指定が必要で、暗黙既定モデルは fail-closed とする
@@ -531,7 +532,25 @@ def main() -> int:
         default=0,
         help="生成モデルで計測するクエリ数（既定0＝全件、N指定で先頭N件に制限）",
     )
+    parser.add_argument(
+        "--list-models",
+        action="store_true",
+        help="cloud_client.fetch_models() で利用可能なモデル ID を表示して終了（既定は通信しない）",
+    )
     args = parser.parse_args()
+
+    # --list-models は起動時検証より前に処理する。明示指定時だけ /v1/models を
+    # 呼び、結果の ID を stdout へ1行ずつ出す。失敗はマスク済み stderr と終了
+    # コード 1（既定の計測経路は従来どおり通信しない）。
+    if args.list_models:
+        try:
+            model_ids = cloud_client.fetch_models()
+            for model_id in model_ids:
+                print(model_id, flush=True)
+        except Exception as exc:
+            _warn(f"モデル一覧の取得に失敗しました: {exc}")
+            return 1
+        return 0
 
     # 起動時検証（cloud_ingest.py と同じ経路）。RAG_CLOUD_EMBED_MODEL 未指定の
     # 暗黙既定モデルは fail-closed で終了コード 2 とする。--help は argparse が

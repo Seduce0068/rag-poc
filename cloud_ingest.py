@@ -6,6 +6,9 @@
   RAG_CLOUD_ENABLED=1 RAG_COLLECTION=rag_poc_cloud_full \
     python3 rag_poc/cloud_ingest.py
 
+  # 外部 API / Qdrant を呼ばずに投入計画だけを表示する
+  python3 rag_poc/cloud_ingest.py --dry-run
+
 ingest.py のチャンク分割・point ID・アップサートを再利用し、埋め込み呼び出し
 だけを cloud_client.embed に差し替える。チェックポイントは使用しない
 （クラウド投入は都度フル投入）。認証情報の値は出力・保存しない。
@@ -16,6 +19,7 @@ ingest.py のチャンク分割・point ID・アップサートを再利用し�
 
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 from pathlib import Path
@@ -287,8 +291,70 @@ def _run_ingest() -> int:
     return EXIT_OK
 
 
-def main() -> int:
+def _dry_run() -> int:
+    """外部 API / Qdrant を呼ばずに投入計画だけを表示する（--dry-run）。
+
+    ローカルのチャンク化と config / 環境変数の解決だけを行い、files / chunks /
+    model / dim / target collection と推定埋め込み呼び出し数
+    （ceil(chunks / cloud_client.MAX_BATCH_SIZE)、既定 64）を表示して EXIT_OK。
+    次元が解決できない場合も警告を出して表示を続け、終了コード 0 を返す。
+    """
+    corpus = ingest.resolve_corpus_dir()
+    files = sorted(ingest.iter_source_files(corpus))
+    root = ingest._project_root()
+    points: list[dict] = []
+    for path in files:
+        points.extend(ingest.iter_chunks(path, root))
+
+    model = cloud_client.embed_model()
+    try:
+        size: int | None = _resolve_dimensions(model)
+    except Exception as exc:
+        _warn(f"埋め込み次元を解決できませんでした（dry-run は続行）: {exc}")
+        size = None
+
+    chunks = len(points)
+    batch_size = cloud_client.MAX_BATCH_SIZE
+    embed_calls = (chunks + batch_size - 1) // batch_size
+    print(
+        "[cloud-ingest] dry-run: files=%d chunks=%d model=%s dim=%s "
+        "collection=%s embed_calls=%d (batch_size=%d)"
+        % (
+            len(files),
+            chunks,
+            model,
+            size if size is not None else "unknown",
+            ingest.COLLECTION,
+            embed_calls,
+            batch_size,
+        ),
+        flush=True,
+    )
+    return EXIT_OK
+
+
+def main(argv: list[str] | None = None) -> int:
     """エントリポイント。検証失敗は終了コード 2、部分投入は 3 を返す。"""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "外部 API / Qdrant を呼ばずに files / chunks / model / dim / "
+            "collection / embed_calls を表示して終了"
+        ),
+    )
+    args = parser.parse_args(argv)
+
+    # dry-run は起動時検証より前に処理する。RAG_CLOUD_ENABLED 等の環境変数を
+    # 要求せず、外部通信なしで計画だけを表示して終了コード 0 を返す。
+    if args.dry_run:
+        try:
+            return _dry_run()
+        except Exception as exc:
+            _warn(f"dry-run に失敗しました: {exc}")
+            return EXIT_FAILURE
+
     # --- 起動時検証（先頭で実行。失敗時はマスク済みで終了コード 2） ---
     try:
         ingest._check_endpoints()

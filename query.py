@@ -77,6 +77,11 @@ except ImportError:
 # 唯一の情報源とし、上記 import でモジュール名として公開する（後方互換）。
 DEFAULT_MODE = "hybrid"
 
+# 許容する検索 mode の唯一の定義。CLI の argparse choices と search() 入口の
+# 検証の両方から参照する（config.py は読み取り専用のため、ここに定数を置く）。
+# evaluate.MODES と同じ集合だが、循環 import を避けるため query.py 内で定義する。
+SEARCH_MODES: tuple[str, ...] = ("dense", "keyword", "hybrid", "hybrid-rerank")
+
 # ペイロードキーは config.PAYLOAD_* を優先し、旧キーは後方互換で残す。
 TEXT_KEYS: tuple[str, ...] = (PAYLOAD_TEXT_KEY, "content", "chunk", "body")
 SOURCE_KEYS: tuple[str, ...] = (
@@ -895,6 +900,13 @@ def search(query: str, mode: str = DEFAULT_MODE, top_k: int | None = None) -> li
     _last_search_errors.set([])
     _last_scroll_truncated.set(False)
 
+    # 未知の mode は hybrid へ黙ってフォールバックせず、入口で明示的に拒否する。
+    # CLI の argparse choices と同じ集合を共有するため、プログラム呼び出しも
+    # 同じ契約に載る（エラーは last_search_errors() から参照可能）。
+    if mode not in SEARCH_MODES:
+        _record_error("mode-validation", str(mode), f"unknown search mode: {mode!r}")
+        return []
+
     for problem in validate_question_length(query):
         _record_error("input-validation", mode, problem)
     if _last_search_errors.get([]):
@@ -934,7 +946,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("question", help="質問文")
     parser.add_argument(
         "--mode",
-        choices=("dense", "keyword", "hybrid", "hybrid-rerank"),
+        choices=SEARCH_MODES,
         default=DEFAULT_MODE,
         help=f"検索モード (既定: {DEFAULT_MODE})",
     )

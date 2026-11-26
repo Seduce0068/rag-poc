@@ -123,7 +123,16 @@ RAG_COLLECTION=rag_poc_full python3 rag_poc/query.py '質問' --json
 RAG_COLLECTION=rag_poc_docs \
 RAG_CORPUS_DIR=rag_poc/corpus-subset python3 rag_poc/ingest.py
 RAG_COLLECTION=rag_poc_docs python3 rag_poc/query.py '質問' --json
+
+# 6. 既存成果物を横断比較（API 呼び出しなし、キー不要）
+python3 rag_poc/compare_cloud_local.py --output rag_poc/cloud-local-comparison.json
 ```
+
+`compare_cloud_local.py` は既存の `eval-results*.json` だけを読み取り、
+コーパス／チャンク数／クエリ数／指標定義を明示した比較表を標準出力へ出す。
+新たな API 呼び出しは行わない。`--filter NAME` で比較行を名前で絞り込み、
+`--sort KEY` で指定キー（例: `name` / `ndcg_at_10` / `latency_sec`）による
+並び替え、`--output PATH` で比較 JSON の出力先を指定する（省略時は stdout）。
 
 `rag_poc/corpus-subset/` は評価用に抜き出した 6 ファイルのサブセット
 （2026-11-26 時点）。全量は既定の `passkey-gateway/docs`（88 ファイル、
@@ -167,6 +176,7 @@ consumer は optional キーの存在を前提にしないこと。参照時は
 | `--corpus-dir DIR` | コーパスディレクトリ（リポジトリ配下。既定 `RAG_CORPUS_DIR`） |
 | `--collection NAME` | Qdrant コレクション名（既定 `RAG_COLLECTION`） |
 | `--recreate` | コレクションを削除して再作成。**`--yes` を同時指定しない限り削除せず終了コード 2 で停止する**（破壊的操作のため実 DELETE は明示承認が必要） |
+| `--yes` | `--recreate` と併用してコレクション削除（実 DELETE）を実行する。単独指定では削除しない |
 
 `evaluate.py`:
 
@@ -225,6 +235,8 @@ consumer は optional キーの存在を前提にしないこと。参照時は
 | `RAG_CLOUD_ENABLED` | `0`（1 でクラウド有効。既定はローカル Ollama） |
 | `RAG_CLOUD_CHAT_ENABLED` | `0`（1 で生成もクラウド。`RAG_CLOUD_ENABLED=1` が前提） |
 | `RAG_CLOUD_EMBED_MODEL` | 空（有効時は明示指定が必要。既定モデルは `text-embedding-3-small`） |
+| `RAG_CLOUD_EMBED_DIMENSION` | 空（正規。未知モデルの期待次元を明示。未指定なら fail-closed。`RAG_CLOUD_DIMENSIONS` より優先） |
+| `RAG_CLOUD_DIMENSIONS` | 空（移行期互換の複数形。正規が未設定のときだけ読む） |
 | `RAG_CLOUD_BASE_URL` | `https://opencode.ai/inference/go/openai/v1` |
 | `RAG_CLOUD_MODEL` | `deepseek-v4.1-flash` |
 
@@ -243,6 +255,9 @@ consumer は optional キーの存在を前提にしないこと。参照時は
 `RAG_CLOUD_EMBED_DIMENSION`（期待次元を明示。未指定なら fail-closed）、
 HTTP タイムアウトに `RAG_CLOUD_TIMEOUT`（既定 60 秒）、
 `cloud_bench.py` のコーパスハッシュ上書きに `RAG_CLOUD_CORPUS_SHA256` がある。
+埋め込み次元は単数形 `RAG_CLOUD_EMBED_DIMENSION` が正規で、複数形
+`RAG_CLOUD_DIMENSIONS` は移行期互換。両方が設定されていれば単数形を
+優先し、値は出さずに環境変数名だけを警告する。
 
 `RAG_RERANK_TOP_N` は廃止した。実効値は `RAG_RERANK_MAX_DOCS`。
 `eval-results.json` には `embed_model` / `chat_model` / `vector_size` /
@@ -461,7 +476,7 @@ export RAG_CLOUD_EMBED_MODEL=text-embedding-3-small
 | 検索 | 埋め込みコサイン類似度のみ（Qdrant を使わない） | Qdrant 投入後に `dense` / `keyword` / `hybrid` / `hybrid-rerank` の 4 モード |
 | コーパス | 既定 `corpus-subset`（`--corpus` で変更可） | `RAG_CORPUS_DIR` / `RAG_COLLECTION`（全量は `rag_poc_cloud_full`） |
 | 成果物 | `eval-results-cloud-*.json`（`schema_version` なし） | `eval-results-cloud-pipeline.json`（`schema_version` あり） |
-| 生成 | `--with-generation` で先頭 3 クエリの rerank / 回答 | `--with-answer` で回答生成（`RAG_ANSWER_TIMEOUT` が適用） |
+| 生成 | `--with-generation` で rerank / 回答（既定は全件、`--generation-max-queries N` で先頭 N 件に制限） | `--with-answer` で回答生成（`RAG_ANSWER_TIMEOUT` が適用） |
 | 用途 | 埋め込みモデルの簡易比較。Token 消費を抑えて確認する | 本番相当の 4 モード評価と退避済み成果物の更新 |
 
 ### クラウド/ローカル比較（2026-11-26）
@@ -529,13 +544,19 @@ rerank nDCG@5 は 2 クエリのみの計測値。
 
 ```bash
 python3 rag_poc/test_rag.py
+
+# Rust 未ビルドの skip を失敗に変える（CI の最終ゲート）
+RAG_REQUIRE_RUST=1 python3 rag_poc/test_rag.py
 ```
 
 外部サービスへ接続せず、`unittest` のみで設定・RRF・JSON 解析・
 チャンク分割・評価クエリ・held-out 指標・rerank のフォールバックを
-検証する（全 104 件）。Rust 同等性テスト 9+8件（`ragcore` 側 9 件と
-Python 側 8 件）のうち Rust バイナリ要のものは未ビルド時に理由付きで
-skip され、`RAG_REQUIRE_RUST=1` を付けると失敗に切り替えられる。
+検証する（全 154 件）。Rust 同等性テスト 9+8件（`ragcore` 側 9 件と
+Python 側 8 件）のうち、Rust バイナリを要する 8 件は未ビルド時に
+理由付きで skip される。第2のコマンドはこの skip を失敗へ切り替え、
+Rust 未ビルドを green で通さないためのゲートである。なお
+`binary_path_default` や `RustSkipGateTest` の 3 件など、バイナリが
+未ビルドでも skip しない Rust 関連テストもある。
 ディレクトリ名にハイフンがあるため `python3 -m unittest` の
 ディスカバリは使えず、直接実行する。
 
@@ -755,12 +776,18 @@ cp rag_poc/eval-results.json rag_poc/eval-results-other-domain.json
 | `eval-results.json` | `python3 rag_poc/evaluate.py`（既定出力） | 実行ごとに上書きされるが、上書き前に `eval-results-<UTC>.json` へ自動退避（`--output` 指定時は退避なし） |
 | `eval-results-<UTC>.json` | 既定実行時の自動退避 | タイムスタンプ付きで蓄積する。保持方針は利用者が決める |
 | `eval-results-<collection>.json` | `python3 rag_poc/evaluate.py --collections a,b,c` | コレクション別に個別保存（サニタイズ＋安定ハッシュ suffix で衝突回避） |
+| `eval-results-baseline.json` | `RAG_COLLECTION=rag_poc_full python3 rag_poc/evaluate.py --qrels rag_poc/qrels.json`（全量 qwen ベースライン、`RAG_EVAL_REPEAT=10`） | 退避済み。再計測時は `eval-results.json` から `cp` で更新する |
+| `eval-results-alt.json` | `RAG_COLLECTION=rag_poc_other_domain python3 rag_poc/evaluate.py`（別ドメインコーパスで計測後に退避） | 退避済み。`eval-results.json` から `cp` で更新する |
 | `eval-results-other-domain.json` | `python3 rag_poc/evaluate.py --qrels rag_poc/qrels-alt.json`（`RAG_CORPUS_DIR=rag_poc/corpus-alt` / `RAG_COLLECTION=rag_poc_other_domain`） | 退避済み。`evaluate.py` の直接出力先ではないため上書きされない |
 | `eval-results-ruri-subset.json` | `python3 rag_poc/evaluate.py --qrels rag_poc/qrels-subset.json`（`RAG_COLLECTION=rag_poc_ruri`） | 退避済み。再計測時は `eval-results.json` から `cp` で更新する |
 | `eval-results-ruri-full.json` | `python3 rag_poc/evaluate.py --qrels rag_poc/qrels.json`（`RAG_CORPUS_DIR=passkey-gateway/docs` / `RAG_COLLECTION=rag_poc_ruri_full`） | 退避済み。再計測時は `eval-results.json` から `cp` で更新する |
 | `eval-results-cloud-full.json` | `RAG_CLOUD_ENABLED=1 python3 rag_poc/cloud_bench.py --corpus ../passkey-gateway/docs --qrels rag_poc/qrels.json --output rag_poc/eval-results-cloud-full.json --with-generation` | 退避済み（注意はクラウド章冒頭の警告を参照） |
 | `eval-results-cloud-pipeline.json` | `RAG_CLOUD_ENABLED=1 RAG_VECTOR_SIZE=1536 RAG_COLLECTION=rag_poc_cloud_full python3 rag_poc/evaluate.py`（投入は `cloud_ingest.py`） | 退避済み。4モードの正式パイプライン評価 |
+| `eval-results-cloud-subset.json` | `RAG_CLOUD_ENABLED=1 RAG_CLOUD_EMBED_MODEL=text-embedding-3-small python3 rag_poc/cloud_bench.py --corpus rag_poc/corpus-subset --qrels rag_poc/qrels-subset.json --output rag_poc/eval-results-cloud-subset.json`（当時は `CHUNK_SIZE=300`） | 退避済み（クラウド章冒頭の警告を参照） |
+| `eval-results-cloud-small-subset.json` | 同上を `ingest.iter_chunks` 既定の `CHUNK_SIZE` で計測し `--output rag_poc/eval-results-cloud-small-subset.json` | 退避済み。`text-embedding-3-small` のサブセット結果 |
+| `eval-results-cloud-qwen3-subset.json` | 同上を `RAG_CLOUD_EMBED_MODEL=qwen3-embedding-8b` で計測し `--output rag_poc/eval-results-cloud-qwen3-subset.json` | 退避済み。`qwen3-embedding-8b` のサブセット結果 |
 | `embedding-comparison.json` | `python3 rag_poc/compare_embeddings.py` | 実行ごとに上書き。必要なら `cp` で退避する |
+| `cloud-local-comparison.json` | `python3 rag_poc/compare_cloud_local.py --output rag_poc/cloud-local-comparison.json` | 実行ごとに上書き。新規 API 呼び出しなしで既存 `eval-results*.json` から生成 |
 | `qrels.json` / `qrels-subset.json` / `qrels-alt.json` | 人手で作成・管理（生成コマンドなし） | `evaluate.py` は読み取り専用で上書きしない。コーパス更新時に内容を見直す |
 
 `eval-results.json` の `qrels_label` に指定した qrels ファイル名が記録される。
