@@ -485,13 +485,11 @@ cp rag_poc/eval-results.json rag_poc/eval-results-other-domain.json
 
 ## 検証のヒント
 
-親エージェントが lint と OKF 検証を実行済み（lint 0 / OKF valid）。
-子エージェントは shell 実行を禁止されているため、ここでは再確認用の
-コマンドのみを示す。
+再確認手順は次のとおり（リポジトリルートで実行）。
 
 ```bash
-markdownlint-cli2 rag_poc/docs/*.md
-rust-script /home/koppe/.agents/skills/okf/scripts/okf_validate.rs rag_poc/docs/explanation.md
+markdownlint-cli2 rag_poc/README.md rag_poc/docs/*.md rag_poc/CONTRIBUTING.md rag_poc/SECURITY.md
+rust-script "$HOME/.agents/skills/okf/scripts/okf_validate.rs" rag_poc/docs/explanation.md
 ```
 
 あわせてフロントマターの `verified[0].at >= generated.at` と、

@@ -3,6 +3,11 @@ type: Reference
 title: ragcore — RAG PoC 指標計算ライブラリ / CLI
 description: Python 版 RAG PoC の指標計算を unsafe なしで再実装した Rust crate。
 tags: [rust, rag, cli]
+generated:
+  by: "team:rag-poc"
+  at: "2026-11-26T23:00:00+09:00"
+status: "stable"
+stale_after: "2026-12-26"
 ---
 
 ## 概要

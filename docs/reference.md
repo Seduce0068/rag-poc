@@ -18,13 +18,27 @@ status: "stable"
 stale_after: "2026-12-26"
 ---
 
+## 目次（主要章）
+
+- [検索モード](#検索モード) / [hits スキーマ](#hits-スキーマ) /
+  [CLI オプション](#cli-オプション)
+- [設定（環境変数）](#設定環境変数) /
+  [qrels ファイルの使い分け](#qrels-ファイルの使い分け)
+- [代表的な実測値](#代表的な実測値) /
+  [比較表の指標定義と注記](#比較表の指標定義と注記) /
+  [成果物一覧](#成果物一覧)
+- [埋め込み単価](#埋め込み単価) /
+  [コストと token 推定キー](#コストと-token-推定キー) / [検証](#検証)
+
 > 出典は分割前 README スナップショット（`/tmp/README-full-backup.md`）の
 > 「検索モード」「設定（環境変数）」「評価」「成果物一覧」の各章である。
-> 現行 README では章の再編があるため行番号は示さない。数値・相対パス・
-> コマンドは元 README の記述をそのまま転記している。表内の `#...` アンカーは
+> 現行 README では章の再編があるため行番号は示さない。旧章由来の数値・
+> 相対パス・コマンドは元 README の記述を転記している。表内の `#...` アンカーは
 > 元 README 内の見出しを指す。
 > R2 で README から集約した章（CLI オプション / hits スキーマ / 埋め込み単価 /
 > 比較表の指標定義と注記 / 簡易計測と正式パイプラインの使い分け）は現行 README を出典とする。
+> R2 で追加した実測値（qwen サブセット / gemini-embedding-2 / 旧 0.9034）は
+> 親提示値または成果物 JSON を出典とする。
 
 ## 概要
 
@@ -231,9 +245,9 @@ recall@10 / nDCG@10 のため取得件数は最大 10 まで引き上げる。
 
 ## 代表的な実測値
 
-元 README の評価章に記載された数値を変更せず転記する。比較条件が表だけ
-で完結するよう definition / コーパス / チャンク / クエリ / repeat の列を
-追加した。出典に値が無い場合は `—` とする。レイテンシは計測対象が
+分割前 README の評価章から代表的な値を抽出した（全値の網羅を意図しない）。
+比較条件が表だけで完結するよう definition / コーパス / チャンク / クエリ /
+repeat の列を追加した。出典に値が無い場合は `—` とする。レイテンシは計測対象が
 異なる（クラウドは埋め込み平均、ローカルは `hybrid-rerank` 検索平均）ため、
 definition 列と併せて読むこと。
 
@@ -246,6 +260,10 @@ definition 列と併せて読むこと。
 | rerank nDCG@5 | 0.8819 | cloud_bench top10 + hit@k | 91 ファイル | 1380 | 9（`rerank_query_count=9`） | 1 | `eval-results-cloud-full.json` |
 | `qwen3-embedding-8b` の nDCG@10 | 0.8978 | cloud_bench top10 + hit@k | 6 ファイルのサブセット | 81 | 6 | 1 | `eval-results-cloud-qwen3-subset.json` |
 | 全量 qwen `hybrid-rerank` のレイテンシ平均 | 6.22 秒 | evaluate query-level hit@k | `rag_poc_full`（88 ファイル） | 2200 | 9 | 10 | `eval-results-baseline.json`（ウォームアップ 1 回＋10 回計測＝60 サンプル） |
+| qwen サブセット `hybrid` の hit@1 | 0.1667 | evaluate query-level hit@k | 6 ファイルのサブセット | 81 | 6 | 1 | 親提示値（R2-B 指示。6 クエリ中 1 件が rank1、[モデル比較の背景](../explanation.md#なぜ-ruri-を比較したか)と整合） |
+| qwen サブセット `hybrid` の nDCG@10 | 0.5384 | evaluate query-level hit@k | 6 ファイルのサブセット | 81 | 6 | 1 | 親提示値（R2-B 指示。同上条件） |
+| `gemini-embedding-2` の hit@1 | 1.0 | cloud_bench top10 + hit@k | 6 ファイルのサブセット | 81 | 6 | 1 | `eval-results-cloud-gemini-subset.json` |
+| `gemini-embedding-2` の nDCG@10 | 1.0 | cloud_bench top10 + hit@k | 6 ファイルのサブセット | 81 | 6 | 1 | `eval-results-cloud-gemini-subset.json` |
 
 ### レイテンシ実測値
 
@@ -272,6 +290,10 @@ definition 列と併せて読むこと。
   set_recall@1、nDCG@10 は上位 10 件・ファイル 1 回）、`cloud_bench top10`
   （`cloud_bench.py`: nDCG@10 は上位 10 件・ファイル 1 回）、`legacy 全順位`
   （旧 `ndcg_at_10`、全順位ベースで現行定義と直接比較不可）。
+- 旧 `ndcg_at_10=0.9034` は `legacy 全順位` の値で、現行定義（上位 10 件・
+  ファイル 1 回）とは直接比較できない。成果物の
+  `metric_definition.legacy_ndcg_at_10` にも記録がある
+  （例: `eval-results-cloud-gemini-subset.json`）。
 - レイテンシは計測対象が異なるため単純比較しない（詳細は
   [代表的な実測値](#代表的な実測値)の冒頭を参照）。
 - 計測回数はクラウド `repeat=1`、ローカル全量 `RAG_EVAL_REPEAT=10`
@@ -370,8 +392,9 @@ opencodeGO の OpenAI 互換 `/embeddings` API で利用できる埋め込みモ
 単価は `qwen3-embedding-8b` の方が安いが、日本語コーパスでは
 `text-embedding-3-small` が精度・レイテンシともに上回った
 （`eval-results-cloud-small-subset.json` / `eval-results-cloud-qwen3-subset.json`）。
-`gemini-embedding-2` は 3072 次元で、`eval-results-cloud-gemini-subset.json` に
-計測値がある。実測値は[代表的な実測値](#代表的な実測値)を参照。
+`gemini-embedding-2` は 3072 次元で、`eval-results-cloud-gemini-subset.json`
+に計測値がある（**hit@1=1.0 / nDCG@10=1.0**、6 ファイルのサブセット・
+6 クエリ・repeat=1）。値は[代表的な実測値](#代表的な実測値)にも追記した。
 エンドポイントは `https://opencode.ai/inference/go/openai/v1/embeddings` で、
 `dimensions` 指定が可能。`encoding_format` は API 仕様上存在するが本クライアント
 未対応（リクエストへ渡さない）。埋め込みリクエストには `x-opencode-session` が
@@ -403,18 +426,17 @@ opencodeGO の OpenAI 互換 `/embeddings` API で利用できる埋め込みモ
 
 ## 検証
 
-R2 で README から章を集約したため、親エージェントが lint と OKF 検証を再実行する。
-子エージェントは shell 実行権限を持たないため、ここでは再確認用のコマンドのみを示す。
+再確認手順は次のとおり（リポジトリルートで実行）。
 
 ```bash
-markdownlint-cli2 rag_poc/README.md rag_poc/docs/reference.md
-rust-script /home/koppe/.agents/skills/okf/scripts/okf_validate.rs rag_poc/docs/reference.md
+markdownlint-cli2 rag_poc/README.md rag_poc/docs/*.md rag_poc/CONTRIBUTING.md rag_poc/SECURITY.md
+rust-script "$HOME/.agents/skills/okf/scripts/okf_validate.rs" rag_poc/docs/reference.md
 ```
 
 転記漏れの確認には次を用いる。
 
 ```bash
-grep -nE "0\.6243|0\.7542|0\.8681|0\.8597|0\.8819|0\.8978|6\.22" rag_poc/docs/reference.md
+grep -nE "0\.6243|0\.7542|0\.8681|0\.8597|0\.8819|0\.8978|6\.22|0\.1667|0\.5384|0\.9034" rag_poc/docs/reference.md
 grep -nE '^#{2,3} (hits スキーマ|CLI オプション|埋め込み単価|比較表の指標定義と注記|簡易計測と正式パイプラインの使い分け)' rag_poc/docs/reference.md
 ```
 

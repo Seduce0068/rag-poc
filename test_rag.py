@@ -4427,6 +4427,163 @@ class QueryRerankUnchangedTest(unittest.TestCase):
         self.assertIs(query.last_rerank_unchanged(), True)
 
 
+class RerankStyleNormalizationTest(unittest.TestCase):
+    """样式値の strip/lower 正規化とフォールバック警告（R2-A）。"""
+
+    STYLE_ENV = config.ENV_RERANK_PROMPT_STYLE
+
+    def test_env_value_is_stripped_and_lowercased(self):
+        with _temporary_env(**{self.STYLE_ENV: "  LeGaCy  "}):
+            self.assertEqual(config.rerank_prompt_style(), "legacy")
+
+    def test_unknown_env_value_warns_with_env_name_only(self):
+        sentinel = "TOPSECRETVALUE42"
+        with _temporary_env(**{self.STYLE_ENV: sentinel}):
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                style = config.rerank_prompt_style()
+        self.assertEqual(style, "strict")
+        self.assertIn(config.ENV_RERANK_PROMPT_STYLE, stderr.getvalue())
+        self.assertNotIn(sentinel, stderr.getvalue())
+
+    def test_explicit_style_argument_is_normalized(self):
+        with _temporary_env(**{self.STYLE_ENV: None}):
+            self.assertEqual(
+                config.rerank_score_instruction(3, style="  LeGaCy  "),
+                config.rerank_score_instruction(3, style="legacy"),
+            )
+            self.assertIn("1-based", config.rerank_rank_instruction(3, style=" STRICT "))
+
+    def test_strict_score_example_mixes_one_and_zero(self):
+        score = config.rerank_score_instruction(4, style="strict")
+        self.assertIn('{"index":1,"score":1}', score)
+        self.assertIn('{"index":2,"score":0}', score)
+
+
+class StrictScoreParseTest(unittest.TestCase):
+    """strict が 1-based を固定し範囲外 index を 0-based へ読まないこと（R2-A）。"""
+
+    def test_out_of_range_one_based_index_is_not_shifted(self):
+        warnings: list[str] = []
+        data = {"scores": [
+            {"index": 1, "score": 0.9},
+            {"index": 2, "score": 0.8},
+            {"index": 4, "score": 0.7},  # expected=3 の範囲外
+        ]}
+        with mock.patch.object(query, "_warn", lambda message: warnings.append(message)):
+            scores = query._parse_scores(data, 3, style="strict")
+        self.assertEqual(scores[:2], [0.9, 0.8])
+        self.assertIsNone(scores[2])  # 4 を 0-based の 3 へシフトしない
+        self.assertTrue(any("範囲外" in message for message in warnings))
+
+    def test_legacy_style_keeps_inference(self):
+        scores = query._parse_scores(
+            {"scores": [{"index": 1, "score": 0.2}, {"index": 2, "score": 0.8}]},
+            3,
+            style="legacy",
+        )
+        self.assertEqual(scores, [0.2, 0.8, None])
+
+    def test_rerank_passes_effective_style_to_parse_scores(self):
+        captured: dict[str, object] = {}
+        real_parse = query._parse_scores
+
+        def spy(data, expected, style=None):
+            captured["style"] = style
+            return real_parse(data, expected, style)
+
+        content = json.dumps({"scores": [
+            {"index": 1, "score": 0.9},
+            {"index": 2, "score": 0.8},
+            {"index": 3, "score": 0.7},
+        ]})
+        points = [
+            {"id": "p%d" % index, "score": 1.0, "text": "本文%d" % index}
+            for index in range(3)
+        ]
+
+        def fake_post(url, payload):
+            return {"message": {"content": content}}
+
+        with _temporary_env(**{config.ENV_RERANK_PROMPT_STYLE: " STRICT "}), \
+                mock.patch.object(query, "_post", fake_post), \
+                mock.patch.object(query, "_warn", lambda message: None), \
+                mock.patch.object(query, "_parse_scores", side_effect=spy):
+            query.rerank("q", points)
+        self.assertEqual(captured["style"], "strict")
+
+
+class CloudBenchFileOrderUnchangedTest(unittest.TestCase):
+    """cloud_bench のファイル単位 unchanged と alias（R2-A）。"""
+
+    def test_file_order_unchanged_and_alias_are_recorded(self):
+        record: dict[str, object] = {}
+        query_case = {"query": "q", "relevant_sources": []}
+        candidates = [(0.9, "a.md", "A"), (0.8, "b.md", "B")]
+        calls: list[object] = []
+
+        def fake_chat(messages, model=None, **kwargs):
+            calls.append(messages)
+            return '{"rank": [1, 2]}' if len(calls) == 1 else "回答"
+
+        with _temporary_env(**{config.ENV_RERANK_PROMPT_STYLE: "strict"}), \
+                mock.patch.object(cloud_bench, "_chat", side_effect=fake_chat):
+            cloud_bench._run_generation(record, query_case, candidates)
+        self.assertIs(record["file_order_unchanged"], True)
+        self.assertIs(record["rerank_unchanged"], True)
+
+
+class EvaluateRerankUnchangedBreakdownTest(unittest.TestCase):
+    """evaluate の unchanged/changed/N-A 内訳（R2-A）。"""
+
+    def test_status_classification(self):
+        self.assertEqual(evaluate._rerank_unchanged_status(True), "unchanged")
+        self.assertEqual(evaluate._rerank_unchanged_status(False), "changed")
+        self.assertEqual(evaluate._rerank_unchanged_status(None), "N/A")
+
+    def test_evaluate_one_records_status_and_value(self):
+        def fake_func(question, mode, top_k):
+            return [{"source": "a.md", "text": "x"}]
+
+        record = evaluate._evaluate_one(
+            fake_func, "q", ["x"], "hybrid-rerank", 3,
+            rerank_unchanged_getter=lambda: True,
+        )
+        self.assertIs(record["rerank_unchanged"], True)
+        self.assertEqual(record["rerank_unchanged_status"], "unchanged")
+        na_record = evaluate._evaluate_one(
+            fake_func, "q", ["x"], "hybrid-rerank", 3,
+            rerank_unchanged_getter=lambda: None,
+        )
+        self.assertEqual(na_record["rerank_unchanged_status"], "N/A")
+
+    def test_summary_counts_include_na(self):
+        def make_record(mode, status):
+            return {
+                "mode": mode,
+                "error": None,
+                "recall": False,
+                "content_recall": False,
+                "unit_uniqueness": {"unique_ratio": 0.0},
+                "latency_sec": 0.0,
+                "hits": 0,
+                "rerank_unchanged_status": status,
+            }
+
+        records = [
+            make_record("hybrid-rerank", "unchanged"),
+            make_record("hybrid-rerank", "changed"),
+            make_record("hybrid-rerank", "N/A"),
+            make_record("dense", "N/A"),
+        ]
+        summary = evaluate._summarize(records)
+        self.assertEqual(
+            summary["hybrid-rerank"]["rerank_unchanged_counts"],
+            {"unchanged": 1, "changed": 1, "N/A": 1},
+        )
+        self.assertEqual(summary["dense"]["rerank_unchanged_counts"]["N/A"], 1)
+
+
 if __name__ == "__main__":
     _result = unittest.main(exit=False)
     if not getattr(_result, "result", _result).wasSuccessful():

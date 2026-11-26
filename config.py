@@ -150,13 +150,38 @@ def rerank_prompt_style() -> str:
     """実効の rerank プロンプト样式を返す（未知値は strict へフォールバック）。
 
     モジュール読み込み後に環境変数を差し替えても反映するため、呼び出し時に
-    環境変数を再読する（既定値は RAG_RERANK_PROMPT_STYLE 定数）。
+    環境変数を再読する。前後空白・大文字小文字は strip/lower で正規化し、
+    正規化後も strict / legacy のいずれでもない場合は strict へフォールバック
+    する。フォールバック時は環境変数名だけを stderr へ警告し、設定値は
+    一切出力しない（秘密情報の混入を防ぐ方針は resolve_cloud_embed_dimension
+    と同じ）。
     """
-    raw = os.environ.get(ENV_RERANK_PROMPT_STYLE, RAG_RERANK_PROMPT_STYLE)
+    raw = os.environ.get(ENV_RERANK_PROMPT_STYLE)
+    if raw is None:
+        raw = RAG_RERANK_PROMPT_STYLE
     value = str(raw or "").strip().lower()
     if value in (RERANK_PROMPT_STYLE_STRICT, RERANK_PROMPT_STYLE_LEGACY):
         return value
+    eprint(
+        "%s に未知の値が設定されたため %s へフォールバックしました"
+        % (ENV_RERANK_PROMPT_STYLE, RERANK_PROMPT_STYLE_STRICT)
+    )
     return RERANK_PROMPT_STYLE_STRICT
+
+
+def normalize_rerank_style(style: str | None) -> str:
+    """明示された样式引数を同じ規則で正規化して実効样式を返す（R2-A）。
+
+    ``rerank_prompt_style()`` と同じ strip/lower 正規化を明示引数へ適用する。
+    未知値は値を出さずに引数名だけを警告し、環境変数由来の実効样式へ戻す。
+    """
+    if style is None:
+        return rerank_prompt_style()
+    normalized = str(style or "").strip().lower()
+    if normalized in (RERANK_PROMPT_STYLE_STRICT, RERANK_PROMPT_STYLE_LEGACY):
+        return normalized
+    eprint("style 引数に未知の値が指定されたため実効样式へフォールバックしました")
+    return rerank_prompt_style()
 
 
 def rerank_rank_instruction(count: int, style: str | None = None) -> str:
@@ -166,7 +191,8 @@ def rerank_rank_instruction(count: int, style: str | None = None) -> str:
     ``{"rank": [整数, ...]}`` を変えない。strict は候補数・1-based 採番・
     スコア基準（relevant=1 / not relevant=0）・全件出力・説明文/余計なキー禁止を明示する。
     """
-    chosen = style or rerank_prompt_style()
+    # 明示引数にも環境変数と同じ strip/lower 正規化を適用する（R2-A）。
+    chosen = normalize_rerank_style(style)
     if chosen == RERANK_PROMPT_STYLE_LEGACY:
         return LEGACY_RANK_INSTRUCTION
     return (
@@ -187,14 +213,17 @@ def rerank_score_instruction(count: int, style: str | None = None) -> str:
     全件出力・説明文/余計なキー禁止を明示する。いずれも ``{"scores": [...]}``
     のパース契約は維持する。
     """
-    chosen = style or rerank_prompt_style()
+    chosen = normalize_rerank_style(style)
     if chosen == RERANK_PROMPT_STYLE_LEGACY:
         example = ", ".join(
             '{"index":%d,"score":0.5}' % index for index in range(count)
         )
         return LEGACY_SCORE_INSTRUCTION % {"last": count - 1, "example": example}
+    # 例示は 1（関連）と 0（非関連）を混在させ、スコア基準が 0/1 両方である
+    # ことをモデルへ明示する。index は 1-based のまま（R2-A）。
     example = ", ".join(
-        '{"index":%d,"score":1}' % index for index in range(1, count + 1)
+        '{"index":%d,"score":%d}' % (index, 1 if index % 2 else 0)
+        for index in range(1, count + 1)
     )
     return (
         "質問と各チャンクの関連度を判定してください"

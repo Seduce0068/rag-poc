@@ -603,6 +603,7 @@ def _run_generation(
     generation_model: str | None = None,
     usage: _UsageCollector | None = None,
     strict_rank: bool = False,
+    style: str | None = None,
 ) -> float:
     """1 クエリ分の rerank + 回答生成を実行し、レイテンシ秒を返す。
 
@@ -622,7 +623,7 @@ def _run_generation(
     )
     # 指示文は config の样式切替に委譲する。legacy は既存文字列を返すため
     # 既存の rank / score パース契約・テストはそのまま成立する（R2-A）。
-    instruction = config.rerank_rank_instruction(len(candidates))
+    instruction = config.rerank_rank_instruction(len(candidates), style=style)
     prompt = "質問: %s\n\n候補:\n%s\n\n%s" % (query["query"], listing, instruction)
     started = time.perf_counter()
 
@@ -649,11 +650,16 @@ def _run_generation(
                     for i in ids
                     if 1 <= i <= len(record["rerank_candidates"])
                 ))
-                # hybrid-rerank が元順位を変えなかったことを検出する（R2-A）。
+                # ファイル単位の順序が変わったかを検出する（R2-A）。
                 # 元順位は候補のファイル重複を一意化した順序（listing と同じ
-                # 1-based 採番順）で比較する。パース契約・既存キーは変更しない。
+                # 1-based 採番順）で比較する。query.py の last_rerank_unchanged
+                # はチャンク（point id）単位で意味が異なるため、ここでは
+                # file_order_unchanged という別名で記録する。旧キー
+                # rerank_unchanged は後方互換の alias として残す。
                 original_order = list(dict.fromkeys(record["rerank_candidates"]))
-                record["rerank_unchanged"] = ordered == original_order
+                order_unchanged = ordered == original_order
+                record["file_order_unchanged"] = order_unchanged
+                record["rerank_unchanged"] = order_unchanged  # 後方互換 alias
                 rel = set(query["relevant_sources"])
                 dcg = sum(
                     1.0 / math.log2(i + 2)
@@ -768,6 +774,8 @@ def main() -> int:
         else cloud_client.model()
     )
     embed_model = cloud_client.embed_model()
+    # 実効样式を 1 回だけ解決し、プロンプト・成果物メタ両方で同じ値を使う。
+    rerank_style = config.rerank_prompt_style()
     usage = _UsageCollector()
     corpus_dir = Path(args.corpus).resolve() if args.corpus else CORPUS
     qrels_path = Path(args.qrels).resolve() if args.qrels else QRELS
@@ -882,6 +890,7 @@ def main() -> int:
                     generation_model=generation_model,
                     usage=usage,
                     strict_rank=args.strict_rank,
+                    style=rerank_style,
                 )
             )
 
@@ -903,10 +912,13 @@ def main() -> int:
     rerank_invalid_rank_count = sum(
         1 for r in records if r.get("rerank_warnings")
     )
-    # 再ランク結果が元順位と同一だったクエリ数（R2-A）。スコア算出できた
-    # クエリだけが rerank_unchanged を持つため、欠損は count に数えない。
-    rerank_unchanged_count = sum(
-        1 for r in records if r.get("rerank_unchanged") is True
+    # ファイル単位の順序が元順位と同一だったクエリ数（R2-A）。スコア算出できた
+    # クエリだけが file_order_unchanged を持つため、欠損は count に数えない。
+    # 旧キー rerank_unchanged は alias として残すため両方を見て互換を保つ。
+    file_order_unchanged_count = sum(
+        1
+        for r in records
+        if r.get("file_order_unchanged", r.get("rerank_unchanged")) is True
     )
     estimated_cost = _estimated_cost_usd(usage_payload, embed_model)
     cost_source = _usage_cost_source(usage_payload, embed_model)
@@ -933,10 +945,22 @@ def main() -> int:
         "embedding_latency_sec": embed_avg,
         "search_latency_sec": search_avg,
         "total_search_latency_sec": round(embed_avg + search_avg, 6),
-        "rerank_query_count": len(rerank_scores),  # 実効クエリ数（スコア換算できた件数）
+        # 分母・単位を明示する（R2-A）。generation_query_count は生成実行数、
+        # parse_success_count は rank パース成功で nDCG を算出できた数。
+        "generation_query_count": generation_query_count,
+        "rerank_parse_success_count": len(rerank_scores),
+        "rerank_query_count": len(rerank_scores),  # 後方互換 alias
         "rerank_warning_count": rerank_warning_count,
         "rerank_invalid_rank_count": rerank_invalid_rank_count,
-        "rerank_unchanged_count": rerank_unchanged_count,
+        "file_order_unchanged_count": file_order_unchanged_count,
+        "rerank_unchanged_count": file_order_unchanged_count,  # 後方互換 alias
+        "rerank_count_denominator": {
+            "generation_query_count": generation_query_count,
+            "parse_success_count": len(rerank_scores),
+            "warning_count_unit": "message",
+            "invalid_rank_count_unit": "query",
+            "unchanged_count_unit": "query",
+        },
         "estimated_cost_usd": estimated_cost,
     }
     if token_cost_applicable:
@@ -984,8 +1008,14 @@ def main() -> int:
             "rerank は JSON の rank 整数配列のみを採用し、パース失敗時は generation_error に記録して nDCG を 0 としない。",
             "範囲外 rank / 重複 rank は rerank_warnings に記録してスコア算出は従来どおり（--strict-rank 指定時は generation_error へ昇格しスコアを見送る）。",
             "RAG_RERANK_PROMPT_STYLE=%s: strict は候補数・1-based 採番・スコア基準（relevant=1 / not relevant=0）・全件出力・説明文/余計なキー禁止を明示し、legacy は従来文字列を使用する（rank / score のパース契約は不変）。"
-            % config.rerank_prompt_style(),
-            "rerank_unchanged_count は再ランク後の順序が元の候補順（ファイル単位一意順）と同一だったクエリ数（元順位のままなら 1 件として計上）。",
+            % rerank_style,
+            "rerank カウントの分母と単位: generation_query_count=生成対象クエリ数（--generation-max-queries 反映）、"
+            "rerank_parse_success_count（=後方互換の rerank_query_count）=rank パース成功で rerank_ndcg_at_5 を算出できたクエリ数、"
+            "rerank_warning_count は警告メッセージ数（クエリ数ではない）、"
+            "rerank_invalid_rank_count と file_order_unchanged_count はクエリ数。",
+            "file_order_unchanged_count は再ランク後のファイル順が元の候補順（ファイル単位一意順）と同一だったクエリ数。"
+            "record.file_order_unchanged が真偽値で、rerank_unchanged は後方互換 alias。"
+            "query.py の last_rerank_unchanged はチャンク（point id）単位のため意味が異なり、別名で記録する。",
         ])
     if args.rerank_file_dedupe:
         notes.append(
@@ -993,6 +1023,12 @@ def main() -> int:
             "同一ファイルの best score チャンクのみを残す（スコア降順で上位 %d 件を再選択）。"
             % RERANK_K
         )
+    # 実効样式は生成の有無に関わらず成果物メタへ記録する（R2-A）。
+    notes.append(
+        "実効 rerank プロンプト样式: %s（RAG_RERANK_PROMPT_STYLE、"
+        "前後空白・大文字小文字を strip/lower 正規化、未知値は strict フォールバック）。"
+        % rerank_style
+    )
     notes.extend(usage.notes)
     if corpus_sha256:
         # 成果物の notes に corpus_sha256 の出典（config / computed）を明記する。
@@ -1017,6 +1053,7 @@ def main() -> int:
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "model": embed_model,
         "generation_model": generation_model,
+        "rerank_prompt_style": rerank_style,
         "corpus": corpus_dir.name,
         "corpus_file_count": len(files),
         "chunk_count": len(passages),

@@ -504,6 +504,31 @@ def _empty_latency_stats() -> dict[str, Any]:
     }
 
 
+RERANK_UNCHANGED_STATUSES: tuple[str, ...] = ("unchanged", "changed", "N/A")
+
+
+def _rerank_unchanged_status(value: Any) -> str:
+    """query.last_rerank_unchanged() の値を 3 状態へ分類する（R2-A）。
+
+    ``True`` = 元順位と同一、``False`` = 順位が変化、``None`` および
+    それ以外 = 未実行／判定不能（N/A）。None を changed に落とさない。
+    """
+    if value is True:
+        return "unchanged"
+    if value is False:
+        return "changed"
+    return "N/A"
+
+
+def _rerank_prompt_style() -> str:
+    """config の実効 rerank 样式を返す（取得不能なら fail-closed で strict）。"""
+    try:
+        value = _import_config().rerank_prompt_style()
+        return str(value)
+    except Exception:
+        return "strict"
+
+
 def _call_search(
     func: Callable[..., Any],
     question: str,
@@ -511,6 +536,8 @@ def _call_search(
     top_k: int,
     repeat: int | None = None,
     errors_getter: Callable[..., Any] | None = None,
+    rerank_unchanged_getter: Callable[..., Any] | None = None,
+    unchanged_collector: list[Any] | None = None,
 ) -> tuple[Any, str, dict[str, Any], list[dict[str, Any]]]:
     """search(query, mode, top_k) を直接呼び、レイテンシを N 回計測する。
 
@@ -518,7 +545,10 @@ def _call_search(
     cold_latency_sec に記録し、その後同一クエリを repeat 回呼んで samples に格納する。
     repeat == 1 ならウォームアップなしの 1 回のみで、samples[0] を cold とする。
     各ラウンドの search が記録したエラーは全件集約して返す（最終回だけを拾うと
-    断続的な障害が隠れるため）。戻り値は (最後の結果, 説明, 統計, エラー一覧)。
+    断続的な障害が隠れるため）。``rerank_unchanged_getter`` が渡された場合は
+    各ラウンドの値を ``unchanged_collector`` へ追記する（エラー収集と同じ
+    パターン、戻り値の形は後方互換のため変更しない）。
+    戻り値は (最後の結果, 説明, 統計, エラー一覧)。
     """
     rounds = _load_repeat() if repeat is None else max(1, int(repeat))
     all_errors: list[dict[str, Any]] = []
@@ -533,6 +563,14 @@ def _call_search(
         if isinstance(errors, list):
             all_errors.extend(item for item in errors if isinstance(item, dict))
 
+    def collect_unchanged() -> None:
+        if rerank_unchanged_getter is None or unchanged_collector is None:
+            return
+        try:
+            unchanged_collector.append(rerank_unchanged_getter())
+        except Exception:  # noqa: BLE001 - 状態取得自体は計測を止めない
+            unchanged_collector.append(None)
+
     # genuine cold: 最初の呼び出し（warm-up）を計測して cold_latency_sec に格納する。
     # 旧実装は warm-up を計測せず「warm-up 後の samples[0]」を cold と呼んでいたため
     # 実態は warm だった。repeat == 1 では warm-up が無いため samples[0] を cold とする。
@@ -542,6 +580,7 @@ def _call_search(
         func(question, mode, top_k)  # warm-up（結果は捨てるが初回レイテンシは残す）
         cold_latency = time.perf_counter() - started
         collect_errors()
+        collect_unchanged()
     samples: list[float] = []
     raw: Any = None
     for _ in range(rounds):
@@ -549,6 +588,7 @@ def _call_search(
         raw = func(question, mode, top_k)
         samples.append(time.perf_counter() - started)
         collect_errors()
+        collect_unchanged()
     stats = {
         "count": rounds,
         "avg": round(sum(samples) / rounds, 6),
@@ -832,6 +872,7 @@ def _evaluate_one(
     errors_getter: Callable[..., Any] | None = None,
     with_answer: bool = False,
     answer_fn: Callable[..., Any] | None = None,
+    rerank_unchanged_getter: Callable[..., Any] | None = None,
 ) -> dict[str, Any]:
     record: dict[str, Any] = {
         "query": question,
@@ -851,12 +892,20 @@ def _evaluate_one(
         "latency_stats": _empty_latency_stats(),
         "call": None,
         "error": None,
+        "rerank_unchanged": None,
+        "rerank_unchanged_status": "N/A",
     }
+    unchanged_values: list[Any] = []
     started = time.perf_counter()
     try:
         raw, call_description, latency, search_errors = _call_search(
-            func, question, mode, top_k, repeat, errors_getter
+            func, question, mode, top_k, repeat, errors_getter,
+            rerank_unchanged_getter, unchanged_values,
         )
+        # 最終ラウンドの値を record に残す（warm-up を含む全値は collector に保持）。
+        last_value = unchanged_values[-1] if unchanged_values else None
+        record["rerank_unchanged"] = last_value
+        record["rerank_unchanged_status"] = _rerank_unchanged_status(last_value)
         record["call"] = call_description
         record["latency_stats"] = latency
         record["latency_sec"] = latency["avg"]  # 後方互換: 平均値を維持
@@ -864,6 +913,8 @@ def _evaluate_one(
     except Exception as exc:  # 1 ケースの失敗で全体を止めない
         record["error"] = "%s: %s" % (type(exc).__name__, _mask_error(exc))
         record["latency_sec"] = round(time.perf_counter() - started, 6)
+        # 検索失敗時は rerank 未実行として N/A を明示する。
+        record["rerank_unchanged_status"] = "N/A"
         _merge_search_errors(record, errors_getter)
         return record
 
@@ -890,6 +941,17 @@ def _evaluate_one(
     if with_answer:
         _record_generated_answer(record, question, items, answer_fn, sources_key="sources")
     return record
+
+
+def _rerank_unchanged_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    """record の rerank_unchanged_status を unchanged/changed/N/A で数える。"""
+    counts = {status: 0 for status in RERANK_UNCHANGED_STATUSES}
+    for row in rows:
+        status = row.get("rerank_unchanged_status", "N/A")
+        if status not in counts:
+            status = "N/A"
+        counts[status] += 1
+    return counts
 
 
 def _summarize(records: list[dict[str, Any]]) -> dict[str, Any]:
@@ -920,6 +982,8 @@ def _summarize(records: list[dict[str, Any]]) -> dict[str, Any]:
             "latency_stats": _aggregate_latency(rows),
             "avg_hits": round(sum(r["hits"] for r in rows) / len(rows), 2) if rows else None,
             "errors": sum(1 for r in all_rows if r["error"] is not None),
+            # 失敗行も N/A として分母に残す（生存者バイアス回避）。
+            "rerank_unchanged_counts": _rerank_unchanged_counts(all_rows),
         }
     return summary
 
@@ -965,6 +1029,7 @@ def _evaluate_heldout_one(
     errors_getter: Callable[..., Any] | None = None,
     with_answer: bool = False,
     answer_fn: Callable[..., Any] | None = None,
+    rerank_unchanged_getter: Callable[..., Any] | None = None,
 ) -> dict[str, Any]:
     """1 クエリ × 1 モードの recall@k / nDCG@k を計算する。"""
     relevant = list(case["relevant_sources"])
@@ -983,12 +1048,19 @@ def _evaluate_heldout_one(
         "latency_stats": _empty_latency_stats(),
         "call": None,
         "error": None,
+        "rerank_unchanged": None,
+        "rerank_unchanged_status": "N/A",
     }
+    unchanged_values: list[Any] = []
     started = time.perf_counter()
     try:
         raw, call_description, latency, search_errors = _call_search(
-            func, case["query"], mode, retrieval_k, repeat, errors_getter
+            func, case["query"], mode, retrieval_k, repeat, errors_getter,
+            rerank_unchanged_getter, unchanged_values,
         )
+        last_value = unchanged_values[-1] if unchanged_values else None
+        record["rerank_unchanged"] = last_value
+        record["rerank_unchanged_status"] = _rerank_unchanged_status(last_value)
         record["call"] = call_description
         record["latency_stats"] = latency
         record["latency_sec"] = latency["avg"]  # 後方互換: 平均値を維持
@@ -996,6 +1068,8 @@ def _evaluate_heldout_one(
     except Exception as exc:  # 1 ケースの失敗で全体を止めない
         record["error"] = "%s: %s" % (type(exc).__name__, _mask_error(exc))
         record["latency_sec"] = round(time.perf_counter() - started, 6)
+        # 検索失敗時は rerank 未実行として N/A を明示する。
+        record["rerank_unchanged_status"] = "N/A"
         _merge_search_errors(record, errors_getter)
         return record
 
@@ -1055,6 +1129,7 @@ def _summarize_heldout(records: list[dict[str, Any]]) -> dict[str, Any]:
         for k in HELD_OUT_NDCG_K:
             total = sum(float(r["ndcg_at"].get(str(k), 0.0)) for r in rows)
             entry["ndcg_at"][str(k)] = round(total / len(rows), 4) if rows else None
+        entry["rerank_unchanged_counts"] = _rerank_unchanged_counts(rows)
         summary[mode] = entry
     return summary
 
@@ -1169,6 +1244,7 @@ def _run_simple_eval(
     errors_getter: Callable[..., Any] | None = None,
     with_answer: bool = False,
     answer_fn: Callable[..., Any] | None = None,
+    rerank_unchanged_getter: Callable[..., Any] | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     records: list[dict[str, Any]] = []
     for case in QRELS["simple_queries"]:
@@ -1184,6 +1260,7 @@ def _run_simple_eval(
                     errors_getter,
                     with_answer=with_answer,
                     answer_fn=answer_fn,
+                    rerank_unchanged_getter=rerank_unchanged_getter,
                 )
             )
     return records, []
@@ -1196,6 +1273,7 @@ def _run_heldout_eval(
     errors_getter: Callable[..., Any] | None = None,
     with_answer: bool = False,
     answer_fn: Callable[..., Any] | None = None,
+    rerank_unchanged_getter: Callable[..., Any] | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     records: list[dict[str, Any]] = []
     for case in QRELS["heldout_queries"]:
@@ -1210,6 +1288,7 @@ def _run_heldout_eval(
                     errors_getter,
                     with_answer=with_answer,
                     answer_fn=answer_fn,
+                    rerank_unchanged_getter=rerank_unchanged_getter,
                 )
             )
     return records, []
@@ -1585,6 +1664,16 @@ def _evaluate_once(
     errors_getter = getattr(query_module, "last_search_errors", None)
     if not callable(errors_getter):
         errors_getter = None
+    # rerank の未変更/変更を search 呼び出しごとに取得する（R2-A）。
+    # 無い／呼び出し不能なら None とし、record は N/A に分類する。
+    rerank_unchanged_getter = getattr(query_module, "last_rerank_unchanged", None)
+    if not callable(rerank_unchanged_getter):
+        rerank_unchanged_getter = None
+    unchanged_kwargs: dict[str, Any] = (
+        {"rerank_unchanged_getter": rerank_unchanged_getter}
+        if rerank_unchanged_getter is not None
+        else {}
+    )
 
     answer_fn: Callable[..., Any] | None = None
     if args.with_answer:
@@ -1645,6 +1734,23 @@ def _evaluate_once(
         notes.append(
             "query.last_search_errors() が無いため検索エラー詳細は record.error に反映しない"
         )
+    # 実効样式と rerank 未変更の定義を成果物メタへ記録する（R2-A）。
+    rerank_style = _rerank_prompt_style()
+    notes.append(
+        "実効 rerank プロンプト样式: %s（RAG_RERANK_PROMPT_STYLE、"
+        "前後空白・大文字小文字を strip/lower 正規化、未知値は strict フォールバック）。"
+        % rerank_style
+    )
+    if rerank_unchanged_getter is None:
+        notes.append(
+            "query.last_rerank_unchanged() が無いため rerank 未変更状態は N/A として記録する"
+        )
+    notes.append(
+        "rerank_unchanged は query.last_rerank_unchanged() の値（True=元順位と同一 / "
+        "False=順位変化 / None=未実行）。record.rerank_unchanged_status と "
+        "summary.<mode>.rerank_unchanged_counts に unchanged/changed/N/A の件数を記録する。"
+        "単位はクエリ×モード（hybrid-rerank 以外と検索失敗は N/A、失敗行も分母に残す）。"
+    )
     corpus_root = _corpus_dir(settings)
     missing_labels = [
         source
@@ -1664,8 +1770,11 @@ def _evaluate_once(
                 errors_getter,
                 with_answer=True,
                 answer_fn=answer_fn,
+                **unchanged_kwargs,
             )
-        return _run_heldout_eval(func, retrieval_k, repeat, errors_getter)
+        return _run_heldout_eval(
+            func, retrieval_k, repeat, errors_getter, **unchanged_kwargs
+        )
 
     def run_simple() -> tuple[list[dict[str, Any]], list[str]]:
         if args.with_answer:
@@ -1676,8 +1785,9 @@ def _evaluate_once(
                 errors_getter,
                 with_answer=True,
                 answer_fn=answer_fn,
+                **unchanged_kwargs,
             )
-        return _run_simple_eval(func, top_k, repeat, errors_getter)
+        return _run_simple_eval(func, top_k, repeat, errors_getter, **unchanged_kwargs)
 
     heldout_records, heldout_notes = run_heldout()
     notes.extend(heldout_notes)
@@ -1779,6 +1889,12 @@ def _evaluate_once(
             "数値は後方互換の参考値としてのみ保持する。"
         ),
         "heldout": heldout_definitions,
+        "rerank_unchanged": (
+            "query.last_rerank_unchanged() を各 search 呼び出し後に取得し、"
+            "record には真偽値と 3 状態（unchanged/changed/N/A）を、"
+            "summary にはモード別件数を記録する。None は未実行として N/A に区別し、"
+            "失敗行も分母に残す。query 側はチャンク（point id）単位。"
+        ),
     }
     if args.with_answer:
         metric_definitions["answer_generation"] = (
@@ -1808,6 +1924,7 @@ def _evaluate_once(
         "qrels_schema_version": QRELS_SCHEMA_VERSION,
         "qrels_label": qrels_label,
         "script": "rag_poc/evaluate.py",
+        "rerank_prompt_style": rerank_style,
         "search_function": {
             "module": "query",
             "name": getattr(func, "__name__", SEARCH_FN_NAME),

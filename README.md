@@ -1,5 +1,11 @@
 # rag_poc — ローカル RAG 検証
 
+> - **何か**: ローカル Ollama + Qdrant で日本語特化埋め込み Ruri の RAG を試す PoC。
+> - **前提**: Ollama / Qdrant がローカル起動済み、Python 3.10 以降（クラウドは既定無効）。
+> - **最初のコマンド**: `python3 -m pip install -r rag_poc/requirements.txt` → `ollama pull kun432/cl-nagoya-ruri-base` → `python3 rag_poc/ingest.py`。
+> - **検証**: `python3 rag_poc/test_rag.py`（全 259 件、外部サービス接続なし）。
+> - **docs への導線**: [docs/index.md](docs/index.md) → [背景](docs/explanation.md) / [設定・実測値](docs/reference.md)。
+
 ## まず動かす（5分）
 
 ローカル Ollama + Qdrant で日本語特化埋め込み Ruri の RAG を最短で試す。リポジトリルートで以下を順にコピペ実行する（Kubuntu 想定）。
@@ -33,13 +39,6 @@ python3 rag_poc/query.py '質問' --mode hybrid --json
 設定の意味・全量への切り替え・Rust バイナリや評価の詳細は[セットアップ](#セットアップ)、
 [使い方](#使い方) および[Ruri での再現手順](docs/explanation.md#ruri-での再現手順)を参照。
 
-> **TL;DR / まず読む順**: [まず動かす（5分）](#まず動かす5分) → [目的](#目的) →
-> [セットアップ](#セットアップ) → [使い方](#使い方) → [テスト](#テスト)。
-> 背景・設計判断は [docs/explanation.md](docs/explanation.md)、全設定と実測値・成果物一覧は
-> [docs/reference.md](docs/reference.md) を参照（この README は入口のみ）。実測値は
-> [docs/reference.md の代表的な実測値](docs/reference.md#代表的な実測値)を単一情報源とする。
-> 日付表記: 本文は `YYYY-MM-DD`、メタデータは RFC 3339、ファイル名は `YYYYMMDD`。
-
 ## 目的
 
 `passkey-gateway/docs/` 配下の Markdown を知識源に、外部 API を使わず
@@ -64,10 +63,13 @@ Ruri を使う場合は[まず動かす（5分）](#まず動かす5分) /
 
 - Ollama がローカルで起動していること（既定 `http://127.0.0.1:11434`）
 - Qdrant がローカルで起動していること（既定 `http://127.0.0.1:6333`）
-- Ollama に `qwen2.5:3b` が投入済みであること
-  - 未取得なら `ollama pull qwen2.5:3b`
 - Python 3.10 以降
 - `requests`（`ingest.py` / `query.py` / `evaluate.py` が使用）
+- 埋め込みモデルは次のいずれか一方でよい:
+  - **Ruri クイックスタート（推奨）**: `ollama pull kun432/cl-nagoya-ruri-base`。
+    [まず動かす（5分）](#まず動かす5分)の設定を使えば **`qwen2.5:3b` は不要**。
+  - 旧ベースライン再現: `ollama pull qwen2.5:3b`（config 既定。未設定の
+    `evaluate.py` はこちらを再現する）。
 
 ## セットアップ
 
@@ -80,8 +82,9 @@ python3 -m pip install -r rag_poc/requirements.txt
 # compare_embeddings 用の Rust バイナリをビルド（任意。未ビルドなら Python へフォールバック）
 cargo build --manifest-path rag_poc/ragcore/Cargo.toml
 
-# モデル取得（未取得の場合）
-ollama pull qwen2.5:3b
+# モデル取得（未取得の場合。Ruri 推奨、旧ベースラインは qwen2.5:3b）
+ollama pull kun432/cl-nagoya-ruri-base
+# ollama pull qwen2.5:3b  # 旧ベースラインを再現する場合のみ
 
 # サービスの生存確認
 curl -fsS http://127.0.0.1:11434/api/tags
@@ -284,7 +287,7 @@ RAG_REQUIRE_RUST=1 python3 rag_poc/test_rag.py
 ```
 
 外部サービスへ接続せず、`unittest` のみで設定・RRF・JSON 解析・チャンク分割・
-評価クエリ・held-out 指標・rerank のフォールバックを検証する（全 230 件）。
+評価クエリ・held-out 指標・rerank のフォールバックを検証する（全 259 件）。
 Rust 同等性テスト 9+8件のうち、バイナリを要する 8 件は未ビルド時に skip される。
 第2のコマンドは skip を失敗へ切り替える CI ゲートである（`binary_path_default`
 や `RustSkipGateTest` の 3 件など、未ビルドでも skip しないテストもある）。
@@ -298,3 +301,7 @@ Rust 同等性テスト 9+8件のうち、バイナリを要する 8 件は未�
 - [docs/explanation.md](docs/explanation.md) — 構成図、設計判断（なぜハイブリッド／Ruri／クラウドか）、既知の制限、モデル比較実験、別ドメインベンチマーク、入力と設定の検証
 - [ragcore/README.md](ragcore/README.md) — Rust 純粋計算クレートの CLI 仕様
 - ドキュメント設計の判断根拠: `passkey-gateway/docs/documentation-references-extra-2026-11-26.md`
+
+実測値は [docs/reference.md の代表的な実測値](docs/reference.md#代表的な実測値)を
+単一情報源とする。日付表記は本文 `YYYY-MM-DD`、メタデータは RFC 3339、
+ファイル名は `YYYYMMDD`。
