@@ -1,6 +1,9 @@
 # rag_poc — ローカル RAG 検証
 
-## 目的
+> この README は入口（how-to）です。背景は `docs/explanation`、仕様は `docs/reference` へ分離する。
+> 日付表記: 本文は `YYYY-MM-DD`、メタデータは RFC 3339、ファイル名は `YYYYMMDD`。
+
+## 目的 [explanation]
 
 `passkey-gateway/docs/` 配下の Markdown を知識源に、外部 API を使わず
 ローカルの Ollama と Qdrant だけで RAG（検索拡張生成）を試す PoC。
@@ -8,9 +11,9 @@
 モード（dense / keyword / hybrid / hybrid-rerank）の差を評価する。
 
 既定はローカル Ollama + Qdrant で、クラウドは `RAG_CLOUD_ENABLED=1` の
-opt-in（詳細は「クラウドモデル（opencodeGO）」を参照）。
+opt-in（詳細は[クラウドモデル（opencodeGO）](#クラウドモデルopencodego-how-to)を参照）。
 
-### 推奨クイックスタート
+### 推奨クイックスタート [tutorial]
 
 クラウド RAG 調査の結論（レポート `passkey-gateway/docs/cloud-rag-research-2026-11-26.md`、
 リポジトリ外のため相対リンクではなくパス表記）に従い、
@@ -18,10 +21,10 @@ opt-in（詳細は「クラウドモデル（opencodeGO）」を参照）。
 同一条件下で dense の `recall@10` / `nDCG@10` がともに 1.0 / 0.7992 を
 達成している（qwen2.5:3b は両方 0.0）。ただし **config 既定は後方互換のため
 `qwen2.5:3b` のまま**で、何も設定せず `evaluate.py` を走らせると旧ベースライン
-を再現する。Ruri を使う場合は「Ruri での再現手順」を参照して
+を再現する。Ruri を使う場合は[Ruri での再現手順](#ruri-での再現手順-how-to)を参照して
 `EMBED_MODEL` / `RAG_VECTOR_SIZE=768` / `CHUNK_SIZE=300` / prefix を揃えること。
 
-## 構成図（テキスト）
+## 構成図（テキスト） [reference]
 
 ```text
 Markdown (passkey-gateway/docs/*.md)
@@ -49,7 +52,7 @@ Markdown (passkey-gateway/docs/*.md)
 `compare_embeddings.py` がこれを利用する（prefix・次元検証・リトライ・
 旧 API フォールバックを一箇所で管理）。各値は環境変数で上書きできる。
 
-## 必要なもの
+## 必要なもの [reference]
 
 - Ollama がローカルで起動していること（既定 `http://127.0.0.1:11434`）
 - Qdrant がローカルで起動していること（既定 `http://127.0.0.1:6333`）
@@ -58,7 +61,7 @@ Markdown (passkey-gateway/docs/*.md)
 - Python 3.10 以降
 - `requests`（`ingest.py` / `query.py` / `evaluate.py` が使用）
 
-## セットアップ
+## セットアップ [tutorial]
 
 リポジトリルートで以下を実行する。
 
@@ -103,7 +106,7 @@ Rust 同等性テストは `ragcore` 側 9 件と Python 側 8 件の計 17 件
 差し替えられる（相対パスはリポジトリルート基準）。Rust CLI 呼び出しの
 タイムアウトは `RAG_RUST_TIMEOUT`（既定 30 秒）で変更する。
 
-## 使い方
+## 使い方 [how-to]
 
 ```bash
 # 1. コーパスを埋め込みして Qdrant へ投入（初回・更新時）
@@ -119,7 +122,7 @@ python3 rag_poc/evaluate.py
 RAG_COLLECTION=rag_poc_full python3 rag_poc/ingest.py
 RAG_COLLECTION=rag_poc_full python3 rag_poc/query.py '質問' --json
 
-# 5. 軽量サブセット（6 ファイル/81 チャンク）で試す場合
+# 5. 軽量サブセット（6 ファイル／81 チャンク）で試す場合
 RAG_COLLECTION=rag_poc_docs \
 RAG_CORPUS_DIR=rag_poc/corpus-subset python3 rag_poc/ingest.py
 RAG_COLLECTION=rag_poc_docs python3 rag_poc/query.py '質問' --json
@@ -135,15 +138,16 @@ python3 rag_poc/compare_cloud_local.py --output rag_poc/cloud-local-comparison.j
 並び替え、`--output PATH` で比較 JSON の出力先を指定する（省略時は stdout）。
 
 `rag_poc/corpus-subset/` は評価用に抜き出した 6 ファイルのサブセット
-（2026-11-26 時点）。全量は既定の `passkey-gateway/docs`（88 ファイル、
-2200 チャンク）。簡易評価の初期値はサブセットで実施した履歴があるため、
+（2026-11-26 時点）。全量は既定の `passkey-gateway/docs`
+（88 ファイル／2200 チャンク）。簡易評価の初期値はサブセットで実施した
+履歴があるため、
 現在の `eval-results.json` の `corpus_file_count` / `corpus_sha256` を
 確認してから比較すること。
 
 `--mode` には `dense` / `keyword` / `hybrid` / `hybrid-rerank` を指定する。
 `--top-k N` で取得候補数を変更できる（既定 `config.TOP_K = 10`）。
 
-### `query.py --json` の hits スキーマ
+### `query.py --json` の hits スキーマ [reference]
 
 `--json` を付けたときの出力対象は `mode` / `hits` / `answer` / `sources` で、
 `hits` の各要素は次のキーを持つ。全モードで必ず現れる共通キーと、
@@ -166,7 +170,7 @@ consumer は optional キーの存在を前提にしないこと。参照時は
 有無を確認する。また共通キーも `id` / `score` はソース次第で `null`
 になり得るため、型を決め打ちしないこと。
 
-### CLI オプション
+### CLI オプション [reference]
 
 `ingest.py`:
 
@@ -197,7 +201,7 @@ consumer は optional キーの存在を前提にしないこと。参照時は
 （既定 5）。上位 5 件のみを再評価し、残りは元のスコアを保持するため、
 返却件数は `--top-k` のまま変わらない。
 
-## 検索モード
+## 検索モード [reference]
 
 | モード | 動作 |
 | --- | --- |
@@ -206,7 +210,7 @@ consumer は optional キーの存在を前提にしないこと。参照時は
 | `hybrid` | dense と keyword の順位を RRF (k=60) で統合 |
 | `hybrid-rerank` | hybrid の上位 5 件を LLM が再ランクし全件を返す |
 
-## 設定（環境変数）
+## 設定（環境変数） [reference]
 
 `config.py` の既定値は次のとおり。必要なら環境変数で上書きする。
 
@@ -220,9 +224,9 @@ consumer は optional キーの存在を前提にしないこと。参照時は
 | `RAG_TOP_K` | `10` |
 | `RAG_RERANK_MAX_DOCS` | `5` |
 | `RAG_VECTOR_SIZE` | `2048` |
-| `OLLAMA_TIMEOUT` / `QDRANT_TIMEOUT` | `300` / `300` |
+| `OLLAMA_TIMEOUT` / `QDRANT_TIMEOUT` | `300 秒` / `300 秒` |
 | `RAG_INGEST_RESUME` | `0`（1 でチェックポイント再開） |
-| `RAG_EVAL_REPEAT` | `1`（ウォームアップなし1回。2以上でN回＋warmup） |
+| `RAG_EVAL_REPEAT` | `1`（ウォームアップなし 1 回。2 以上でウォームアップ 1 回＋N 回） |
 | `RAG_CORPUS_DIR` | `passkey-gateway/docs` |
 | `RAG_ALLOW_REMOTE_ENDPOINTS` | `0`（既定でリモート拒否。`1` でオプトイン） |
 | `RAG_ALLOWED_ENDPOINT_HOSTS` | 空（カンマ区切りの許可ホスト。`host:port` 形式も可） |
@@ -230,8 +234,9 @@ consumer は optional キーの存在を前提にしないこと。参照時は
 | `RAG_EMBED_PREFIX_QUERY` | `""`（空。ruri は config テーブルで「クエリ: 」） |
 | `RAG_EMBED_PREFIX_PASSAGE` | `""`（空。ruri は config テーブルで「文章: 」） |
 | `RAG_RUST_BIN` | `rag_poc/ragcore/target/debug/ragcore` |
-| `RAG_RUST_TIMEOUT` | `30`（秒） |
-| `RAG_ANSWER_TIMEOUT` | `60`（秒。回答生成1回のタイムアウト） |
+| `RAG_RUST_TIMEOUT` | `30 秒` |
+| `RAG_ANSWER_TIMEOUT` | `60 秒`（回答生成 1 回のタイムアウト） |
+| `RAG_CLOUD_TIMEOUT` | `60 秒`（クラウド HTTP タイムアウト） |
 | `RAG_CLOUD_ENABLED` | `0`（1 でクラウド有効。既定はローカル Ollama） |
 | `RAG_CLOUD_CHAT_ENABLED` | `0`（1 で生成もクラウド。`RAG_CLOUD_ENABLED=1` が前提） |
 | `RAG_CLOUD_EMBED_MODEL` | 空（有効時は明示指定が必要。既定モデルは `text-embedding-3-small`） |
@@ -269,9 +274,9 @@ HTTP タイムアウトに `RAG_CLOUD_TIMEOUT`（既定 60 秒）、
 テーブル値が優先され、環境変数の不一致は `ingest.py` の警告どまり
 （期待次元を採用）となる。未知モデルの場合だけ `RAG_VECTOR_SIZE` が
 実効値になる。ただし `query.py` の設定検証は ruri に 768 を要求するため、
-ruri を使う場合は環境変数も 768 に揃えること（後述「Ruri での再現手順」）。
+ruri を使う場合は環境変数も 768 に揃えること（後述 [Ruri での再現手順](#ruri-での再現手順-how-to)）。
 
-## 評価
+## 評価 [how-to]
 
 `python3 rag_poc/evaluate.py` は簡易指標と held-out 評価を実行し、
 `rag_poc/eval-results.json` に出力する。`--heldout-only` を付けると
@@ -290,7 +295,7 @@ held-out は 9 クエリに正解ファイル名ラベルを付け、次をモ�
 suffix・basename で照合し、検索失敗ケースは 0 として分母に残す。
 recall@10 / nDCG@10 のため取得件数は最大 10 まで引き上げる。
 
-### qrels ファイルの使い分け
+### qrels ファイルの使い分け [reference]
 
 評価ラベルは 3 種類の qrels ファイルで切り替える。`evaluate.py` の
 `--qrels` 省略時は `rag_poc/qrels.json`。投入時と評価時で
@@ -323,10 +328,10 @@ python3 rag_poc/evaluate.py --qrels rag_poc/qrels-alt.json
 ラベルとコーパスが対応していることを確かめる。既に投入済みなら
 `python3 rag_poc/ingest.py` は不要だが、コーパス切替時は先に投入する。
 
-### 全量コーパスでの実測（2026-11-26）
+### 全量コーパスでの実測（2026-11-26） [explanation]
 
-88 ファイル・2200 チャンク（`rag_poc_full`）・held-out 9 クエリの結果。
-レイテンシは `RAG_EVAL_REPEAT=10`（ウォームアップ1回＋10回計測＝60サンプル）
+88 ファイル／2200 チャンク（`rag_poc_full`）・held-out 9 クエリの結果。
+レイテンシは `RAG_EVAL_REPEAT=10`（ウォームアップ 1 回＋10 回計測＝60 サンプル）
 の平均値（`eval-results-baseline.json`）:
 
 | モード | recall@10 | nDCG@10 | レイテンシ平均 | 中央値 | 標準偏差 |
@@ -336,7 +341,7 @@ python3 rag_poc/evaluate.py --qrels rag_poc/qrels-alt.json
 | `hybrid` | 1.0 | 0.6292 | 0.22 秒 | 0.218 | 0.021 |
 | `hybrid-rerank` | 1.0 | 0.6243 | 6.22 秒 | 6.25 | 0.66 |
 
-> `dense` 行の但し書き: これは qwen2.5:3b の query-level hit@10 であり集合 recall ではない。Ruri では recall@10=1.0（後述の Ruri 全量表を参照）。
+> `dense` 行の但し書き: これは qwen2.5:3b の query-level hit@10 であり集合 recall ではない。Ruri では recall@10=1.0（[全量コーパスでの実測](#全量コーパスでの実測2026-11-26-explanation)の Ruri 表を参照）。
 
 他構成の `hybrid-rerank` 平均は ruri 全量 3.32 秒（中央値 3.33 / 標準偏差 0.18,
 `eval-results-ruri-full.json`）、別ドメイン 7.17 秒（中央値 7.05 / 標準偏差 0.45,
@@ -365,12 +370,12 @@ rank1 に置けなかった。`recall@10` は両者 1.0 だが、ランキング
 品質は埋め込みモデルで大きく変わることが実証された。
 クラウド埋め込みも同一サブセット・同一 qrels で recall@1 / nDCG@10
 ともに 1.0 だった（`eval-results-cloud-subset.json`）。ローカル Ruri と
-同等の品質だが、注意はクラウド章冒頭の警告を参照。
+同等の品質だが、注意は[クラウド章冒頭の警告](#クラウドモデルopencodego-how-to)を参照。
 Ruri は 512 トークンcontextのため `CHUNK_SIZE=300` 前後で投入する
 （800 のままでは HTTP 400 になる）。サブセット結果は
 `rag_poc/eval-results-ruri-subset.json` に退避済み。
 
-全量（88 ファイル/2200 チャンク、`rag_poc_ruri_full`、`qrels.json`
+全量（88 ファイル／2200 チャンク、`rag_poc_ruri_full`、`qrels.json`
 9 クエリ、2026-11-26）でも改善は維持された。結果は
 `rag_poc/eval-results-ruri-full.json` に退避済み。
 
@@ -381,17 +386,22 @@ Ruri は 512 トークンcontextのため `CHUNK_SIZE=300` 前後で投入する
 | `hybrid` | 1.0 | 0.8624 |
 | `hybrid-rerank` | 1.0 | 0.7542 |
 
-opencodeGO の `text-embedding-3-small` を全量コーパス（87 ファイル/
-214 チャンク、`qrels.json` 9 クエリ、repeat=2）で計測すると、
+opencodeGO の `text-embedding-3-small` を全量コーパス
+（91 ファイル／1380 チャンク、`ingest.iter_chunks` 委譲後、
+`qrels.json` 9 クエリ、repeat=1）で計測すると、
 `hit@1=0.7778`（query-level）/ `set_recall@1=0.7222`（集合 recall）/
-`hit@10=1.0` / `nDCG@10=0.9034` だった
+`hit@10=1.0` / `nDCG@10=0.8597`（現行定義＝上位10件・ファイル1回）だった
 （`eval-results-cloud-full.json`）。ローカル qwen の dense（0.0 / 0.0）
-より大幅に良く、Ruri（0.7992）より nDCG が高い。埋め込みレイテンシ
-平均 14.0 秒（外部送信＋token 課金の注意はクラウド章冒頭の警告を参照）。
-生成モデル `deepseek-v4.1-flash` による rerank / 回答生成も
-2 クエリで動作を確認した（`rerank_query_count=2`）。rerank の
-`nDCG@5=1.0` は旧 0.3608 が ideal のファイル重複カウントバグに
-よる過小評価だったため、修正後の値で置き換えた。
+より大幅に良い。ただし全量 Ruri は 88 ファイル／2200 チャンクで
+コーパスとチャンク条件が異なるため、Ruri（dense 0.7992）との
+nDCG の優劣は直接比較できない。埋め込みレイテンシ平均 42.3 秒
+（外部送信＋token 課金の注意は
+[クラウド章冒頭の警告](#クラウドモデルopencodego-how-to)を参照）。
+生成モデル `deepseek-v4.1-flash` による rerank / 回答生成は
+9 クエリで動作を確認した（`rerank_query_count=9`、
+`rerank_ndcg_at_5=0.8819`）。rerank の `nDCG@5` は旧 0.3608 が
+ideal のファイル重複カウントバグによる過小評価だったため、
+修正後の値で置き換えた。
 Qdrant 投入後の正式パイプラインでは hybrid が `nDCG@10=0.8681`
 で最良だった（`eval-results-cloud-pipeline.json`）。
 `cloud_bench.py` の nDCG は上位10件・ファイル単位1回の定義へ
@@ -408,7 +418,7 @@ rerank は nDCG を下げた（0.7542）。数値は各 JSON の `heldout.summar
 `hybrid-rerank` は `RAG_RERANK_MAX_DOCS=5` により
 再ランク前の約 11 秒から約 5.4 秒へ短縮した。
 
-## クラウドモデル（opencodeGO）
+## クラウドモデル（opencodeGO） [how-to]
 
 ユーザー承認により、opencodeGO の OpenAI 互換 API を生成モデルとして
 使える。実装は `cloud_client.py` にあり、**既定は無効**（ローカル Ollama
@@ -441,7 +451,7 @@ export RAG_CLOUD_MODEL=deepseek-v4.1-flash
 | `qwen3-embedding-8b` | $0.01 |
 | `gemini-embedding-2` | $0.20 |
 
-同一サブセット（6 ファイル/81 チャンク、`qrels-subset.json` 6 クエリ、
+同一サブセット（6 ファイル／81 チャンク、`qrels-subset.json` 6 クエリ、
 `ingest.iter_chunks` 既定 CHUNK_SIZE、repeat=1）で日本語埋め込みモデルを
 比較した結果は「クラウド/ローカル比較」の表へ集約した。
 
@@ -469,7 +479,7 @@ export RAG_CLOUD_EMBED_MODEL=text-embedding-3-small
 - 既定は埋め込みも生成もローカル Ollama。クラウドを使う場合は
   `RAG_CLOUD_ENABLED=1` を明示する。
 
-### 簡易計測と正式パイプラインの使い分け
+### 簡易計測と正式パイプラインの使い分け [how-to]
 
 | 観点 | 簡易: `cloud_bench.py` | 正式: `cloud_ingest.py` → `evaluate.py` |
 | --- | --- | --- |
@@ -479,12 +489,37 @@ export RAG_CLOUD_EMBED_MODEL=text-embedding-3-small
 | 生成 | `--with-generation` で rerank / 回答（既定は全件、`--generation-max-queries N` で先頭 N 件に制限） | `--with-answer` で回答生成（`RAG_ANSWER_TIMEOUT` が適用） |
 | 用途 | 埋め込みモデルの簡易比較。Token 消費を抑えて確認する | 本番相当の 4 モード評価と退避済み成果物の更新 |
 
-### クラウド/ローカル比較（2026-11-26）
+`--with-generation` の既定は全件で、全量コーパスでの実測は 9 クエリ
+（`rerank_query_count=9`、`rerank_ndcg_at_5=0.8819`、
+`nDCG@10=0.8597`）だった。先頭 N 件だけに絞る場合は
+`--generation-max-queries N` を指定する。
+
+### クラウド生成で回答を作る（--with-answer） [how-to]
+
+`RAG_CLOUD_CHAT_ENABLED=1` は `RAG_CLOUD_ENABLED=1` が前提で、単独では
+設定検証（fail-closed）で停止する。`evaluate.py` の `--with-answer` と
+組み合わせると `query.generate_answer()` の LLM 呼び出しが
+`cloud_client.chat()` へ差し替わり、クラウド生成モデルが回答を生成する
+（タイムアウトは `RAG_ANSWER_TIMEOUT`＝60 秒）。埋め込みもクラウドへ
+切り替わるため、上記の `RAG_CLOUD_EMBED_MODEL` と整合する
+`RAG_VECTOR_SIZE` も設定しておくこと。
+
+```bash
+# 前提: dsh.env のキー読み込みと RAG_CLOUD_EMBED_MODEL は上記設定を再利用
+RAG_CLOUD_ENABLED=1 RAG_CLOUD_CHAT_ENABLED=1 \
+  python3 rag_poc/evaluate.py --with-answer \
+  --output rag_poc/eval-results-cloud-answer.json
+```
+
+生成結果は `answer` / `sources` / `answer_error` / `answer_latency_sec`
+として記録される。失敗は `answer_error` へ分離され検索指標を汚さない。
+
+### クラウド/ローカル比較（2026-11-26） [explanation]
 
 評価章のサブセット・全量の結果を 1 表へ集約した。`hit@1` は query-level、
 `set_recall@1` は集合 recall。ローカルの `recall@1` は `hit@1` に相当する。
 
-| モデル | コーパス | チャンク数 | クエリ数 | hit@1 | set_recall@1 | nDCG@10 | rerank nDCG@5(n=2) | レイテンシ |
+| モデル | コーパス | チャンク数 | クエリ数 | hit@1 | set_recall@1 | nDCG@10 | rerank nDCG@5(n=9) | レイテンシ |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `qwen2.5:3b`（ローカル） | `corpus-subset`（6 ファイル） | 81 | 6 | 0.1667 | — | 0.5384（dense） | — | — |
 | `kun432/cl-nagoya-ruri-base`（ローカル） | `corpus-subset`（6 ファイル） | 81 | 6 | 1.0 | — | 1.0（dense） | — | — |
@@ -492,14 +527,20 @@ export RAG_CLOUD_EMBED_MODEL=text-embedding-3-small
 | `qwen3-embedding-8b`（クラウド） | `corpus-subset`（6 ファイル） | 81 | 6 | 0.8333 | — | 0.8978 | — | 10.04 秒（埋め込み平均） |
 | `qwen2.5:3b`（ローカル） | `passkey-gateway/docs`（88 ファイル） | 2200 | 9 | — | — | 0.0（dense）/ 0.6243（hybrid-rerank） | — | 6.22 秒（hybrid-rerank 平均） |
 | `kun432/cl-nagoya-ruri-base`（ローカル） | `passkey-gateway/docs`（88 ファイル） | 2200 | 9 | — | — | 0.7992（dense）/ 0.7542（hybrid-rerank） | — | 3.32 秒（hybrid-rerank 平均） |
-| `text-embedding-3-small`（クラウド） | `passkey-gateway/docs`（87 ファイル） | 214 | 9 | 0.7778 | 0.7222 | 0.9034 | 1.0 | 14.0 秒（埋め込み平均） |
+| `text-embedding-3-small`（クラウド） | `passkey-gateway/docs`（91 ファイル） | 1380 | 9 | 0.7778 | 0.7222 | 0.8597 | 0.8819 | 42.3 秒（埋め込み平均） |
 | `text-embedding-3-small`（クラウド・Qdrant 正式） | `passkey-gateway/docs`（87 ファイル） | 214 | 9 | — | — | 0.8681（hybrid） | — | — |
 
 `—` は当該構成で未計測の指標。レイテンシは計測対象が異なる（クラウドは埋め込み平均、
-ローカルは hybrid-rerank の検索平均）ため単純比較しないこと。
-rerank nDCG@5 は 2 クエリのみの計測値。
+ローカルは hybrid-rerank の検索平均）ため単純比較しないこと。さらに計測回数も
+クラウドは `repeat=1`、ローカル全量は `RAG_EVAL_REPEAT=10`
+（ウォームアップ 1 回＋10 回計測＝60 サンプル）で混在している。
+rerank nDCG@5 は 9 クエリの計測値（`rerank_query_count=9`）。
+旧 `nDCG@10=0.9034` は全順位ベースで現行定義（上位10件・ファイル1回）と
+直接比較できない。全量クラウドは 91 ファイル／1380 チャンク
+（`ingest.iter_chunks` 委譲後）、全量 Ruri は 88 ファイル／2200 チャンクで
+コーパスとチャンク条件が異なるため、両者の nDCG に優劣は付けられない。
 
-## 既知の制限
+## 既知の制限 [explanation]
 
 - `keyword` は日本語を空白・記号で分割するため、「起動トークン」の
   ような複合語の部分一致が弱い。形態素解析はしていない。
@@ -514,7 +555,7 @@ rerank nDCG@5 は 2 クエリのみの計測値。
   `false` なら元スコア。`base_score` に再ランク前の値を残す。
 - `ingest.py` は既定で毎回すべてを再埋め込み・再投入する。
   `RAG_INGEST_RESUME=1` でチェックポイントから再開できる。
-  現状は 88 ファイル・2200 チャンク（全量）で数分かかる。
+  現状は 88 ファイル／2200 チャンク（全量）で数分かかる。
 - Qdrant のベクトル次元は `RAG_VECTOR_SIZE`（既定 2048、`qwen2.5:3b` の
   実測値）。モデルを変更する場合は同値を変更しコレクションを作り直す。
   point ID は blake2b 64bit のため、旧 ID のポイントが残る場合は
@@ -528,19 +569,19 @@ rerank nDCG@5 は 2 クエリのみの計測値。
   `text` に対する any-match で、分母となる取得深度が異なる。
   `avg_distinct_source_ratio_at3` は出典の多様性であり検索品質ではない。
   レイテンシは `RAG_EVAL_REPEAT`（既定 1）回の計測で、1 回のときは
-  ウォームアップなし（実運用に近い）。2 以上なら warmup 1 回＋N 回の
+  ウォームアップなし（実運用に近い）。2 以上ならウォームアップ 1 回＋N 回の
   `avg` / `median` / `min` / `max` / `stdev` / `samples` /
   `cold_latency_sec` を記録する。`hybrid-rerank` は CPU の `qwen2.5:3b` が
   上位 5 件分の JSON を生成するため他モードより遅い。
   性能表の値は `RAG_EVAL_REPEAT=10`（60サンプル）で再計測済み。
-- 簡易評価は 6 ファイル/81 チャンクのサブセット・6 クエリで実施。
-  本番の 88 ファイル・2200 チャンクや一般 RAG 方式の比較ではない。
+- 簡易評価は 6 ファイル／81 チャンクのサブセット・6 クエリで実施。
+  本番の 88 ファイル／2200 チャンクや一般 RAG 方式の比較ではない。
   held-out 評価は 9 クエリの正解ラベル付きだがドメイン内のみで、
   一般化には別コーパスでの検証が必要。
 - チャンク本文は `CHUNK_SIZE` 以内だが、見出し行を先頭に付けるため
   `payload.text` 全体は見出し長だけ長くなる。
 
-## テスト
+## テスト [how-to]
 
 ```bash
 python3 rag_poc/test_rag.py
@@ -560,7 +601,7 @@ Rust 未ビルドを green で通さないためのゲートである。なお
 ディレクトリ名にハイフンがあるため `python3 -m unittest` の
 ディスカバリは使えず、直接実行する。
 
-## モデル比較実験（2026-11-26 時点）
+## モデル比較実験（2026-11-26 時点） [how-to]
 
 2026-11-26 時点のベースラインでは `dense` の recall@10 が 0.0 で、
 日本語技術文書に対する汎用埋め込みの限界が見えた。候補モデルに
@@ -594,7 +635,7 @@ cp rag_poc/eval-results.json \
 既定の 2048 は `qwen2.5:3b` の値なので、そのまま使うと `ingest.py` は
 次元不一致で停止する。`ensure_collection()` は既存コレクションを
 作り直さないので、比較用は専用名（`rag_poc_qwen25_7b`）へ切り替え、
-`rag_poc_full`（88 ファイル・2200 チャンク）のベースラインは残す。
+`rag_poc_full`（88 ファイル／2200 チャンク）のベースラインは残す。
 回答生成と再ランクの `CHAT_MODEL` は既定のまま変えず、
 埋め込みモデルだけを比較対象にする。
 
@@ -609,7 +650,7 @@ cp rag_poc/eval-results.json \
 system / user プロンプト）、計測回数（`RAG_EVAL_REPEAT`）を揃える。
 1 つでも変わると既存の 5.38 秒などの数値と直接比較できない。
 
-### Ruri での再現手順
+### Ruri での再現手順 [how-to]
 
 日本語特化モデル `kun432/cl-nagoya-ruri-base` でサブセットの結果を
 再現する手順。Ruri は 512 トークン context のため
@@ -652,7 +693,7 @@ cp rag_poc/eval-results.json rag_poc/eval-results-ruri-subset.json
 `--qrels rag_poc/qrels.json` に切り替える（結果は
 `rag_poc/eval-results-ruri-full.json` に退避済み）。
 
-## 別ドメインベンチマーク（2026-11-26 時点）
+## 別ドメインベンチマーク（2026-11-26 時点） [how-to]
 
 2026-11-26 時点のベースラインは簡易 6 クエリ＋held-out 9 クエリの
 計 15 クエリで、いずれも `passkey-gateway/docs` のドメイン内コーパスと
@@ -689,7 +730,7 @@ cp rag_poc/eval-results.json rag_poc/eval-results-other-domain.json
 `evaluate.py` は同じ `config.CORPUS_DIR` を参照する。相対パスは
 リポジトリルート基準で解決されるため cwd に依存しない。
 `RAG_COLLECTION` は専用名（`rag_poc_other_domain`）にして、
-`rag_poc_full`（88 ファイル・2200 チャンク）のベースラインと
+`rag_poc_full`（88 ファイル／2200 チャンク）のベースラインと
 旧ポイントが混在しないようにする。`RAG_TOP_K` と
 `RAG_RERANK_MAX_DOCS` はベースラインと揃え、4 モードを比較する。
 出力 JSON の `corpus_file_count` / `corpus_sha256` が旧コーパスと
@@ -703,7 +744,7 @@ cp rag_poc/eval-results.json rag_poc/eval-results-other-domain.json
 `evaluate.py` の preflight は `RAG_CORPUS_DIR` 配下に各
 `relevant_sources` が実在するかを確認する。
 
-### 実測結果（2026-11-26、ADR 6 ファイル / 50 チャンク）
+### 実測結果（2026-11-26、ADR 6 ファイル／50 チャンク） [explanation]
 
 | モード | recall@10 | nDCG@10 |
 | --- | --- | --- |
@@ -723,11 +764,11 @@ cp rag_poc/eval-results.json rag_poc/eval-results-other-domain.json
 「ドメイン内 15 クエリでは見えなかった順位の入れ替わり」を示す
 仮説であり、一般の RAG 方式の優劣を確定させるものではない。
 
-## 入力と設定の検証（2026-11-26 時点）
+## 入力と設定の検証（2026-11-26 時点） [reference]
 
 以下は 2026-11-26 時点の実装を前提にした確認項目。
 
-### 入力長とプロンプト
+### 入力長とプロンプト [reference]
 
 - `RAG_QUESTION_MAX_CHARS`（既定 2000）は `config.validate_question_length()`
   で共通検証され、`query.py` の `main()` と `search()` の両方で適用される。
@@ -737,14 +778,14 @@ cp rag_poc/eval-results.json rag_poc/eval-results-other-domain.json
   指示は system ロールに固定し、ユーザーロールにはタグ付きデータ
   だけを置く。タグ内の文章を指示として扱わない設計。
 
-### 警告のマスキング
+### 警告のマスキング [reference]
 
 - 警告・エラーは `config.mask_secrets()` で URL / 認証情報 / IP /
   パスを `<masked>` に置換して stderr へ出力する。stdout の JSON は
   汚さない。rerank の JSON 抽出失敗では本文を出さず、
   `reason` / `len` / `sha256_12` だけを残す。
 
-### 接続先
+### 接続先 [reference]
 
 - `OLLAMA_URL`（既定 `http://127.0.0.1:11434`）と `QDRANT_URL`
   （既定 `http://127.0.0.1:6333`）は既定でループバック
@@ -756,7 +797,7 @@ cp rag_poc/eval-results.json rag_poc/eval-results-other-domain.json
   そのホストへ送信される。外部送信にあたるため、信頼できるホスト
   以外への変更は避ける。
 
-### 再開とコレクション
+### 再開とコレクション [reference]
 
 - `RAG_INGEST_RESUME=1` のチェックポイント
   `.ingest-checkpoint.json` は `collection` / `vector_size` /
@@ -765,9 +806,9 @@ cp rag_poc/eval-results.json rag_poc/eval-results-other-domain.json
   最初から投入される。コレクションの新規作成時も無効になる。
 - point ID の blake2b 64bit 化で旧 ID が残る場合は `ingest.py` の
   preflight が検出して停止する。旧コレクションを削除してから
-  再投入する（「既知の制限」も参照）。
+  再投入する（[既知の制限](#既知の制限-explanation)も参照）。
 
-## 成果物一覧
+## 成果物一覧 [reference]
 
 評価で生成・利用する JSON の一覧。いずれも `rag_poc/` 配下に置く。
 
@@ -781,9 +822,9 @@ cp rag_poc/eval-results.json rag_poc/eval-results-other-domain.json
 | `eval-results-other-domain.json` | `python3 rag_poc/evaluate.py --qrels rag_poc/qrels-alt.json`（`RAG_CORPUS_DIR=rag_poc/corpus-alt` / `RAG_COLLECTION=rag_poc_other_domain`） | 退避済み。`evaluate.py` の直接出力先ではないため上書きされない |
 | `eval-results-ruri-subset.json` | `python3 rag_poc/evaluate.py --qrels rag_poc/qrels-subset.json`（`RAG_COLLECTION=rag_poc_ruri`） | 退避済み。再計測時は `eval-results.json` から `cp` で更新する |
 | `eval-results-ruri-full.json` | `python3 rag_poc/evaluate.py --qrels rag_poc/qrels.json`（`RAG_CORPUS_DIR=passkey-gateway/docs` / `RAG_COLLECTION=rag_poc_ruri_full`） | 退避済み。再計測時は `eval-results.json` から `cp` で更新する |
-| `eval-results-cloud-full.json` | `RAG_CLOUD_ENABLED=1 python3 rag_poc/cloud_bench.py --corpus ../passkey-gateway/docs --qrels rag_poc/qrels.json --output rag_poc/eval-results-cloud-full.json --with-generation` | 退避済み（注意はクラウド章冒頭の警告を参照） |
+| `eval-results-cloud-full.json` | `RAG_CLOUD_ENABLED=1 python3 rag_poc/cloud_bench.py --corpus ../passkey-gateway/docs --qrels rag_poc/qrels.json --output rag_poc/eval-results-cloud-full.json --with-generation` | 退避済み（注意は[クラウド章冒頭の警告](#クラウドモデルopencodego-how-to)を参照） |
 | `eval-results-cloud-pipeline.json` | `RAG_CLOUD_ENABLED=1 RAG_VECTOR_SIZE=1536 RAG_COLLECTION=rag_poc_cloud_full python3 rag_poc/evaluate.py`（投入は `cloud_ingest.py`） | 退避済み。4モードの正式パイプライン評価 |
-| `eval-results-cloud-subset.json` | `RAG_CLOUD_ENABLED=1 RAG_CLOUD_EMBED_MODEL=text-embedding-3-small python3 rag_poc/cloud_bench.py --corpus rag_poc/corpus-subset --qrels rag_poc/qrels-subset.json --output rag_poc/eval-results-cloud-subset.json`（当時は `CHUNK_SIZE=300`） | 退避済み（クラウド章冒頭の警告を参照） |
+| `eval-results-cloud-subset.json` | `RAG_CLOUD_ENABLED=1 RAG_CLOUD_EMBED_MODEL=text-embedding-3-small python3 rag_poc/cloud_bench.py --corpus rag_poc/corpus-subset --qrels rag_poc/qrels-subset.json --output rag_poc/eval-results-cloud-subset.json`（当時は `CHUNK_SIZE=300`） | 退避済み（[クラウド章冒頭の警告](#クラウドモデルopencodego-how-to)を参照） |
 | `eval-results-cloud-small-subset.json` | 同上を `ingest.iter_chunks` 既定の `CHUNK_SIZE` で計測し `--output rag_poc/eval-results-cloud-small-subset.json` | 退避済み。`text-embedding-3-small` のサブセット結果 |
 | `eval-results-cloud-qwen3-subset.json` | 同上を `RAG_CLOUD_EMBED_MODEL=qwen3-embedding-8b` で計測し `--output rag_poc/eval-results-cloud-qwen3-subset.json` | 退避済み。`qwen3-embedding-8b` のサブセット結果 |
 | `embedding-comparison.json` | `python3 rag_poc/compare_embeddings.py` | 実行ごとに上書き。必要なら `cp` で退避する |

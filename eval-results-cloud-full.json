@@ -1,75 +1,73 @@
 {
-  "generated_at": "2026-11-26T10:38:09.069219+00:00",
+  "generated_at": "2026-11-26T11:51:13.344321+00:00",
   "model": "text-embedding-3-small",
   "generation_model": "deepseek-v4.1-flash",
   "corpus": "docs",
-  "corpus_file_count": 87,
-  "chunk_count": 214,
+  "corpus_file_count": 91,
+  "chunk_count": 1380,
   "qrels_label": "qrels.json",
-  "chunk_size": 300,
-  "repeat": 2,
+  "chunk_size": 800,
+  "repeat": 1,
   "latency_runs": [
     {
-      "embedding_sec": 14.516219,
-      "search_sec": 0.413466
-    },
-    {
-      "embedding_sec": 13.517141,
-      "search_sec": 0.423263
+      "embedding_sec": 42.259882,
+      "search_sec": 2.142106
     }
   ],
   "summary": {
     "queries": 9,
-    "repeat": 2,
+    "repeat": 1,
     "hit_at_1": 0.7778,
     "hit_at_10": 1.0,
     "recall_at_1": 0.7222,
     "recall_at_10": 1.0,
     "set_recall_at_1": 0.7222,
     "set_recall_at_10": 1.0,
-    "ndcg_at_10": 0.9034,
-    "embedding_latency_sec": 14.01668,
-    "search_latency_sec": 0.418364,
-    "total_search_latency_sec": 14.435044,
-    "rerank_query_count": 2,
-    "generation_latency_sec": 10.999122,
-    "rerank_ndcg_at_5": 1.0
+    "ndcg_at_10": 0.8597,
+    "embedding_latency_sec": 42.259882,
+    "search_latency_sec": 2.142106,
+    "total_search_latency_sec": 44.401988,
+    "rerank_query_count": 9,
+    "estimated_cost_usd": 0.0,
+    "generation_latency_sec": 11.859436,
+    "rerank_ndcg_at_5": 0.8819
   },
   "results": [
     {
       "id": "h01-tooling-research",
-      "top_source": "zed-setup-2026-11-10.md",
+      "top_source": "tooling-research-2026-11-09.md",
       "relevant_sources": [
         "tooling-research-2026-11-09.md"
       ],
       "hit_at": {
-        "1": 0.0,
+        "1": 1.0,
         "3": 1.0,
         "5": 1.0,
         "10": 1.0
       },
       "set_recall_at": {
-        "1": 0.0,
+        "1": 1.0,
         "3": 1.0,
         "5": 1.0,
         "10": 1.0
       },
       "recall_at": {
-        "1": 0.0,
+        "1": 1.0,
         "3": 1.0,
         "5": 1.0,
         "10": 1.0
       },
-      "ndcg_at_10": 0.5,
-      "rerank_reply": "{\"rank\": [5, 2, 4, 3, 1]}",
+      "ndcg_at_10": 1.0,
+      "rerank_reply": "{\"rank\":[1,3,2,5,4]}",
       "rerank_candidates": [
+        "tooling-research-2026-11-09.md",
+        "dependency-vulnerability-check-2026-11-09.md",
+        "current-state-2026-11-08.md",
         "zed-setup-2026-11-10.md",
-        "dsh-opencode-gap-2026-11-11.md",
-        "zed-setup-2026-11-10.md",
-        "dsh-opencode-gap-2026-11-11.md",
-        "dsh-opencode-gap-2026-11-11.md"
+        "jarvis-generalization-proposal.md"
       ],
-      "answer": "参考文書の範囲では、次のように整理できます。\n\n**Zed**\n- 2026-11-10 に Zed 1.27.0 を Kubuntu 2026.04 / KDE Plasma 6 / Wayland でセットアップ。\n- `~<masked>` に外観・フォント・保存/整形・パネル・Git・ターミナル・拡張・DSH ACP 連携を適用。\n- DSH ACP は `initialize` → `session/new` → `session/prompt` まで実測成功（`OK` 応答、約5秒、`stopReason: end_turn`）。\n- VSCode 風レイアウト（左 Project Panel など）を採用。GUI 表示も XDG Portal のスクリーンショットで確認済み。\n- 一次資料は `work<masked>`、`work<masked>`。\n\n**DSH と opencode の比較（2026-11-11 時点）**\n- 対象: DSH `0.2.2-rc.1`、opencode `v2.2.6`（最新 `v2.2.7` / 2026-11-10）。\n- 結論は「プラグインで大体なんとかなるが、置き換え不要なものが多い」。\n- opencode v2.2.6 は DSH の主要機能のうち Goal・Schedule・Skills・Plan・MCP resources・背景 subagent/shell・Artifacts・worktree・TUI/GUI プラグイン SDK を標準搭載。\n- 差分が残るのは限定的。\n\n**opencode プラグイン**\n- `open-artisan`: 8フェーズ状態機械＋独立 reviewer＋品質ゲート。2026-06 更新で v1 時代の可能性、v2 実機確認が必要。\n- `flow-opencode`: skills-first、durable state、検証/レビューゲート。2026-11 更新。\n- `opencode-easy-workflow`: Kanban 型。2026-04 更新で v1 の可能性。\n- `opencode-cortex-mode`: 単一ターンで TypeScript ワークフロー、「Deep"
+      "rerank_ndcg_at_5": 1.0,
+      "answer": "参考文書に基づく要点のみ（2026-11-09 時点）:\n\n| ツール | バージョン | 状況 |\n|---|---|---|\n| DSH | 0.2.2-rc.1（npm） | 最新。AGENTS.md 階層＋MCP＋ACP 対応（budget 65KB/chain、ACP は workspace 1つ・MCP tools のみ）。ACP は initialize→session/new→session/prompt まで実測成功（実モデル応答 約5秒、stopReason: end_t…） |\n| opencode | ローカル v2.2.6 / GitHub latest v1.19.5 | **v2 系は別系統**で v1 系 advisory の対象外、更新は別途追跡。AGENTS.md/Claude 互換、permission allow<masked>、`opencode acp` |\n| VSCode | 1.145.2 | 最新。指示ファイルは harness 依存、`.vscode/mcp.json`/`.mcp.json`、applyTo パターン |\n| Zed | 未導入（最新 v1.27.0） | 本機では未使用。ACP External Agents・Skills(`SKILL.md`)・`context_servers` MCP・指示優先順位。設定/キーマップ検証 0 errors、起動ログにパースエラーなし、拡張 9件自動インストール（installed 10件、html 含む）、GUI 表示確認済み |\n| Muse | 2026-09〜11 公開情報 | アプリ側に MCP 設定（記述は途切れ） |\n\n- 交換可能なもの: エージェントランタイム（OpenCode → DSH → 将来）、IDE/クライアント（code-server → Zed → DSH Web → Muse）、LLM プロバイダ（DSH/opencode 側設定）。\n- 補足: Tailscale（node-a/trial compose）は未使用構成、使うなら digest pin 推奨。"
     },
     {
       "id": "h02-plugin-markets",
@@ -96,16 +94,16 @@
         "10": 1.0
       },
       "ndcg_at_10": 1.0,
-      "rerank_reply": "{\"rank\":[1,2]}",
+      "rerank_reply": "{\"rank\":[2,3,4,5,1]}",
       "rerank_candidates": [
         "dsh-plugin-markets-research-2026-11-26.md",
         "dsh-plugin-markets-research-2026-11-26.md",
-        "network-investigation-2026-11-21.md",
-        "battery-drain-dsh-mobile-investigation-2026-11-21.md",
-        "STATUS.md"
+        "dsh-plugin-markets-research-2026-11-26.md",
+        "dsh-plugin-markets-research-2026-11-26.md",
+        "dsh-plugin-markets-research-2026-11-26.md"
       ],
       "rerank_ndcg_at_5": 1.0,
-      "answer": "参考文書の該当レポートは途中で切れているため、確認できる範囲のみです。\n\n- 調査対象は DSH の Discover タブ（Plugins → Discover → Add index source）で読める `format 1` インデックスのうち、コミュニティで著名なもの。\n- 調査方法は `swarm-research`（web / local）を無制限プロファイルで実施。\n- 代表例として **awesome-dsh-plugin** を確認。ライセンスは **CC0-1.0** で、`index.json`、GitHub リポジトリ、`market-index.mjs` が根拠として挙げられている。\n- その他の format 1 候補として **Alice39s/agent-stash**（11件、追加可・小規模／個人用）が挙げられている。\n- `brokep/grok-bots` 以降の記載は文書が途切れており不明。\n\n除外範囲は「プラグイン単体の紹介」と「format 1 でない独自カタログの詳細な中身」です。"
+      "answer": "## DSH プラグインマーケット index 調査結果（要約）\n\n- **DSH 公式のプラグインインデックスは存在しない。** 公式が提供するのは format 1 の仕様・バリデーター・リファレンスジェネレーターのみ。Discover はユーザーが追加したインデックスソースだけを表示する。\n- **現在の環境に登録済みのインデックスは 1 件のみ**：`<masked>\n  - Open Plugin Market（`polang233/dsh-plugin-index`）のミラー\n  - `<masked> と SHA-256 が一致（バイト単位で同一）\n  - format 1、収録数 **1,487 プラグイン**（2026-11-26T01:12:01+09:00 時点）\n  - HTTP 200 / `application/json; charset=utf-8` / 2,385,077 bytes / GPL-3.0\n- **著名な代替候補**：`awesome-dsh-plugin.com`（6,885 件）\n- **追加不可／要変換とされたもの**\n  - `LivXue/dsh-plugin-shop`：`schemaVersion: 5` のハッシュ付きマニフェストで `plugins` がオブジェクト。`format: 1` ではない\n  - `zhu1090093659/dsh-community-plugins`：トップレベルが配列。format 1 生成物への変換が必要\n  - `ymck-x/dsh-plugin-index`：統計＋分片方式で独自 UI を持つ DSH プラグイン。Discover 用ではない"
     },
     {
       "id": "h03-okf-v03",
@@ -132,42 +130,52 @@
         "10": 1.0
       },
       "ndcg_at_10": 1.0,
-      "rerank_reply": "{\"rank\":[1,2,3]}",
+      "rerank_reply": "{\"rank\":[2,1,4,3,5]}",
       "rerank_candidates": [
         "okf-v03-upgrade-proposal-2026-11-25.md",
         "okf-v03-upgrade-proposal-2026-11-25.md",
         "okf-v03-upgrade-proposal-2026-11-25.md",
-        "rag-methods-selection-2026-11-26.md",
+        "okf-v03-upgrade-proposal-2026-11-25.md",
         "rag-methods-selection-2026-11-26.md"
       ],
       "rerank_ndcg_at_5": 1.0,
-      "answer": "参考文書のメタデータは以下のとおりです。\n\n- **type**: Reference\n- **title**: OKF v0.3 移行に向けた更新提案書\n- **description**: R1-spec の 10 件の指摘を反映した OKF v0.3 移行の更新提案。\n- **tags**: okf / migration / proposal\n- **generated**: by: lead/dsh、at: 2026-11-25T19:31:00+09:00\n- **status**: draft\n\n補足: 対象は OKF スキル、検証スクリプト、グローバル AGENTS.md §8 の 3 点です。"
+      "answer": "参考文書におけるメタデータの要点は以下です。\n\n- 提案書の front matter は `type: Reference`、`title`、`description`、`tags`（okf / migration / proposal）、`generated`（by: lead/dsh、at: 2026-11-25T19:31:00+09:00）、`status: draft`。\n- OKF は検索方式を規定せず、メタデータは候補選択の材料にすぎない。\n- RAG では `type` をフィルタ、`description` をスニペット、`tags` を候補絞り込み、`sources[].id` を出典表示に使えるが、回答根拠は本文チャンクを開いて確認する必要がある。"
     },
     {
       "id": "h04-home-consolidation",
-      "top_source": "backup-restore.md",
+      "top_source": "dsh-home-consolidation-prep-2026-11-25.md",
       "relevant_sources": [
         "dsh-home-consolidation-prep-2026-11-25.md"
       ],
       "hit_at": {
-        "1": 0.0,
+        "1": 1.0,
         "3": 1.0,
         "5": 1.0,
         "10": 1.0
       },
       "set_recall_at": {
-        "1": 0.0,
+        "1": 1.0,
         "3": 1.0,
         "5": 1.0,
         "10": 1.0
       },
       "recall_at": {
-        "1": 0.0,
+        "1": 1.0,
         "3": 1.0,
         "5": 1.0,
         "10": 1.0
       },
-      "ndcg_at_10": 0.6309
+      "ndcg_at_10": 1.0,
+      "rerank_reply": "{\"rank\":[1,2,5,4,3]}",
+      "rerank_candidates": [
+        "dsh-home-consolidation-prep-2026-11-25.md",
+        "dsh-home-consolidation-prep-2026-11-25.md",
+        "dsh-home-consolidation-prep-2026-11-25.md",
+        "dsh-home-consolidation-prep-2026-11-25.md",
+        "dsh-workspace-json-merge-2026-11-25.md"
+      ],
+      "rerank_ndcg_at_5": 1.0,
+      "answer": "参考文書に基づく要点：\n\n- 統合準備の rsync は `--ignore-existing` 付きで、`~/.dsh-agentrouter/` から `~/.dsh/` へ以下をコピー：\n  - `sessions/`\n  - `storages/`\n  - `attachments/`\n  - `dsh-mobile-maxxing/`\n- バックアップはスナップショット先を `~/.dsh-migration-backup-path` に永続化し、ロールバック時にそのパスを読んで `~/.dsh-agentrouter/` と `~/.dsh/` を rsync で復元。\n- ロールバック順は「サービス停止 → home 復元 → unit 復元 → daemon-reload → 起動」。\n- 注意点として、セッション実体の rsync に加えて `storages/workspace.json` のマージが必須。\n- 記載の手順はドラフト・未実行。"
     },
     {
       "id": "h05-fs-ext4",
@@ -193,7 +201,17 @@
         "5": 1.0,
         "10": 1.0
       },
-      "ndcg_at_10": 1.0
+      "ndcg_at_10": 1.0,
+      "rerank_reply": "{\"rank\":[1,3,2,4,5]}",
+      "rerank_candidates": [
+        "fs-selection-ext4-report-20261123.md",
+        "timeshift-decision.md",
+        "fs-selection-ext4-report-20261123.md",
+        "backup-restore.md",
+        "DECISIONS.md"
+      ],
+      "rerank_ndcg_at_5": 1.0,
+      "answer": "**結論：ext4 を維持**。変更根拠はなく、XFS<masked> はコスト不相応。btrfs は in-place 変換可能だが、単一ディスクでは利点が限定的で 604 GiB の変換リスクを正当化できない。\n\n優先は **Timeshift バックアップの実効性改善**。\n\n- A：外付け ext4 化は**破壊的**（要バックアップ・承認）\n- B：内蔵 ext4 追加は**破壊的・危険度高**\n- C：設定＋会話履歴＋Pocket ID DB のバックアップと OS 再インストールで復旧。**非破壊だが全体ロールバック不可**\n- D：ext4 イメージのループバックは**非推奨**\n\n未対応として、外付け NTFS 領域への**オフディスク複製は未実施**。また「Timeshift は Device: Not Selected（0件）」との記載がある一方、D4 では `<masked>`(ext4) に週次2世代＋オフサイト日次（KEEP=10）で**稼働中・復元ドリル済み**とあり、最新状態の確認が必要。"
     },
     {
       "id": "h06-session-cache-adr",
@@ -220,59 +238,89 @@
         "5": 1.0,
         "10": 1.0
       },
-      "ndcg_at_10": 1.0
+      "ndcg_at_10": 0.9197,
+      "rerank_reply": "{\"rank\":[1,4,5,3,2]}",
+      "rerank_candidates": [
+        "session-local-cache-adr-2026-11-22.md",
+        "mobile-storage-utilization-research-2026-11-22.md",
+        "session-local-cache-adr-2026-11-20.md",
+        "session-local-cache-adr-2026-11-22.md",
+        "session-cache-verification-2026-11-22.md"
+      ],
+      "rerank_ndcg_at_5": 0.9197,
+      "answer": "**決定（2026-11-22 ADR、11/20 版を置き換え）**\n\n- 11/20 のローカルキャッシュ方式は撤回。実装がビルド済み `lib/client.js` に反映されておらず、反映時も `refreshList()` が無条件に `remote.session.list({})` を呼び、`doOpen()` も follow スナップショットで上書きされるため往復・解決時刻とも改善しないと実証された。平文保存・TTL/容量上限/LRU 不在も問題視。\n- 代わりに、予約済みの `SessionListRequest.cursor` を用いた **差分取得** を推奨方針とする。会話履歴の差分化は protocol 変更を伴うため第二段。\n- 前提として Host 側 protocol 変更が必須：wire 型に `cursor?` は存在するが Host の `list(_request)` は無視しており、「どこまで見たか」を永続化して差分取得する経路は現状無い。`session.follow` にも cursor/throughSeq は無い。\n- 受け入れ条件：cursor 指定で差分行のみ返す／不正 cursor は full list にフォールバックし欠落しない／新規はフル取得・既知は再取得しない／呼出回数・転送量を before/after で計測し削減を示す／先描画ハック無しで体感改善を確認。"
     },
     {
       "id": "h07-network-investigation",
-      "top_source": "network-investigation-2026-11-21.md",
+      "top_source": "tailscale-exit-study.md",
       "relevant_sources": [
         "network-investigation-2026-11-21.md"
       ],
       "hit_at": {
-        "1": 1.0,
-        "3": 1.0,
+        "1": 0.0,
+        "3": 0.0,
         "5": 1.0,
         "10": 1.0
       },
       "set_recall_at": {
-        "1": 1.0,
-        "3": 1.0,
+        "1": 0.0,
+        "3": 0.0,
         "5": 1.0,
         "10": 1.0
       },
       "recall_at": {
-        "1": 1.0,
-        "3": 1.0,
+        "1": 0.0,
+        "3": 0.0,
         "5": 1.0,
         "10": 1.0
       },
-      "ndcg_at_10": 1.0
+      "ndcg_at_10": 0.3869,
+      "rerank_reply": "{\"rank\":[3,2,1,4,5]}",
+      "rerank_candidates": [
+        "tailscale-exit-study.md",
+        "current-state-2026-11-08.md",
+        "entry-plan.md",
+        "remote-access-and-muse-plan.md",
+        "network-investigation-2026-11-21.md"
+      ],
+      "rerank_ndcg_at_5": 0.3869,
+      "answer": "参考文書に基づく「Tailscale 到達性」の調査結果は以下です。\n\n- `ts.net` は公共リゾルバでは **NXDOMAIN**。Tailscale DNS（MagicDNS）専用で、ローカルDNSでの上書きは不可。\n- 既存 Serve は **443/tcp のみ**。`/`→3080、`/agent`→3081。\n- `:8080` は python3 が使用中のため**触らない**。\n- 証明書は `~<masked>` の ts.net 証明書（**2027-01-30 期限**）。\n- 独自ドメインは未所有。\n- 本環境は **docomo HOME 5G で IPv4 CGNAT の可能性大** → 自前ポート開放は非現実的。\n- Tailscale 脱却は技術的には可能だが、**パスキーの RP ID 変更（全再登録）が必須**。リモート維持には代替トンネル（Cloudflare Tunnel 等）または VPN(VPS) が必要。\n\n今回の調査では設定変更・プロセス停止・実機操作は行っていません。"
     },
     {
       "id": "h08-health-report",
-      "top_source": "system-health-anomalies-2026-11-09.md",
+      "top_source": "verification-report-2026-11-09.md",
       "relevant_sources": [
         "system-health-anomalies-2026-11-09.md"
       ],
       "hit_at": {
-        "1": 1.0,
-        "3": 1.0,
+        "1": 0.0,
+        "3": 0.0,
         "5": 1.0,
         "10": 1.0
       },
       "set_recall_at": {
-        "1": 1.0,
-        "3": 1.0,
+        "1": 0.0,
+        "3": 0.0,
         "5": 1.0,
         "10": 1.0
       },
       "recall_at": {
-        "1": 1.0,
-        "3": 1.0,
+        "1": 0.0,
+        "3": 0.0,
         "5": 1.0,
         "10": 1.0
       },
-      "ndcg_at_10": 1.0
+      "ndcg_at_10": 0.4307,
+      "rerank_reply": "{\"rank\": [2, 4, 5, 3, 1]}",
+      "rerank_candidates": [
+        "verification-report-2026-11-09.md",
+        "current-state-2026-11-08.md",
+        "STATUS.md",
+        "system-health-anomalies-2026-11-09.md",
+        "system-health-anomalies-2026-11-09.md"
+      ],
+      "rerank_ndcg_at_5": 0.6309,
+      "answer": "## HDD `<masked>` の pending セクター\n\n- **デバイス**: TOSHIBA DT01ACA100 931.5G（`<masked>`、`sda1` は未マウント・NTFS/ラベル「新加卷」、fstab登録なし）\n- **検出内容**: 未読（pending）セクター**8件**。smartd が「8 Currently unreadable (pending) sectors」を24hで**51回**警告（健康点検表示は alerts=48）\n- **意味**: 読み出し不能セクターが代替処理待ちで存在。**劣化のサイン**\n- **影響**: 現在 `sda1` は未使用のため直ちの実害なし。ただし使い続ける場合はリスク。重要データ非配置を推奨\n- **確認コマンド**:\n  ```bash\n  sudo <masked> -a <masked>   # Reallocated<masked>, 温度, 時間\n  sudo <masked> -t long <masked>\n  ```\n\n## 健康点検・監視の状況\n\n- 健康点検に `disk pending sectors` と `boot update` を追加 → **SUMMARY: warn=2 fail=0**（別表示では warn=6 fail=0）\n- 他のWARN: serve mappings 4件、boot update 失敗（Warp aptリポジトリのRelease.gpg/鍵エラーで `apt update` が status=1。鍵再導入かリポジトリ無効化で解消）、security scan、journal size 3.9G（vacuum推奨）、failed system units 1件\n- watchdog失敗は11/8 16:35–44の移行作業中のみで現在正常。failed user units/amd_pstate等は無害\n- 詳細: `docs/system-health-anomalies-2026-11-09.md`"
     },
     {
       "id": "h09-container-tools",
@@ -298,19 +346,51 @@
         "5": 1.0,
         "10": 1.0
       },
-      "ndcg_at_10": 1.0
+      "ndcg_at_10": 1.0,
+      "rerank_reply": "{\"rank\":[2,1,4,3,5]}",
+      "rerank_candidates": [
+        "container-tools-setup-2026-11-21.md",
+        "container-tools-setup-2026-11-21.md",
+        "docker-group-separation.md",
+        "container-tools-setup-2026-11-21.md",
+        "sudoers-proposal.md"
+      ],
+      "rerank_ndcg_at_5": 1.0,
+      "answer": "参考文書に基づく要点は以下です。\n\n- **権限の性質**: `kiri` グループは `docker` グループと同様に **root 同等の権限**を持ちます。`docker` グループ所属も Docker API 経由で任意操作が可能なため実質 root 相当で、sudo を絞っても Docker 権限が残る点は別途検討が必要です。\n- **所属状況**: ユーザー `koppe` は `kiri`（gid 980）と `docker`（gid 129、既存）の両方に所属しています。\n- **ソケット分離**: 既存 Docker は `<masked>`（root:docker）、Kiri は `<masked>`（root:kiri）で分離されています。\n- **サービス状態**: `kiri.service` は enabled かつ active。GUI（`kiri ui`）は未起動で、エンジン設定は完了済みです。\n- **更新方法**: Kiri の apt リポジトリは未登録のため、更新時は手動で `.deb` を導入します。"
     }
   ],
+  "metric_definition": {
+    "ndcg_at_10": "上位10件のみを採用し、同一ファイルは最上位の1回だけ計上（gain=1 / discount=log2(rank+1)、IDCG は relevant_sources 数）。evaluate.py 準拠。",
+    "hit_at": "query-level hit@k（上位 k に正解が1件でもあれば1）。evaluate.py 準拠。",
+    "set_recall_at": "集合 recall（上位 k の正解数 / relevant_sources 数）。recall_at は互換キーとして同一値。",
+    "rerank_ndcg_at_5": "生成モデルが返した rank の上位5件、qrels の relevant_sources を母集団。",
+    "legacy_ndcg_full_ranking": true,
+    "legacy_ndcg_at_10": "旧値 0.9034 は全順位ベース（現行定義と直接比較不可）。"
+  },
+  "legacy_ndcg_full_ranking": true,
   "notes": [
     "埋め込みは opencodeGO の OpenAI 互換 /embeddings API を使用。",
     "スコアはコサイン類似度、ファイル単位の best score でランク付け。",
-    "nDCG@10 は上位10件のみ・ファイル単位1回で計上（evaluate.py と同一定義）。",
-    "hit_at は evaluate.py の query-level hit@k と同一定義。",
-    "set_recall_at は旧 recall_at（集合 recall）の別名で、互換のため recall_at にも同一値を残す。",
+    "チャンク分割は ingest.iter_chunks に委譲（chunk_size は ingest.CHUNK_SIZE の実効値）。",
+    "指標定義: set_recall_at は集合 recall、hit_at は evaluate.py と同じ query-level hit@k、ndcg_at_10 は上位10件ベース（ファイル単位1回で計上）。",
+    "metric_definition は現行定義（ndcg_at_10 は上位10件・ファイル1回、hit_at は query-level、set_recall_at は集合 recall）を payload に記録する。",
+    "旧 ndcg_at_10=0.9034 は全順位ベースで算出した値です。現行の ndcg_at_10 は上位10件・ファイル1回の定義であり、evaluate.py の同名指標と直接比較できません（比較表では legacy_ndcg_full_ranking=true を参照）。",
+    "埋め込み単価は README の単価表（opencode.ai/docs/console/go/） を採用（単価出典日: 2026-11-26）。API が cost を返さない場合は単価 × total_tokens で summary.estimated_cost_usd を推定する。",
+    "互換のため recall_at には set_recall_at（集合 recall）と同一値を残す。",
+    "generation_model は --generation-model の指定値を記録し、未指定なら cloud_client.model() を実効値とする。",
     "レイテンシは time.perf_counter で計測し repeat 回の平均を summary に記録。",
     "秘密情報の値は出力・保存しない（生成テキストは mask_secrets を通過）。",
-    "生成モデルは opencodeGO の OpenAI 互換 chat completions を使用（先頭3クエリのみ、rerank_query_count を参照）。",
+    "生成モデルは opencodeGO の OpenAI 互換 chat completions を使用（生成対象 9 件、rerank_query_count を参照）。",
+    "生成呼び出しは外部送信＋トークン課金を伴う。total_tokens には生成呼び出しのトークンも含まれるため estimated_cost_usd は概算（API cost があれば実値を優先）。",
+    "生成リクエストのセッション UUID は cloud_client.chat 側で付与し cloud_bench では生成しない。",
     "rerank は JSON の rank 整数配列のみを採用し、パース失敗時は generation_error に記録して nDCG を 0 としない。"
   ],
-  "corpus_sha256": "fd5b9f857eb1a98755b42ff44dc65dac0afbc37fc39585b6d80da1c04be8a811"
+  "corpus_sha256": "fd5b9f857eb1a98755b42ff44dc65dac0afbc37fc39585b6d80da1c04be8a811",
+  "usage": {
+    "prompt_tokens": 316953,
+    "completion_tokens": 9882,
+    "total_tokens": 326835,
+    "cost": 0.0,
+    "calls": 20
+  }
 }

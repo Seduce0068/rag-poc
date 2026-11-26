@@ -300,8 +300,10 @@ def resolve_corpus_dir() -> Path:
 SCHEMA_VERSION = 2  # eval-results.json のスキーマバージョン（必須キー欠落で再計測）
 
 # 実験定数を config へ集約（現行の各モジュール定義と同一値）。
-# query.py はこれらを import して参照する（単一情報源）。ingest.py のローカル定義は
-# 後続対応待ちだが値は同一。いずれも current_settings には含めない。
+# query.py はこれらを import して参照する（単一情報源）。ingest.py /
+# compare_embeddings.py のローカル定義は後続対応待ちだが値は同一。呼び出し側は
+# 下の experiment_defaults() を経由して参照する（差し替えは担当外のため提案のみ）。
+# いずれも current_settings には含めない。
 RRF_K = 60                    # query.py: RRF の k
 SCROLL_PAGE_SIZE = 256        # query.py / ingest.py: scroll 1 ページの件数
 MAX_SCROLL_PAGES = 100        # query.py / ingest.py: scroll の最大ページ数
@@ -319,6 +321,37 @@ COMPARISON_QUERIES = [
     "OKF メタデータ",
     "RAG 検索モード比較",
 ]
+
+
+def experiment_defaults() -> dict[str, int]:
+    """ingest.py / compare_embeddings.py 向けの実験定数 accessor（R2-B）。
+
+    現行の各モジュール内のローカル定数と同一値を返す。呼び出し側の差し替えは
+    担当外のため未実施で、ここでは参照先だけを公開する。既存 API は維持し、
+    ``current_settings()`` とは独立（実験定数は setting スナップショットに
+    含めない従来方針を継続）。
+
+    呼び出し側の提案::
+
+        defaults = config.experiment_defaults()
+        RRF_K = defaults["RRF_K"]
+        SCROLL_PAGE_SIZE = defaults["SCROLL_PAGE_SIZE"]
+        MAX_SCROLL_PAGES = defaults["MAX_SCROLL_PAGES"]
+        EMBED_BATCH_SIZE = defaults["EMBED_BATCH_SIZE"]
+        UPSERT_BATCH_SIZE = defaults["UPSERT_BATCH_SIZE"]
+        RERANK_MAX_CHARS = defaults["RERANK_MAX_CHARS"]
+        COMPARE_MAX_CHARS = defaults["COMPARE_MAX_CHARS"]  # compare のみ
+    """
+    return {
+        "RRF_K": RRF_K,
+        "SCROLL_PAGE_SIZE": SCROLL_PAGE_SIZE,
+        "MAX_SCROLL_PAGES": MAX_SCROLL_PAGES,
+        "EMBED_BATCH_SIZE": EMBED_BATCH_SIZE,
+        "UPSERT_BATCH_SIZE": UPSERT_BATCH_SIZE,
+        "RERANK_MAX_CHARS": RERANK_MAX_CHARS,
+        "COMPARE_MAX_CHARS": COMPARE_MAX_CHARS,
+    }
+
 
 _MASK_PATTERNS = (
     re.compile(r"https?://[^\s'\"]+", re.I),

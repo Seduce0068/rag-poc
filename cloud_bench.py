@@ -314,23 +314,38 @@ class _UsageCollector:
         return result
 
 
-def _chat(messages: list[dict[str, str]], model: str | None = None) -> str:
-    """生成モデルを実効化して cloud_client.chat を呼ぶ（UUID は委譲）。"""
-    if not model:
-        return cloud_client.chat(messages)
+def _chat(
+    messages: list[dict[str, str]],
+    model: str | None = None,
+    *,
+    isolated: bool = False,
+) -> str:
+    """生成モデルを実効化して cloud_client.chat を呼ぶ（UUID は委譲）。
+
+    ``isolated=True`` が使えるなら cloud_client.chat(isolated=True) へ渡し、
+    呼び出し単位の失敗を CloudUnavailable へ閉じ込める（ad-query が追加した
+    API）。未対応の古い cloud_client では引数を渡さず、呼び出し側の try/except
+    に委譲する。既存の ``_chat(messages, model)`` 呼び出しはそのまま成立する。
+    """
     try:
-        accepts_model = "model" in inspect.signature(cloud_client.chat).parameters
+        params = inspect.signature(cloud_client.chat).parameters
     except (TypeError, ValueError):
-        accepts_model = False
-    if accepts_model:
-        return cloud_client.chat(messages, model=model)
+        params = {}
+    kwargs: dict[str, object] = {}
+    if isolated and "isolated" in params:
+        kwargs["isolated"] = True
+    if not model:
+        return cloud_client.chat(messages, **kwargs)
+    if "model" in params:
+        kwargs["model"] = model
+        return cloud_client.chat(messages, **kwargs)
     # 現行 chat は cloud_client.model()（RAG_CLOUD_MODEL）を参照するため、
     # 呼び出し中だけ実効モデルへ差し替え、finally で必ず復元する。
     env_name = str(getattr(cloud_client, "ENV_MODEL", "RAG_CLOUD_MODEL"))
     previous = os.environ.get(env_name)
     os.environ[env_name] = model
     try:
-        return cloud_client.chat(messages)
+        return cloud_client.chat(messages, **kwargs)
     finally:
         if previous is None:
             os.environ.pop(env_name, None)
@@ -374,6 +389,10 @@ def _extract_rank_ids(reply: str) -> list[int]:
 
     ``{"rank": [...]}`` 前後に説明文が混入していても許容する。
     rank が整数配列でない場合・JSON が見つからない場合は ValueError。
+
+    範囲外・重複 rank の判定は候補数を知る呼び出し側の責務とする（API は
+    従来どおり 1 引数・list[int] 返しを維持）。``_rank_diagnostics()`` で
+    黙って捨てずに診断を残すこと。
     """
     text = str(reply)
     decoder = json.JSONDecoder()
@@ -395,6 +414,32 @@ def _extract_rank_ids(reply: str) -> list[int]:
             raise ValueError("rank は整数配列である必要があります")
         return rank
     raise ValueError("JSON の rank 整数配列が見つかりません")
+
+
+def _rank_diagnostics(ids: list[int], candidate_count: int) -> list[str]:
+    """範囲外 rank と重複 rank を診断メッセージへ変換する（スコアは変更しない）。
+
+    ``_run_generation`` は従来どおり範囲外を除外し重複を一意化して nDCG を
+    算出するが、その際に本関数で診断を残す（黙って除外しない）。rank 番号は
+    秘密情報ではないが、名称だけを扱う既存方針に合わせて ``mask_secrets`` を通す。
+    """
+    warnings: list[str] = []
+    out_of_range = sorted({i for i in ids if not 1 <= i <= candidate_count})
+    if out_of_range:
+        warnings.append(
+            mask_secrets("rank out of range: %s" % ", ".join(str(i) for i in out_of_range))
+        )
+    seen: set[int] = set()
+    duplicates: list[int] = []
+    for i in ids:
+        if i in seen and i not in duplicates:
+            duplicates.append(i)
+        seen.add(i)
+    if duplicates:
+        warnings.append(
+            mask_secrets("duplicate rank: %s" % ", ".join(str(i) for i in duplicates))
+        )
+    return warnings
 
 
 def _embedding_metrics(ranked: list[tuple[str, float]], relevant: set[str]) -> dict:
@@ -445,11 +490,18 @@ def _run_generation(
     *,
     generation_model: str | None = None,
     usage: _UsageCollector | None = None,
+    strict_rank: bool = False,
 ) -> float:
     """1 クエリ分の rerank + 回答生成を実行し、レイテンシ秒を返す。
 
     保存する reply / answer / error は必ず config.mask_secrets を通す。
+    rerank と answer は別 try/except で実行する。rerank が失敗しても answer を
+    続行し、answer が失敗しても算出済みの rerank_ndcg_at_5 は保持する。
     パース失敗時は generation_error に記録し、nDCG キーは作成しない（0 にしない）。
+
+    範囲外・重複 rank は既定では ``rerank_warnings`` に記録して既存のスコア
+    挙動（nDCG=1.0）を維持する。``strict_rank=True`` では generation_error
+    へ昇格してスコア算出を見送る（呼び出し側のサニタイズ方針で選択可能）。
     """
     errors: list[str] = []
     listing = "\n".join(
@@ -462,40 +514,53 @@ def _run_generation(
         % (query["query"], listing)
     )
     started = time.perf_counter()
+
+    # --- rerank フェーズ: 失敗しても answer を続行する。 ---
     try:
         reply = _chat([
             {"role": "system", "content": "あなたは検索結果の関連度を判定するアシスタントです。JSON のみを返してください。"},
             {"role": "user", "content": prompt},
-        ], generation_model)
+        ], generation_model, isolated=True)
         if usage is not None:
             usage.sample()
         record["rerank_reply"] = mask_secrets(reply[:500])
         record["rerank_candidates"] = [src for _, src, _ in candidates]
         try:
             ids = _extract_rank_ids(reply)
-            ordered = list(dict.fromkeys(
-                record["rerank_candidates"][i - 1]
-                for i in ids
-                if 1 <= i <= len(record["rerank_candidates"])
-            ))
-            rel = set(query["relevant_sources"])
-            dcg = sum(
-                1.0 / math.log2(i + 2)
-                for i, src in enumerate(ordered[:RERANK_K])
-                if src in rel
-            )
-            # ideal は qrels の relevant_sources 全体（最大 RERANK_K 件）を母集団に
-            # 算出する。候補内に正解が無い場合は dcg=0 となり、検索 nDCG と
-            # 比較可能な定義へ揃える（旧来の「候補内の正解数」は使わない）。
-            ideal = sum(
-                1.0 / math.log2(i + 2)
-                for i in range(min(len(rel), RERANK_K))
-            )
-            if ideal:
-                record["rerank_ndcg_at_5"] = round(dcg / ideal, 4)
+            warnings = _rank_diagnostics(ids, len(record["rerank_candidates"]))
+            if warnings:
+                record["rerank_warnings"] = warnings
+            if strict_rank and warnings:
+                errors.extend(warnings)
+            else:
+                ordered = list(dict.fromkeys(
+                    record["rerank_candidates"][i - 1]
+                    for i in ids
+                    if 1 <= i <= len(record["rerank_candidates"])
+                ))
+                rel = set(query["relevant_sources"])
+                dcg = sum(
+                    1.0 / math.log2(i + 2)
+                    for i, src in enumerate(ordered[:RERANK_K])
+                    if src in rel
+                )
+                # ideal は qrels の relevant_sources 全体（最大 RERANK_K 件）を
+                # 母集団に算出する。候補内に正解が無い場合は dcg=0 となり、
+                # 検索 nDCG と比較可能な定義へ揃える（旧来の「候補内の正解数」は
+                # 使わない）。
+                ideal = sum(
+                    1.0 / math.log2(i + 2)
+                    for i in range(min(len(rel), RERANK_K))
+                )
+                if ideal:
+                    record["rerank_ndcg_at_5"] = round(dcg / ideal, 4)
         except (ValueError, TypeError) as exc:
             errors.append("rerank rank parse: %s" % mask_secrets(str(exc)))
+    except Exception as exc:
+        errors.append("rerank: %s" % mask_secrets(str(exc))[:300])
 
+    # --- answer フェーズ: rerank の成否に依存せず実行する。 ---
+    try:
         answer_prompt = "質問: %s\n\n参考文書:\n%s\n\n参考文書のみに基づき短く回答してください。" % (
             query["query"],
             "\n".join(chunk[:500] for _, _, chunk in candidates),
@@ -503,12 +568,13 @@ def _run_generation(
         answer = _chat([
             {"role": "system", "content": "あなたは日本語の質問に答えるアシスタントです。"},
             {"role": "user", "content": answer_prompt},
-        ], generation_model)
+        ], generation_model, isolated=True)
         if usage is not None:
             usage.sample()
         record["answer"] = mask_secrets(answer[:1000])
     except Exception as exc:
-        errors.append(mask_secrets(str(exc))[:300])
+        errors.append("answer: %s" % mask_secrets(str(exc))[:300])
+
     if errors:
         record["generation_error"] = "; ".join(errors)[:300]
     return time.perf_counter() - started
@@ -746,6 +812,7 @@ def main() -> int:
             "生成呼び出しは外部送信＋トークン課金を伴う。total_tokens には生成呼び出しのトークンも含まれるため estimated_cost_usd は概算（API cost があれば実値を優先）。",
             "生成リクエストのセッション UUID は cloud_client.chat 側で付与し cloud_bench では生成しない。",
             "rerank は JSON の rank 整数配列のみを採用し、パース失敗時は generation_error に記録して nDCG を 0 としない。",
+            "範囲外 rank / 重複 rank は rerank_warnings に記録してスコア算出は従来どおり（strict_rank=True なら generation_error へ昇格しスコアを見送る）。",
         ])
     notes.extend(usage.notes)
     if not corpus_sha256:

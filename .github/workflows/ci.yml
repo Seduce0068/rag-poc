@@ -24,6 +24,7 @@ jobs:
         RAG_REQUIRE_RUST=1 python3 test_rag.py
         python3 - <<'PY'
         import json
+        import re
         import sys
         from pathlib import Path
 
@@ -49,6 +50,16 @@ jobs:
             'eval-results-cloud-qwen3-subset.json': CLOUD_BENCH_KEYS,
         }
 
+        # 公開用 cloud 成果物に残してはならないキー（値は stderr へ出さない）。
+        FORBIDDEN_CLOUD_KEYS = {'answer', 'rerank_candidates'}
+        # 既存の未サニタイズ成果物の明示例外。親がサニタイズ方針を決定するまでの
+        # 移行措置として警告に格下げする。新規ファイルはここへ追加しない。
+        LEGACY_UNSANITIZED = {'eval-results-cloud-full.json'}
+        # RFC3339 date-time かつ UTC オフセット（Z または +00:00 / -00:00）必須。
+        RFC3339_UTC_RE = re.compile(
+            r'^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]00:00)$'
+        )
+
         def required_keys(name):
             if name in ARTIFACT_KEYS:
                 return ARTIFACT_KEYS[name]
@@ -61,10 +72,49 @@ jobs:
             try:
                 data = json.loads(path.read_text(encoding='utf-8'))
             except (OSError, ValueError):
+                # 値や例外文は出さず、ファイル名だけを stderr へ出す。
+                print('%s: invalid JSON' % path.name, file=sys.stderr)
                 failed = True
                 continue
-            if any(key not in data for key in required_keys(path.name)):
+            if not isinstance(data, dict):
+                print('%s: top-level object required' % path.name, file=sys.stderr)
                 failed = True
+                continue
+            missing = sorted(k for k in required_keys(path.name) if k not in data)
+            if missing:
+                print('%s: missing keys: %s' % (
+                    path.name, ', '.join(missing)
+                ), file=sys.stderr)
+                failed = True
+
+            # 成果物ごとのサニタイズ検証は cloud-* 成果物のみを対象とする。
+            if not path.name.startswith('eval-results-cloud-'):
+                continue
+            generated_at = data.get('generated_at')
+            if (not isinstance(generated_at, str)
+                    or not RFC3339_UTC_RE.match(generated_at)):
+                print('%s: generated_at requires RFC3339 UTC' % path.name,
+                      file=sys.stderr)
+                failed = True
+
+            present = sorted(k for k in FORBIDDEN_CLOUD_KEYS if k in data)
+            results = data.get('results')
+            if isinstance(results, list):
+                for entry in results:
+                    if isinstance(entry, dict):
+                        for k in FORBIDDEN_CLOUD_KEYS:
+                            if k in entry and k not in present:
+                                present.append(k)
+            if present:
+                message = '%s: forbidden keys present: %s' % (
+                    path.name, ', '.join(sorted(present))
+                )
+                if path.name in LEGACY_UNSANITIZED:
+                    print('WARN: ' + message, file=sys.stderr)
+                else:
+                    print('ERROR: ' + message, file=sys.stderr)
+                    failed = True
+
         print('JSON gate failed' if failed else 'JSON gate OK')
         sys.exit(1 if failed else 0)
         PY
