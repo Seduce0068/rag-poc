@@ -5,10 +5,11 @@
 //! 出力: op ごとの結果値、失敗時は `{"error":"..."}` を出して終了コード 1。
 
 use std::io::{self, Read};
+use std::path::Path;
 
 use ragcore::{
-    chunk_text, corpus_fingerprint, cosine, distribution, latency_stats, ndcg_at, point_id,
-    recall_at,
+    check_eval_results, chunk_text, corpus_fingerprint, cosine, distribution, latency_stats,
+    ndcg_at, point_id, recall_at,
 };
 use serde_json::{json, Value};
 
@@ -37,6 +38,7 @@ fn main() {
         "latency" => run_latency(&value),
         "fingerprint" => run_fingerprint(&value),
         "point_id" => run_point_id(&value),
+        "check_eval_results" => run_check_eval_results(&value),
         other => Err(format!("未知の op: {other}")),
     };
 
@@ -218,4 +220,29 @@ fn run_point_id(value: &Value) -> Result<String, String> {
     let chunk_index =
         u64::try_from(index).map_err(|_| "chunk_index is too large for u64".to_string())?;
     to_json_string(&point_id(source, chunk_index))
+}
+
+/// eval-results-*.json のパス一覧を受け取り、ゲート結果 JSON を返す。
+///
+/// ファイル名とキー名だけを diagnostics に含め、値は stdout にも出さない。
+fn run_check_eval_results(value: &Value) -> Result<String, String> {
+    let paths = value
+        .get("paths")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "missing or invalid array field: paths".to_string())?;
+    let mut files = Vec::with_capacity(paths.len());
+    for (index, item) in paths.iter().enumerate() {
+        let path = item
+            .as_str()
+            .ok_or_else(|| format!("paths[{index}] must be a string"))?;
+        let content = std::fs::read_to_string(path)
+            .map_err(|_| format!("paths[{index}] could not be read"))?;
+        let name = Path::new(path)
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or(path)
+            .to_string();
+        files.push((name, content));
+    }
+    to_json_string(&check_eval_results(&files))
 }

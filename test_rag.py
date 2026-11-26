@@ -3846,6 +3846,170 @@ class CloudBenchPayloadTest(unittest.TestCase):
         self.assertEqual(len(payload["corpus_sha256"]), 64)
 
 
+class CheckEvalResultsDelegationTest(_RustSkipCounter, unittest.TestCase):
+    """JSON ゲートが Rust op へ正しく委譲されていること（R2-B）。
+
+    検証ロジック自体は Rust 側の #[test] に置き、Python 側は
+    「パスのみ渡す／診断を stderr へ出す／終了コードを返す」を検証する。
+    """
+
+    SKIP_GATE_ENV = "RAG_REQUIRE_RUST"
+    SECRET = "SENSITIVE_VALUE_MUST_NOT_LEAK"
+
+    def _report(self, ok=True, diagnostics=None):
+        return {
+            "ok": ok,
+            "checked": 1,
+            "failed": 0 if ok else 1,
+            "diagnostics": list(diagnostics or []),
+        }
+
+    def _run_cli(self, argv):
+        import rust_bridge as bridge
+
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = bridge.main(argv)
+        return code, out.getvalue(), err.getvalue()
+
+    def _rust_unavailable(self, reason):
+        if os.environ.get(self.SKIP_GATE_ENV, "") == "1":
+            self.fail(
+                "Rust 同等性テストが必要です（%s=1）: %s"
+                % (self.SKIP_GATE_ENV, reason)
+            )
+        self.skipTest(reason)
+
+    def test_wrapper_sends_paths_only(self):
+        import rust_bridge as bridge
+
+        paths = [Path("a") / "eval-results.json", "eval-results-cloud-full.json"]
+        with mock.patch.object(bridge, "run_op", return_value=self._report()) as run:
+            result = bridge.check_eval_results(paths)
+
+        self.assertEqual(result, self._report())
+        run.assert_called_once_with(
+            "check_eval_results",
+            {"paths": ["a/eval-results.json", "eval-results-cloud-full.json"]},
+        )
+        payload = run.call_args.args[1]
+        for key in ("content", "payload", "data", "text"):
+            self.assertNotIn(key, payload)
+        self.assertNotIn(self.SECRET, repr(payload))
+
+    def test_wrapper_rejects_unexpected_result(self):
+        import rust_bridge as bridge
+
+        with mock.patch.object(bridge, "run_op", return_value=[1, 2, 3]):
+            with self.assertRaises(bridge.RustUnavailable):
+                bridge.check_eval_results(["eval-results.json"])
+
+    def test_cli_ok_prints_fixed_message_and_zero(self):
+        with mock.patch(
+            "rust_bridge.check_eval_results", return_value=self._report()
+        ):
+            code, out, err = self._run_cli(
+                ["check_eval_results", "eval-results.json"]
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(out.strip(), "JSON gate OK")
+        self.assertEqual(err, "")
+
+    def test_cli_failure_prints_diagnostics_to_stderr(self):
+        report = self._report(False, [
+            "ERROR: eval-results.json: forbidden keys present: answer, rerank_reply",
+        ])
+        with mock.patch("rust_bridge.check_eval_results", return_value=report):
+            code, out, err = self._run_cli(
+                ["check_eval_results", "eval-results.json"]
+            )
+
+        self.assertEqual(code, 1)
+        self.assertEqual(out.strip(), "JSON gate failed")
+        self.assertIn("eval-results.json", err)
+        self.assertIn("answer", err)
+        self.assertIn("rerank_reply", err)
+
+    def test_cli_discovers_eval_results_when_no_paths(self):
+        import rust_bridge as bridge
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "eval-results.json").write_text("{}", encoding="utf-8")
+            (root / "eval-results-cloud-full.json").write_text("{}", encoding="utf-8")
+            (root / "other.json").write_text("{}", encoding="utf-8")
+            found = bridge._discover_eval_results(root)
+
+        # パターンは eval-results-*.json（ハイフン区切り）のみ。
+        # eval-results.json は一致しないため列挙されない。
+        self.assertEqual(
+            [path.name for path in found],
+            ["eval-results-cloud-full.json"],
+        )
+
+    def test_cli_uses_discovery_when_paths_omitted(self):
+        with mock.patch(
+            "rust_bridge._discover_eval_results", return_value=[Path("x.json")]
+        ) as discover, mock.patch(
+            "rust_bridge.check_eval_results", return_value=self._report()
+        ) as check:
+            code, out, err = self._run_cli(["check_eval_results"])
+
+        self.assertEqual(code, 0)
+        discover.assert_called_once()
+        check.assert_called_once_with([Path("x.json")])
+        self.assertEqual(out.strip(), "JSON gate OK")
+        self.assertEqual(err, "")
+
+    def test_cli_reports_unavailable_rust_without_value(self):
+        import rust_bridge as bridge
+
+        with mock.patch(
+            "rust_bridge.check_eval_results",
+            side_effect=bridge.RustUnavailable("Rust bridge unavailable: x"),
+        ):
+            code, out, err = self._run_cli(
+                ["check_eval_results", "eval-results.json"]
+            )
+
+        self.assertEqual(code, 1)
+        self.assertEqual(out.strip(), "JSON gate failed")
+        self.assertIn("Rust bridge unavailable", err)
+        self.assertNotIn(self.SECRET, err + out)
+
+    def test_cli_rejects_unknown_op(self):
+        code, out, err = self._run_cli(["unknown_op"])
+
+        self.assertEqual(code, 2)
+        self.assertEqual(out, "")
+        self.assertIn("usage", err)
+
+    def test_real_rust_gate_delegates_when_available(self):
+        import rust_bridge as bridge
+
+        if not bridge.available():
+            self._rust_unavailable("Rust binary not built (or cosine probe failed)")
+        payload = {
+            "generated_at": "2026-11-26T00:00:00Z",
+            "schema_version": 1,
+            "qrels_schema_version": 1,
+            "qrels_label": "qrels.json",
+            "collection": "c",
+            "embed_model": "m",
+            "summary": {},
+            "results": [],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "eval-results.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            report = bridge.check_eval_results([path])
+
+        self.assertTrue(report["ok"])
+        self.assertEqual(report["checked"], 1)
+        self.assertEqual(report["failed"], 0)
+
+
 if __name__ == "__main__":
     _result = unittest.main(exit=False)
     if not getattr(_result, "result", _result).wasSuccessful():

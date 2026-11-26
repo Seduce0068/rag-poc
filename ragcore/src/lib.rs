@@ -269,6 +269,211 @@ pub fn point_id(source: &str, chunk_index: u64) -> u64 {
     u64::from_be_bytes(digest)
 }
 
+/// eval-results-*.json の公開ゲート結果。
+///
+/// `diagnostics` にはファイル名とキー名のみを格納し、JSON の値は一切含めない。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GateReport {
+    pub ok: bool,
+    pub checked: usize,
+    pub failed: usize,
+    pub diagnostics: Vec<String>,
+}
+
+const EVALUATE_KEYS: &[&str] = &[
+    "generated_at",
+    "schema_version",
+    "qrels_schema_version",
+    "qrels_label",
+    "collection",
+    "embed_model",
+    "summary",
+    "results",
+];
+const CLOUD_BENCH_KEYS: &[&str] = &[
+    "generated_at",
+    "model",
+    "corpus",
+    "qrels_label",
+    "chunk_size",
+    "summary",
+    "results",
+    "notes",
+];
+const FORBIDDEN_KEYS: &[&str] = &["answer", "rerank_candidates", "rerank_reply"];
+
+/// 成果物名ごとの必須キー集合（ci.yml の heredoc と同じ対応表）。
+fn required_keys(name: &str) -> &'static [&'static str] {
+    match name {
+        "eval-results.json"
+        | "eval-results-baseline.json"
+        | "eval-results-other-domain.json"
+        | "eval-results-ruri-subset.json"
+        | "eval-results-ruri-full.json"
+        | "eval-results-alt.json"
+        | "eval-results-cloud-pipeline.json" => EVALUATE_KEYS,
+        "eval-results-cloud-subset.json"
+        | "eval-results-cloud-full.json"
+        | "eval-results-cloud-small-subset.json"
+        | "eval-results-cloud-qwen3-subset.json" => CLOUD_BENCH_KEYS,
+        _ if name.starts_with("eval-results-cloud-") => CLOUD_BENCH_KEYS,
+        _ => EVALUATE_KEYS,
+    }
+}
+
+fn take_digits(bytes: &[u8], pos: &mut usize, count: usize) -> bool {
+    let end = *pos + count;
+    if end > bytes.len() || !bytes[*pos..end].iter().all(|byte| byte.is_ascii_digit()) {
+        return false;
+    }
+    *pos = end;
+    true
+}
+
+/// RFC3339 date-time かつ UTC オフセット（Z / +00:00 / -00:00）を要求する。
+/// 依存追加なしで元の正規表現と同じ受理条件を再現する。
+fn is_rfc3339_utc(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    let mut pos = 0;
+    if !take_digits(bytes, &mut pos, 4) {
+        return false;
+    }
+    if bytes.get(pos).copied() != Some(b'-') {
+        return false;
+    }
+    pos += 1;
+    if !take_digits(bytes, &mut pos, 2) {
+        return false;
+    }
+    if bytes.get(pos).copied() != Some(b'-') {
+        return false;
+    }
+    pos += 1;
+    if !take_digits(bytes, &mut pos, 2) {
+        return false;
+    }
+    match bytes.get(pos).copied() {
+        Some(b'T') | Some(b't') => pos += 1,
+        _ => return false,
+    }
+    if !take_digits(bytes, &mut pos, 2) {
+        return false;
+    }
+    if bytes.get(pos).copied() != Some(b':') {
+        return false;
+    }
+    pos += 1;
+    if !take_digits(bytes, &mut pos, 2) {
+        return false;
+    }
+    if bytes.get(pos).copied() != Some(b':') {
+        return false;
+    }
+    pos += 1;
+    if !take_digits(bytes, &mut pos, 2) {
+        return false;
+    }
+    if bytes.get(pos).copied() == Some(b'.') {
+        pos += 1;
+        let start = pos;
+        while pos < bytes.len() && bytes[pos].is_ascii_digit() {
+            pos += 1;
+        }
+        if pos == start {
+            return false;
+        }
+    }
+    let tail = &bytes[pos..];
+    tail == &b"Z"[..] || tail == &b"+00:00"[..] || tail == &b"-00:00"[..]
+}
+
+/// (ファイル名, JSON 文字列) の組を検証する。
+///
+/// 検査内容はci.yml の heredoc と同一: 必須キー、禁止キー不在、
+/// cloud-* の `generated_at` UTC。値は diagnostics に一切含めない。
+pub fn check_eval_results(files: &[(String, String)]) -> GateReport {
+    let mut diagnostics = Vec::new();
+    let mut failed = 0usize;
+    for (name, content) in files {
+        let data: serde_json::Value = match serde_json::from_str(content) {
+            Ok(data) => data,
+            Err(_) => {
+                diagnostics.push(format!("{name}: invalid JSON"));
+                failed += 1;
+                continue;
+            }
+        };
+        let object = match data.as_object() {
+            Some(object) => object,
+            None => {
+                diagnostics.push(format!("{name}: top-level object required"));
+                failed += 1;
+                continue;
+            }
+        };
+        let mut file_failed = false;
+
+        let mut missing: Vec<&str> = required_keys(name)
+            .iter()
+            .copied()
+            .filter(|key| !object.contains_key(*key))
+            .collect();
+        missing.sort_unstable();
+        if !missing.is_empty() {
+            diagnostics.push(format!("{}: missing keys: {}", name, missing.join(", ")));
+            file_failed = true;
+        }
+
+        if name.starts_with("eval-results-cloud-") {
+            let valid = object
+                .get("generated_at")
+                .and_then(serde_json::Value::as_str)
+                .map(is_rfc3339_utc)
+                .unwrap_or(false);
+            if !valid {
+                diagnostics.push(format!("{name}: generated_at requires RFC3339 UTC"));
+                file_failed = true;
+            }
+        }
+
+        let mut present: Vec<&str> = FORBIDDEN_KEYS
+            .iter()
+            .copied()
+            .filter(|key| object.contains_key(*key))
+            .collect();
+        if let Some(results) = object.get("results").and_then(serde_json::Value::as_array) {
+            for entry in results {
+                if let Some(entry_object) = entry.as_object() {
+                    for key in FORBIDDEN_KEYS {
+                        if entry_object.contains_key(*key) && !present.contains(key) {
+                            present.push(key);
+                        }
+                    }
+                }
+            }
+        }
+        present.sort_unstable();
+        if !present.is_empty() {
+            diagnostics.push(format!(
+                "ERROR: {}: forbidden keys present: {}",
+                name,
+                present.join(", ")
+            ));
+            file_failed = true;
+        }
+
+        if file_failed {
+            failed += 1;
+        }
+    }
+    GateReport {
+        ok: failed == 0,
+        checked: files.len(),
+        failed,
+        diagnostics,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -356,5 +561,84 @@ mod tests {
     fn point_id_is_stable_and_source_sensitive() {
         assert_eq!(point_id("doc.md", 0), point_id("doc.md", 0));
         assert_ne!(point_id("doc.md", 0), point_id("other.md", 0));
+    }
+
+    #[test]
+    fn eval_results_gate_accepts_valid_artifacts() {
+        let evaluate = r#"{
+            "generated_at":"2026-11-26T00:00:00Z",
+            "schema_version":1,"qrels_schema_version":1,"qrels_label":"qrels.json",
+            "collection":"c","embed_model":"m","summary":{},"results":[]
+        }"#;
+        let cloud = r#"{
+            "generated_at":"2026-11-26T00:00:00+00:00",
+            "model":"m","corpus":"c","qrels_label":"qrels.json",
+            "chunk_size":512,"summary":{},"results":[],"notes":[]
+        }"#;
+        let files = vec![
+            ("eval-results.json".to_string(), evaluate.to_string()),
+            (
+                "eval-results-cloud-subset.json".to_string(),
+                cloud.to_string(),
+            ),
+        ];
+        let report = check_eval_results(&files);
+        assert!(report.ok);
+        assert_eq!(report.checked, 2);
+        assert_eq!(report.failed, 0);
+        assert!(report.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn eval_results_gate_rejects_forbidden_keys_without_values() {
+        let json = r#"{
+            "generated_at":"2026-11-26T00:00:00Z",
+            "schema_version":1,"qrels_schema_version":1,"qrels_label":"q",
+            "collection":"c","embed_model":"m","summary":{},
+            "results":[{"id":"q0","answer":"SECRET_VALUE"}],
+            "rerank_reply":"ANOTHER_SECRET"
+        }"#;
+        let files = vec![("eval-results.json".to_string(), json.to_string())];
+        let report = check_eval_results(&files);
+        assert!(!report.ok);
+        let joined = report.diagnostics.join("\n");
+        assert!(joined.contains("eval-results.json"));
+        assert!(joined.contains("answer"));
+        assert!(joined.contains("rerank_reply"));
+        assert!(!joined.contains("SECRET_VALUE"));
+        assert!(!joined.contains("ANOTHER_SECRET"));
+    }
+
+    #[test]
+    fn eval_results_gate_requires_offset_on_cloud_generated_at() {
+        let json = r#"{
+            "generated_at":"2026-11-26T00:00:00",
+            "model":"m","corpus":"c","qrels_label":"q",
+            "chunk_size":512,"summary":{},"results":[],"notes":[]
+        }"#;
+        let files = vec![("eval-results-cloud-full.json".to_string(), json.to_string())];
+        let report = check_eval_results(&files);
+        assert!(!report.ok);
+        assert!(report
+            .diagnostics
+            .iter()
+            .any(|line| { line.contains("generated_at requires RFC3339 UTC") }));
+    }
+
+    #[test]
+    fn eval_results_gate_checks_forbidden_keys_on_non_cloud_artifacts() {
+        let json = r#"{
+            "generated_at":"2026-11-26T00:00:00Z",
+            "schema_version":1,"qrels_schema_version":1,"qrels_label":"q",
+            "collection":"c","embed_model":"m","summary":{},
+            "results":[{"rerank_candidates":["SECRET_VALUE"]}]
+        }"#;
+        let files = vec![("eval-results-custom.json".to_string(), json.to_string())];
+        let report = check_eval_results(&files);
+        assert!(!report.ok);
+        let joined = report.diagnostics.join("\n");
+        assert!(joined.contains("eval-results-custom.json"));
+        assert!(joined.contains("rerank_candidates"));
+        assert!(!joined.contains("SECRET_VALUE"));
     }
 }

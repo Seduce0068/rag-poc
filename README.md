@@ -1,9 +1,43 @@
 # rag_poc — ローカル RAG 検証
 
-> **TL;DR / まず読む順**: [目的](#目的) → [セットアップ](#セットアップ) → [使い方](#使い方) →
-> [クラウドモデル](#クラウドモデルopencodego) → [テスト](#テスト)。
+## まず動かす（5分）
+
+ローカル Ollama + Qdrant で日本語特化埋め込み Ruri の RAG を最短で試す。リポジトリルートで以下を順にコピペ実行する（Kubuntu 想定）。
+
+```bash
+# 0. Ruri 設定（2026-11-26 時点の再現条件。サブセットで短時間に確認）
+export RAG_CORPUS_DIR=rag_poc/corpus-subset
+export RAG_COLLECTION=rag_poc_ruri
+export EMBED_MODEL=kun432/cl-nagoya-ruri-base
+export RAG_VECTOR_SIZE=768
+export CHUNK_SIZE=300
+export CHUNK_OVERLAP=50
+export RAG_EMBED_PREFIX_QUERY='クエリ: '
+export RAG_EMBED_PREFIX_PASSAGE='文章: '
+
+# 1. Python 依存をインストール
+python3 -m pip install -r rag_poc/requirements.txt
+
+# 2. モデル取得とサービス生存確認
+ollama pull "$EMBED_MODEL"
+curl -fsS http://127.0.0.1:11434/api/tags
+curl -fsS http://127.0.0.1:6333/collections
+
+# 3. コーパスを埋め込みして Qdrant へ投入
+python3 rag_poc/ingest.py
+
+# 4. 質問する（--mode 省略時は hybrid）
+python3 rag_poc/query.py '質問' --mode hybrid --json
+```
+
+設定の意味・全量への切り替え・Rust バイナリや評価の詳細は[セットアップ](#セットアップ)、
+[使い方](#使い方) および[Ruri での再現手順](docs/explanation.md#ruri-での再現手順)を参照。
+
+> **TL;DR / まず読む順**: [まず動かす（5分）](#まず動かす5分) → [目的](#目的) →
+> [セットアップ](#セットアップ) → [使い方](#使い方) → [テスト](#テスト)。
 > 背景・設計判断は [docs/explanation.md](docs/explanation.md)、全設定と実測値・成果物一覧は
-> [docs/reference.md](docs/reference.md) を参照（この README は入口のみ）。
+> [docs/reference.md](docs/reference.md) を参照（この README は入口のみ）。実測値は
+> [docs/reference.md の代表的な実測値](docs/reference.md#代表的な実測値)を単一情報源とする。
 > 日付表記: 本文は `YYYY-MM-DD`、メタデータは RFC 3339、ファイル名は `YYYYMMDD`。
 
 ## 目的
@@ -21,11 +55,13 @@ opt-in（詳細は[クラウドモデル（opencodeGO）](#クラウドモデル
 クラウド RAG 調査の結論（レポート `passkey-gateway/docs/cloud-rag-research-2026-11-26.md`、
 リポジトリ外のため相対リンクではなくパス表記）に従い、
 日本語特化埋め込み `kun432/cl-nagoya-ruri-base` の利用を推奨する。
-同一条件下で dense の `recall@10` / `nDCG@10` がともに 1.0 / 0.7992 を
-達成している（qwen2.5:3b は両方 0.0）。ただし **config 既定は後方互換のため
-`qwen2.5:3b` のまま**で、何も設定せず `evaluate.py` を走らせると旧ベースライン
-を再現する。Ruri を使う場合は[Ruri での再現手順](docs/explanation.md#ruri-での再現手順)を参照して
-`EMBED_MODEL` / `RAG_VECTOR_SIZE=768` / `CHUNK_SIZE=300` / prefix を揃えること。
+実測値は [docs/reference.md の代表的な実測値](docs/reference.md#代表的な実測値)を参照。
+ただし **config 既定は後方互換のため `qwen2.5:3b` のまま**で、何も設定せず
+`evaluate.py` を走らせると旧ベースラインを再現する。Ruri を使う場合は
+[まず動かす（5分）](#まず動かす5分) または
+[Ruri での再現手順](docs/explanation.md#ruri-での再現手順)を参照して
+`EMBED_MODEL` / `RAG_VECTOR_SIZE=768` / `CHUNK_SIZE=300` / `CHUNK_OVERLAP=50` /
+prefix を揃えること。
 
 ## 必要なもの
 
@@ -188,7 +224,7 @@ consumer は optional キーの存在を前提にしないこと。参照時は
 
 > **警告**: 有効化すると質問文・チャンク本文・ベクトルが外部 API へ送信され、
 > token 課金が発生する。キーと接続先を確認し、長時間の連続評価は避けること。
-> この注意は本章に集約し、他箇所では繰り返さない。
+> この注意は README 内では本章に集約。docs/explanation.md では ARID に従い要約を重複。
 
 共有 `dsh.env` 全体を `set -a; source ...; set +a` で export すると他サービスのキーまで子プロセスへ継承されるリスクがあるため、必要なキーだけを明示的に読み込む。
 
@@ -217,15 +253,16 @@ export RAG_CLOUD_MODEL=deepseek-v4.1-flash
 
 同一サブセット（6 ファイル／81 チャンク、`qrels-subset.json` 6 クエリ、
 `ingest.iter_chunks` 既定 CHUNK_SIZE、repeat=1）で日本語埋め込みモデルを
-比較した結果は「クラウド/ローカル比較」の表へ集約した。
+比較した。計測の前提は[クラウド/ローカル比較](#クラウドローカル比較2026-11-26)へ、
+実測値は [docs/reference.md](docs/reference.md#代表的な実測値)へ集約した。
 
 単価は `qwen3-embedding-8b` の方が安いが、この日本語コーパスでは
 `text-embedding-3-small` が精度・レイテンシともに上回った
 （`eval-results-cloud-small-subset.json` /
 `eval-results-cloud-qwen3-subset.json`）。
 `gemini-embedding-2`（3072 次元、1M 入力トークン $0.20）も同一サブセットで
-計測し、`hit@1=1.0` / `nDCG@10=1.0` だった
-（`eval-results-cloud-gemini-subset.json`、比較表も参照）。
+計測した（`eval-results-cloud-gemini-subset.json`）。実測値は
+[docs/reference.md](docs/reference.md#代表的な実測値)を参照。
 
 エンドポイントは `https://opencode.ai/inference/go/openai/v1/embeddings` で、
 OpenAI 互換の `/embeddings` API。`dimensions` は指定可能。
@@ -256,10 +293,10 @@ export RAG_CLOUD_EMBED_MODEL=text-embedding-3-small
 | 生成 | `--with-generation` で rerank / 回答（既定は全件、`--generation-max-queries N` で先頭 N 件に制限） | `--with-answer` で回答生成（`RAG_ANSWER_TIMEOUT` が適用） |
 | 用途 | 埋め込みモデルの簡易比較。Token 消費を抑えて確認する | 本番相当の 4 モード評価と退避済み成果物の更新 |
 
-`--with-generation` の既定は全件で、全量コーパスでの実測は 9 クエリ
-（`rerank_query_count=9`、`rerank_ndcg_at_5=0.8819`、
-`nDCG@10=0.8597`）だった。先頭 N 件だけに絞る場合は
-`--generation-max-queries N` を指定する。
+`--with-generation` の既定は全件で、全量コーパスでは 9 クエリ
+（`rerank_query_count=9`、n=9）を計測した。実測値は
+[docs/reference.md](docs/reference.md#代表的な実測値)を参照。先頭 N 件だけに
+絞る場合は `--generation-max-queries N` を指定する。
 
 ### クラウド生成で回答を作る（--with-answer）
 
@@ -283,52 +320,14 @@ RAG_CLOUD_ENABLED=1 RAG_CLOUD_CHAT_ENABLED=1 \
 
 ### クラウド/ローカル比較（2026-11-26）
 
-評価章のサブセット・全量の結果を「精度指標」と「条件」の 2 表へ集約した。
-`hit@1` は query-level、`set_recall@1` は集合 recall。ローカルの `recall@1` は
-`hit@1` に相当する。
+計測の前提のみをここに残す。各構成の実測値は[docs/reference.md の代表的な実測値](docs/reference.md#代表的な実測値)を単一情報源とする。
 
-精度指標（各構成の計測値）: `definition` は指標定義で、
-`evaluate query-level`（`evaluate.py`: query-level hit@1 と集合 set_recall@1、
-nDCG@10 は上位10件・ファイル1回）、`cloud_bench top10`（`cloud_bench.py`:
-nDCG@10 は上位10件・ファイル1回）、`legacy 全順位`（旧 ndcg_at_10=0.9034、
-全順位ベースで現行定義と直接比較不可）の3種。`—` は当該構成で未計測の指標。
-レイテンシは計測対象が異なる（クラウドは埋め込み平均、ローカルは hybrid-rerank
-の検索平均）ため単純比較しないこと。さらに計測回数もクラウドは `repeat=1`、
-ローカル全量は `RAG_EVAL_REPEAT=10`（ウォームアップ 1 回＋10 回計測＝60 サンプル）
-で混在している。rerank nDCG@5 は 9 クエリの計測値（`rerank_query_count=9`）。
-全量ファイル数は成果物ごとに異なる。`passkey-gateway/docs` の実体は 91 ファイル、
-`eval-results-cloud-pipeline.json` は 88 ファイル／214 チャンクで、
-旧比較表の「87 ファイル／214 チャンク」は旧値として残す。
-全量クラウドは 91 ファイル／1380 チャンク（`ingest.iter_chunks` 委譲後）、
-全量 Ruri は 88 ファイル／2200 チャンクでコーパスとチャンク条件が異なるため、
-両者の nDCG に優劣は付けられない。
-
-| モデル | definition | hit@1 | set_recall@1 | nDCG@10 | rerank nDCG@5 (n=9) |
-| --- | --- | --- | --- | --- | --- |
-| `qwen2.5:3b`（ローカル） | evaluate query-level | 0.1667 | — | 0.5384（dense） | — |
-| `kun432/cl-nagoya-ruri-base`（ローカル） | evaluate query-level | 1.0 | — | 1.0（dense） | — |
-| `text-embedding-3-small`（クラウド） | cloud_bench top10 | 1.0 | — | 1.0 | — |
-| `qwen3-embedding-8b`（クラウド） | cloud_bench top10 | 0.8333 | — | 0.8978 | — |
-| `gemini-embedding-2`（クラウド） | cloud_bench top10 | 1.0 | — | 1.0 | — |
-| `qwen2.5:3b`（ローカル・全量） | evaluate query-level | — | — | 0.0（dense）/ 0.6243（hybrid-rerank） | — |
-| `kun432/cl-nagoya-ruri-base`（ローカル・全量） | evaluate query-level | — | — | 0.7992（dense）/ 0.7542（hybrid-rerank） | — |
-| `text-embedding-3-small`（クラウド・全量） | cloud_bench top10 | 0.7778 | 0.7222 | 0.8597 | 0.8819 |
-| `text-embedding-3-small`（クラウド・Qdrant 正式） | evaluate query-level | — | — | 0.8681（hybrid） | — |
-| （旧値）`text-embedding-3-small`（クラウド・全量） | legacy 全順位 | — | — | 0.9034（旧 ndcg_at_10、全順位ベース） | — |
-
-条件（モデル・コーパス・チャンク・クエリ・レイテンシ）:
-
-| モデル | definition | コーパス | チャンク数 | クエリ数 | レイテンシ |
-| --- | --- | --- | --- | --- | --- |
-| `qwen2.5:3b`（ローカル） | evaluate query-level | `corpus-subset`（6 ファイル） | 81 | 6 | — |
-| `kun432/cl-nagoya-ruri-base`（ローカル） | evaluate query-level | `corpus-subset`（6 ファイル） | 81 | 6 | — |
-| `text-embedding-3-small`（クラウド） | cloud_bench top10 | `corpus-subset`（6 ファイル） | 81 | 6 | 8.03 秒（埋め込み平均） |
-| `qwen3-embedding-8b`（クラウド） | cloud_bench top10 | `corpus-subset`（6 ファイル） | 81 | 6 | 10.04 秒（埋め込み平均） |
-| `gemini-embedding-2`（クラウド） | cloud_bench top10 | `corpus-subset`（6 ファイル） | 81 | 6 | — |
-| `qwen2.5:3b`（ローカル・全量） | evaluate query-level | `passkey-gateway/docs`（88 ファイル／2200 チャンク） | 2200 | 9 | 6.22 秒（hybrid-rerank 平均） |
-| `kun432/cl-nagoya-ruri-base`（ローカル・全量） | evaluate query-level | `passkey-gateway/docs`（88 ファイル／2200 チャンク） | 2200 | 9 | 3.32 秒（hybrid-rerank 平均） |
-| `text-embedding-3-small`（クラウド・全量） | cloud_bench top10 | `passkey-gateway/docs`（91 ファイル／1380 チャンク） | 1380 | 9 | 42.3 秒（埋め込み平均） |
-| `text-embedding-3-small`（クラウド・Qdrant 正式） | evaluate query-level | `passkey-gateway/docs`（88 ファイル／214 チャンク、旧比較表は 87 ファイルと記載） | 214 | 9 | — |
+- `hit@1` は query-level、`set_recall@1` は集合 recall。ローカルの `recall@1` は `hit@1` に相当する。
+- 指標定義は3種。`evaluate query-level`（`evaluate.py`: query-level hit@1 と集合 set_recall@1、nDCG@10 は上位10件・ファイル1回）、`cloud_bench top10`（`cloud_bench.py`: nDCG@10 は上位10件・ファイル1回）、`legacy 全順位`（旧 `ndcg_at_10`、全順位ベースで現行定義と直接比較不可）。`—` は未計測を表す。
+- レイテンシは計測対象が異なる（クラウドは埋め込み平均、ローカルは `hybrid-rerank` の検索平均）ため単純比較しないこと。
+- 計測回数はクラウド `repeat=1`、ローカル全量 `RAG_EVAL_REPEAT=10`（ウォームアップ 1 回＋10 回計測＝60 サンプル）で混在している。rerank nDCG@5 は 9 クエリ（`rerank_query_count=9`、n=9）の計測値。
+- 全量ファイル数は成果物ごとに異なる。`passkey-gateway/docs` の実体は 91 ファイル、`eval-results-cloud-pipeline.json` は 88 ファイル／214 チャンクで、旧比較表の「87 ファイル／214 チャンク」は旧値。
+- 全量クラウドは 91 ファイル／1380 チャンク（`ingest.iter_chunks` 委譲後）、全量 Ruri は 88 ファイル／2200 チャンクでコーパスとチャンク条件が異なるため、両者の nDCG に優劣は付けられない。
 
 ## テスト
 
@@ -352,7 +351,7 @@ Rust 未ビルドを green で通さないためのゲートである。なお
 
 ## 詳細ドキュメント
 
-- [docs/reference.md](docs/reference.md) — 検索モード、全設定項目（35変数）、代表的な実測値、成果物一覧
+- [docs/reference.md](docs/reference.md) — 検索モード、全設定項目（35変数）、実測値の単一情報源、成果物一覧
 - [docs/explanation.md](docs/explanation.md) — 構成図、設計判断（なぜハイブリッド／Ruri／クラウドか）、既知の制限、モデル比較実験、別ドメインベンチマーク、入力と設定の検証
 - [ragcore/README.md](ragcore/README.md) — Rust 純粋計算クレートの CLI 仕様
 - ドキュメント設計の判断根拠: `passkey-gateway/docs/documentation-references-extra-2026-11-26.md`

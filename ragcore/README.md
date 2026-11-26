@@ -1,5 +1,5 @@
 ---
-type: readme
+type: Reference
 title: ragcore — RAG PoC 指標計算ライブラリ / CLI
 description: Python 版 RAG PoC の指標計算を unsafe なしで再実装した Rust crate。
 tags: [rust, rag, cli]

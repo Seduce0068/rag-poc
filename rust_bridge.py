@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any, BinaryIO, Sequence
@@ -218,3 +219,55 @@ def available() -> bool:
         return result == 1.0
     except Exception:  # noqa: BLE001 - 探測なので何でも False
         return False
+
+
+def check_eval_results(paths: Sequence[str | Path]) -> dict:
+    """eval-results-*.json の検証を Rust op へ委譲し、サマリ dict を返す。
+
+    Rust 側へ渡すのはファイルパスのみ。JSON の内容（値）は一切渡さない。
+    タイムアウトと出力上限は :func:`run_op` の既存契約をそのまま使う。
+    """
+    request_paths = [str(path) for path in paths]
+    result = run_op("check_eval_results", {"paths": request_paths})
+    if not isinstance(result, dict) or "ok" not in result:
+        raise _fail("check_eval_results returned unexpected result")
+    return result
+
+
+def _discover_eval_results(root: Path) -> list[Path]:
+    """指定ツリーの eval-results-*.json をファイル名順に列挙する。"""
+    return sorted(root.rglob("eval-results-*.json"))
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """`python3 rust_bridge.py check_eval_results [paths...]` の入口。"""
+    args = list(sys.argv[1:] if argv is None else argv)
+    if not args or args[0] != "check_eval_results":
+        print(
+            "usage: python3 rust_bridge.py check_eval_results [paths...]",
+            file=sys.stderr,
+        )
+        return 2
+
+    paths = [Path(value) for value in args[1:]] or _discover_eval_results(Path("."))
+    try:
+        result = check_eval_results(paths)
+    except RustUnavailable as exc:
+        # マスク済みの理由のみ。JSON の値は出さない。
+        print("JSON gate failed")
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    diagnostics = result.get("diagnostics", [])
+    if isinstance(diagnostics, list):
+        for line in diagnostics:
+            if isinstance(line, str):
+                # Rust 側が組み立てるのはファイル名とキー名だけ。
+                print(line, file=sys.stderr)
+    ok = bool(result.get("ok"))
+    print("JSON gate OK" if ok else "JSON gate failed")
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
