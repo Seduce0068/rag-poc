@@ -97,19 +97,27 @@ curl -fsS http://127.0.0.1:6333/collections
 `evaluate.py` が明示エラーで終了する。
 
 Rust バイナリは `rag_poc/ragcore/target/debug/ragcore` に生成される。
-ただし Rust bridge が Python 本番コードで使われるのは
-`compare_embeddings.py` の一部だけである。具体的には `cosine_batch`
-（質問×ファイルのコサイン類似度を 1 回で計算）と `distribution`
-（スコアの min/max/mean/stdev）を `rust_bridge.py` 経由で呼び、Rust が
-無い／失敗した場合は Python 実装へフォールバックする（フォールバック
-発生は出力 JSON の `notes` に記録される）。
+`ragcore` の op は 9 件（`chunk` / `cosine` / `cosine_batch` /
+`distribution` / `recall` / `ndcg` / `latency` / `fingerprint` /
+`point_id`）で、本番配線は `cosine_batch` と `distribution` の 2 op だけである。
+`compare_embeddings.py` が `rust_bridge.py` 経由で呼び、`cosine_batch` は
+質問×ファイルのコサイン類似度を 1 回で計算し、`distribution` はスコアの
+min/max/mean/stdev を求める。Rust が無い／失敗した場合は Python 実装へ
+フォールバックする（フォールバック発生は出力 JSON の `notes` に記録される）。
+`cosine` は実計算には使わず、`rust_bridge.available()` の probe
+（`a=[1.0]` / `b=[1.0]` の応答確認）に限られる。
 
-`ragcore` の他の op（`chunk` / `point_id` / `fingerprint` / `recall` /
-`ndcg` / `latency`）は Python 本番コードへ配線されていない。`ingest.py` の
-チャンク分割と point ID 生成、`evaluate.py` の fingerprint / recall /
-nDCG / レイテンシ集計は純 Python のままで、Rust 実装は同等性テスト
-（`test_rag.py`）でのみ使われる。つまり「Rust 再実装」は完了しておらず、
-本番配線は `compare_embeddings.py` の一部に限定される。
+残り 6 op（`chunk` / `point_id` / `fingerprint` / `recall` / `ndcg` /
+`latency`）は未配線である。`ingest.py` のチャンク分割と point ID 生成、
+`evaluate.py` の fingerprint / recall / nDCG / レイテンシ集計は純 Python の
+ままで、Rust 実装は同等性テスト（`test_rag.py`）でのみ使われる。つまり
+「Rust 再実装」は完了しておらず、本番配線は `compare_embeddings.py` の
+2 op に限定される。
+
+`check_eval_results` は上記 9 op に含めない、CI ゲート専用の別 op である。
+`python3 rag_poc/rust_bridge.py check_eval_results` が
+`eval-results-*.json` のパスだけを Rust へ渡し、成果物のキー検証をゲートする
+（Python の検索・評価経路では呼ばない）。
 Rust 同等性テストは `ragcore` 側 9 件と Python 側 8 件の計 17 件
 （9+8件）で、`RAG_REQUIRE_RUST=1` を付けると skip ではなく失敗にできる。
 
@@ -145,8 +153,10 @@ python3 rag_poc/compare_cloud_local.py --output rag_poc/cloud-local-comparison.j
 `compare_cloud_local.py` は既存の `eval-results*.json` だけを読み取り、
 コーパス／チャンク数／クエリ数／指標定義を明示した比較表を標準出力へ出す。
 新たな API 呼び出しは行わない。`--filter NAME` で比較行を名前で絞り込み、
-`--sort KEY` で指定キー（例: `name` / `ndcg_at_10` / `latency_sec`）による
+`--sort KEY`（`ndcg` / `latency` / `hit`）で同一条件グループ内のみの
 並び替え、`--output PATH` で比較 JSON の出力先を指定する（省略時は stdout）。
+`--run-ab` を付けるとローカル／クラウドを条件別にグループ化した A/B 比較表を
+出力する（詳細は[A/B 比較の手順](#ab-比較の手順--run-ab)）。
 
 `rag_poc/corpus-subset/` は評価用に抜き出した 6 ファイルのサブセット
 （2026-11-26 時点）。全量は既定の `passkey-gateway/docs` で、
@@ -283,6 +293,25 @@ export RAG_CLOUD_EMBED_MODEL=text-embedding-3-small
 - 既定は埋め込みも生成もローカル Ollama。クラウドを使う場合は
   `RAG_CLOUD_ENABLED=1` を明示する。
 
+### コストと token 推定キーの使い分け
+
+`cloud_bench.py` が出力する `eval-results-cloud-*.json` には、API 応答の
+`usage` を集約した次のキーが入る（根拠: `cloud_bench.py` の
+`_usage_cost_source` / `_estimated_cost_usd` / `_token_cost_usd`）。
+
+| キー | 値・意味 | 読み方 |
+| --- | --- | --- |
+| `usage.cost_source` | `api` / `api-zero` / `estimated` / `None` | コストの出所。`api` は正の API cost、`api-zero` は `cost=0.0` かつ `total_tokens>0`、`estimated` は cost キーが無い単価推定、`None` は判定不能 |
+| `summary.estimated_cost_usd` | 小数または `None` | API cost を 6 桁で保持。cost が無ければ単価 × total_tokens の 6 桁推定 |
+| `summary.estimated_cost_from_tokens_usd` | 小数（12 桁） | 6 桁丸めで 0.0 に潰れる場合のトークン由来見込み。`usage` 側にも同じ値を記録 |
+
+`cost_source=api-zero` のとき、`summary.estimated_cost_usd` は API 応答の
+`cost=0.0` を維持する。**API が 0.0 を返した理由は未確認**であり、
+実コストがゼロだと断定しない。このときは
+`estimated_cost_from_tokens_usd` を主指標として読み、成果物 `notes` に
+「cost_source=api-zero のときは token 推定を参照」を明記する。
+単価が未知のモデルの場合は `estimated_cost_from_tokens_usd` を作らない。
+
 ### 簡易計測と正式パイプラインの使い分け
 
 | 観点 | 簡易: `cloud_bench.py` | 正式: `cloud_ingest.py` → `evaluate.py` |
@@ -329,6 +358,47 @@ RAG_CLOUD_ENABLED=1 RAG_CLOUD_CHAT_ENABLED=1 \
 - 全量ファイル数は成果物ごとに異なる。`passkey-gateway/docs` の実体は 91 ファイル、`eval-results-cloud-pipeline.json` は 88 ファイル／214 チャンクで、旧比較表の「87 ファイル／214 チャンク」は旧値。
 - 全量クラウドは 91 ファイル／1380 チャンク（`ingest.iter_chunks` 委譲後）、全量 Ruri は 88 ファイル／2200 チャンクでコーパスとチャンク条件が異なるため、両者の nDCG に優劣は付けられない。
 
+### A/B 比較の手順（`--run-ab`）
+
+A/B 比較は**各コマンドを手順どおり実行し、比較は
+`compare_cloud_local.py --run-ab` で行う**。実計測をまとめて呼び出す
+一括スクリプト（ingest → evaluate → cloud_bench を順に呼ぶもの）は
+作らない。外部送信と token 課金を伴ううえ、既存コマンドの組合せで
+十分に再現できるためである（車輪の再発明を避ける）。
+
+```bash
+# 1. ローカル Ruri を計測（全量。環境変数は「まず動かす」を参照）
+export RAG_CORPUS_DIR=passkey-gateway/docs
+export RAG_COLLECTION=rag_poc_ruri_full
+export EMBED_MODEL=kun432/cl-nagoya-ruri-base
+export RAG_VECTOR_SIZE=768
+export CHUNK_SIZE=300
+export CHUNK_OVERLAP=50
+export RAG_EMBED_PREFIX_QUERY='クエリ: '
+export RAG_EMBED_PREFIX_PASSAGE='文章: '
+python3 rag_poc/ingest.py
+python3 rag_poc/evaluate.py --qrels rag_poc/qrels.json \
+  --output rag_poc/eval-results-ruri-full.json
+
+# 2. クラウドを計測（キー読み込みと opt-in は「クラウドモデル」章を参照）
+export RAG_CLOUD_ENABLED=1
+export RAG_CLOUD_EMBED_MODEL=text-embedding-3-small
+python3 rag_poc/cloud_bench.py --corpus ../passkey-gateway/docs \
+  --qrels rag_poc/qrels.json \
+  --output rag_poc/eval-results-cloud-full.json
+
+# 3. 既存成果物だけを読んで A/B 比較表を出力（API 呼び出しなし）
+python3 rag_poc/compare_cloud_local.py --run-ab --sort ndcg
+```
+
+`--run-ab` は `eval-results*.json` を横断し、`eval-results-cloud-*` を
+クラウド側、それ以外（`baseline` / `ruri-*` 等）をローカル側として
+条件別にグループ化する。コーパス／チャンク数／クエリ数／repeat／
+指標定義が反対側と異なる行には `[条件不一致]` フラグを付け、直接
+比較できないことを明示する。並び替えは `--sort` を併用したときに
+同一条件の行グループ内だけで行われ、現行 `--sort` のグループ化を
+再利用する。新たな API 呼び出しも実計測も行わない。
+
 ## テスト
 
 ```bash
@@ -340,7 +410,7 @@ RAG_REQUIRE_RUST=1 python3 rag_poc/test_rag.py
 
 外部サービスへ接続せず、`unittest` のみで設定・RRF・JSON 解析・
 チャンク分割・評価クエリ・held-out 指標・rerank のフォールバックを
-検証する（全 221 件）。Rust 同等性テスト 9+8件（`ragcore` 側 9 件と
+検証する（全 230 件）。Rust 同等性テスト 9+8件（`ragcore` 側 9 件と
 Python 側 8 件）のうち、Rust バイナリを要する 8 件は未ビルド時に
 理由付きで skip される。第2のコマンドはこの skip を失敗へ切り替え、
 Rust 未ビルドを green で通さないためのゲートである。なお

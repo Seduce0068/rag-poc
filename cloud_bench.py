@@ -25,6 +25,10 @@ cloud_client.chat 側で付与し、ここでは生成しない。cloud_client.l
 利用可能なら呼び出し回数・トークン使用量・cost を payload.usage へ集計し、
 summary.estimated_cost_usd に課金見込みを記録する（--with-generation 指定時は
 生成対象件数と見込みを stderr へ警告する）。
+cost=0.0 かつ total_tokens>0 のときは cost_source を 'api-zero' として
+'api' と区別し、summary.estimated_cost_usd は API cost を維持したうえで
+summary.estimated_cost_from_tokens_usd を主指標として参照する。
+API が 0.0 を返す理由は未確認のため、課金ゼロと断定しない。
 """
 
 from __future__ import annotations
@@ -228,15 +232,24 @@ def _estimated_cost_usd(
 def _usage_cost_source(
     usage_payload: dict[str, int | float] | None, embed_model: str
 ) -> str | None:
-    """usage のコスト出所を 'api' / 'estimated' / None で返す。
+    """usage のコスト出所を 'api' / 'api-zero' / 'estimated' / None で返す。
 
-    API が cost を返していれば実値（'api'）を優先する。cost が無く、既知の
-    埋め込み単価と total_tokens があれば単価推定（'estimated'）。どちらも
-    無ければ None（判定不能として usage に None を残す）。
+    API が cost を返していれば実値（'api'）を優先する。ただし cost が 0.0 で
+    total_tokens が正の場合は、API が 0.0 を返す理由が未確認のため実コスト
+    として断定せず、既存の 'api' と区別する 'api-zero' を返す（token 推定
+    キーを参照する手掛かり）。cost が無く、既知の埋め込み単価と total_tokens
+    があれば単価推定（'estimated'）。どちらも無ければ None（判定不能として
+    usage に None を残す）。
     """
     if not usage_payload:
         return None
-    if _usage_cost(usage_payload.get("cost")) is not None:
+    api_cost = _usage_cost(usage_payload.get("cost"))
+    if api_cost is not None:
+        tokens = _usage_cost(usage_payload.get("total_tokens"))
+        if api_cost == 0.0 and tokens is not None and tokens > 0:
+            # 実コストが 0 かどうかは未確認。'api' と混同せず token 推定
+            # キーへの参照を促すため、別値 'api-zero' を設定する。
+            return "api-zero"
         return "api"
     if (
         _usage_cost(usage_payload.get("total_tokens")) is not None
@@ -943,6 +956,15 @@ def main() -> int:
         "レイテンシは time.perf_counter で計測し repeat 回の平均を summary に記録。",
         "秘密情報の値は出力・保存しない（生成テキストは mask_secrets を通過）。",
     ]
+    if cost_source == "api-zero":
+        # API cost が 0.0 でも理由は未確認。summary.estimated_cost_usd は
+        # API cost を維持し、token 由来の見込みを主指標として読むよう明記する。
+        notes.append(
+            "cost_source=api-zero のときは token 推定を参照: "
+            "summary.estimated_cost_usd は API 応答の cost=0.0 を維持するため、"
+            "summary / usage の estimated_cost_from_tokens_usd を主指標として読む。"
+            "API が 0.0 を返す理由は未確認で、課金が無いと断定するものではない。"
+        )
     if args.with_generation:
         notes.extend([
             "生成モデルは opencodeGO の OpenAI 互換 chat completions を使用"

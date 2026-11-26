@@ -68,13 +68,23 @@ prefix・次元検証・リトライ・旧 API（`/api/embeddings`）フォー�
 
 ### Rust の段階的導入
 
-Rust バイナリは `rag_poc/ragcore/target/debug/ragcore` に生成されるが、
-本番配線は `compare_embeddings.py` の `cosine_batch` と `distribution`
-の 2 op に限定される。`rust_bridge.py` 経由で呼び、Rust が無い／
-失敗した場合は Python 実装へフォールバックする。
-`chunk` / `point_id` / `fingerprint` / `recall` / `ndcg` / `latency` は
-`test_rag.py` の同等性テストでのみ使われる（Rust 側 9 件と Python 側 8 件の
-計 17 件（9+8件））。完全な Rust 再実装ではなく、効果の測れる箇所から
+Rust バイナリは `rag_poc/ragcore/target/debug/ragcore` に生成される。
+`ragcore` の op は 9 件（`chunk` / `cosine` / `cosine_batch` /
+`distribution` / `recall` / `ndcg` / `latency` / `fingerprint` /
+`point_id`）で、本番配線は `cosine_batch` と `distribution` の 2 op だけである。
+`compare_embeddings.py` が `rust_bridge.py` 経由で呼び、`cosine_batch` は
+質問×ファイルのコサイン類似度を 1 回で計算し、`distribution` はスコアの
+min/max/mean/stdev を求める。Rust が無い／失敗した場合は Python 実装へ
+フォールバックする。`cosine` は実計算には使わず、
+`rust_bridge.available()` の probe（`a=[1.0]` / `b=[1.0]` の応答確認）に限られる。
+残り 6 op（`chunk` / `point_id` / `fingerprint` / `recall` / `ndcg` /
+`latency`）は未配線で、`ingest.py` / `evaluate.py` の該当処理は純 Python の
+まま、Rust 実装は同等性テスト（`test_rag.py`）でのみ使われる
+（Rust 側 9 件と Python 側 8 件の計 17 件（9+8件））。
+`check_eval_results` は上記 9 op に含めない、CI ゲート専用の別 op である。
+`python3 rag_poc/rust_bridge.py check_eval_results` が `eval-results-*.json`
+のパスだけを Rust へ渡し、成果物のキー検証をゲートする（Python の検索・評価
+経路では呼ばない）。完全な Rust 再実装ではなく、効果の測れる箇所から
 段階的に置き換える判断である。
 
 ### 入力と設定の検証が設計に与える影響
@@ -286,6 +296,13 @@ token 課金が発生するため、ローカル Ruri と同等の品質を別�
 `text-embedding-3-small` が精度・レイテンシともに上回った。
 `gemini-embedding-2`（3072 次元、1M 入力トークン $0.20）も
 同一サブセットで計測し、`hit@1=1.0` / `nDCG@10=1.0` だった。
+
+実コストは API 応答に依存し未検証である。`cloud_bench.py` で
+`cost_source=api-zero`（`cost=0.0` かつ `total_tokens>0`）が返る理由も
+未確認で、課金がゼロだと断定しない。`summary.estimated_cost_usd` は
+API cost を維持するため、6 桁丸めで 0.0 に潰れる場合は
+`estimated_cost_from_tokens_usd` を主指標として読む（キーの使い分けは
+[reference.md のコストと token 推定キー](reference.md#コストと-token-推定キー)を参照）。
 
 ### 最新の実測値と旧値の扱い
 

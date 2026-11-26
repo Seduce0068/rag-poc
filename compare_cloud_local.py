@@ -8,6 +8,12 @@
 使い方:
   python3 rag_poc/compare_cloud_local.py --output rag_poc/cloud-local-comparison.json
   python3 rag_poc/compare_cloud_local.py --filter cloud --sort ndcg
+  python3 rag_poc/compare_cloud_local.py --run-ab --sort ndcg
+
+--run-ab は既存 eval-results*.json だけを横断し、ローカル / クラウドを
+条件別にグループ化した A/B 比較表を出す。外部 API 呼び出し・新規計測は
+行わない（実計測は ingest.py / evaluate.py / cloud_bench.py を手順どおり
+実行し、比較だけを本コマンドに委譲する）。
 """
 
 from __future__ import annotations
@@ -31,6 +37,18 @@ DEFAULT_ARTIFACTS: list[tuple[str, str, str]] = [
     ("eval-results-cloud-qwen3-subset.json", "cloud/qwen3-embedding-8b (subset)", "cloud_bench top10 + hit@k"),
     ("eval-results-cloud-gemini-subset.json", "cloud/gemini-embedding-2 (subset)", "cloud_bench top10 + hit@k"),
 ]
+
+# A/B 比較（--run-ab）で使うファイル名の判定規則。eval-results-cloud-* を
+# クラウド側、それ以外（baseline / ruri-* / alt 等）をローカル側として扱う。
+CLOUD_FILENAME_PREFIX = "eval-results-cloud-"
+
+# A/B 比較表に載せる指標（欠損は null、比較は条件が揃った行のみ）。
+AB_METRICS: tuple[str, ...] = (
+    "ndcg_at_10",
+    "set_recall_at_10",
+    "hit_at_1",
+    "latency_sec",
+)
 
 
 def _pick(d: dict[str, Any], *keys: str) -> Any:
@@ -178,6 +196,176 @@ def _sorted_rows(rows: list[dict[str, Any]], sort_key: str | None) -> list[dict[
     return result
 
 
+# ---------------------------------------------------------------------------
+# --run-ab: 既存成果物だけを読む A/B 比較（外部 API 呼び出し・実計測なし）
+# ---------------------------------------------------------------------------
+
+
+def _side_of(filename: str) -> str:
+    """ファイル名から比較編を判定する（eval-results-cloud-* は cloud、他は local）。"""
+    return "cloud" if filename.startswith(CLOUD_FILENAME_PREFIX) else "local"
+
+
+def _display_name(filename: str, side: str) -> str:
+    """ファイル名から表示名を作る（例: cloud/text-embedding-3-small-full）。"""
+    stem = filename
+    if stem.startswith("eval-results-"):
+        stem = stem[len("eval-results-"):]
+    if stem.endswith(".json"):
+        stem = stem[:-len(".json")]
+    return f"{side}/{stem}"
+
+
+def _infer_definition(data: dict[str, Any]) -> str:
+    """成果物の構造から指標定義を推定する（A/B 比較用）。
+
+    heldout.summary があれば evaluate.py 系、トップレベル summary に
+    ndcg_at_10 / set_recall_at_10 があれば cloud_bench 系とみなす。
+    """
+    if _pick(data, "heldout", "summary"):
+        return "evaluate query-level hit@k"
+    summary = data.get("summary")
+    if isinstance(summary, dict) and (
+        "ndcg_at_10" in summary or "set_recall_at_10" in summary
+    ):
+        return "cloud_bench top10 + hit@k"
+    return "unknown"
+
+
+def _discover_result_files() -> list[Path]:
+    """HERE 直下の eval-results*.json をファイル名順で列挙する。"""
+    return sorted(HERE.glob("eval-results*.json"), key=lambda path: path.name)
+
+
+def _ab_rows() -> tuple[list[dict[str, Any]], list[str]]:
+    """既存 eval-results*.json を横断読み取り、A/B 比較行を構築する。
+
+    外部 API 呼び出し・新規計測は一切行わない。壊れた JSON は skipped へ
+    記録してスキップし、比較表全体が止まらないようにする。
+    """
+    rows: list[dict[str, Any]] = []
+    skipped: list[str] = []
+    for path in _discover_result_files():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            skipped.append(f"{path.name}: {type(exc).__name__}")
+            continue
+        if not isinstance(data, dict):
+            skipped.append(f"{path.name}: JSON object ではない")
+            continue
+        side = _side_of(path.name)
+        row = _row(_display_name(path.name, side), _infer_definition(data), data)
+        row["side"] = side
+        row["file"] = path.name
+        rows.append(row)
+    return rows, skipped
+
+
+def _condition_of(row: dict[str, Any]) -> dict[str, Any]:
+    """比較条件を人間が読める辞書で返す（定義を含む 5 条件）。"""
+    return {
+        "corpus": row.get("source"),
+        "corpus_file_count": row.get("corpus_file_count"),
+        "chunk_count": row.get("chunk_count"),
+        "queries": row.get("queries"),
+        "repeat": row.get("repeat"),
+        "definition": row.get("definition"),
+    }
+
+
+def _mark_condition_match(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """反対側に同一条件の行があるかを明示フラグとして各 row へ付ける。
+
+    条件鍵は現行 --sort と同じ _condition_key（定義を含む）を使う。
+    反対側に一致が無い行は「条件不一致」として直接比較不可を明示する。
+    """
+    keys_by_side: dict[str, set[tuple[Any, ...]]] = {"local": set(), "cloud": set()}
+    for row in rows:
+        keys_by_side[row["side"]].add(_condition_key(row))
+    for row in rows:
+        other = "cloud" if row["side"] == "local" else "local"
+        matched = _condition_key(row) in keys_by_side[other]
+        row["condition_match"] = matched
+        row["condition_mismatch"] = not matched
+    return rows
+
+
+def _compact_row(row: dict[str, Any]) -> dict[str, Any]:
+    """比較表の 1 行をコンパクトな辞書で返す。"""
+    return {
+        "file": row.get("file"),
+        "name": row.get("name"),
+        "side": row.get("side"),
+        "embed_model": row.get("embed_model"),
+        "mode": row.get("mode"),
+        "definition": row.get("definition"),
+        "condition_mismatch": row.get("condition_mismatch"),
+        "metrics": {metric: row.get(metric) for metric in AB_METRICS},
+    }
+
+
+def _ab_summary(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """比較条件ごとに local / cloud の行をまとめた比較表を返す。
+
+    グループ鍵は _condition_key（現行 --sort と同じ条件）。同一条件の
+    両側が揃ったグループだけ comparable=True とし、片側しか無い
+    グループには比較不可の理由を note として付ける。
+    """
+    groups: dict[tuple[Any, ...], dict[str, Any]] = {}
+    order: list[tuple[Any, ...]] = []
+    for row in rows:
+        key = _condition_key(row)
+        if key not in groups:
+            groups[key] = {
+                "condition": _condition_of(row),
+                "local": [],
+                "cloud": [],
+            }
+            order.append(key)
+        groups[key][row["side"]].append(_compact_row(row))
+
+    result: list[dict[str, Any]] = []
+    for key in order:
+        group = groups[key]
+        local_rows = group["local"]
+        cloud_rows = group["cloud"]
+        comparable = bool(local_rows and cloud_rows)
+        entry: dict[str, Any] = {
+            "condition": group["condition"],
+            "comparable": comparable,
+            "local": local_rows,
+            "cloud": cloud_rows,
+        }
+        if not comparable:
+            missing = "cloud" if local_rows else "local"
+            entry["note"] = f"反対側（{missing}）に同一条件の成果物が無いため直接比較不可"
+        result.append(entry)
+    return result
+
+
+def _print_ab_table(rows: list[dict[str, Any]], stream: Any) -> None:
+    """A/B 比較表を人間向けに stderr へ出力する（stdout は JSON のみ）。"""
+    print(
+        "[compare] A/B: 既存 eval-results*.json のみ（外部 API 呼び出しなし）",
+        file=stream,
+    )
+    print(
+        "[compare] [条件不一致] は反対側に同一条件の行が無いことを示す。"
+        "ソートは同一条件グループ内のみ。",
+        file=stream,
+    )
+    for row in rows:
+        flag = "[条件不一致]" if row.get("condition_mismatch") else "[条件一致]"
+        metrics = " ".join(
+            f"{metric}={row.get(metric)}" for metric in AB_METRICS
+        )
+        print(
+            f"[compare] {row.get('side'):<5} {flag} {row.get('file')} | {metrics}",
+            file=stream,
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", default=None, help="比較 JSON の出力先")
@@ -192,37 +380,67 @@ def main() -> int:
         default=None,
         help="並び順: ndcg は ndcg_at_10 降順、latency は latency_sec 昇順、hit は hit_at_1 降順。同一条件グループ内のみ有効（既定は現行順）",
     )
+    parser.add_argument(
+        "--run-ab",
+        action="store_true",
+        help="既存 eval-results*.json を local/cloud 別・条件別にグループ化した A/B 比較表を出す（外部 API 呼び出しなし・新規計測なし）",
+    )
     args = parser.parse_args()
 
-    rows: list[dict[str, Any]] = []
-    for filename, label, definition in DEFAULT_ARTIFACTS:
-        path = HERE / filename
-        if not path.exists():
-            continue
-        data = json.loads(path.read_text(encoding="utf-8"))
-        rows.append(_row(label, definition, data))
+    if args.run_ab:
+        rows, skipped = _ab_rows()
+        rows = _filtered_rows(rows, args.filter)
+        rows = _mark_condition_match(rows)
+        rows = _sorted_rows(rows, args.sort)
+        payload: dict[str, Any] = {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "mode": "run-ab",
+            "notes": [
+                "既存の eval-results*.json を読み取った A/B 比較であり、新たな API 呼び出し・実計測は無い。",
+                "side はファイル名で判定する（eval-results-cloud-* を cloud、その他を local）。",
+                "condition_match は反対側（local/cloud）に _condition_key（コーパス / チャンク数 / クエリ数 / repeat / 指標定義）が同一の行があるかを示す。false の行には [条件不一致] フラグを付け、直接比較不可であることを明示する。",
+                "ab_comparison は同一条件グループごとに local / cloud の行をまとめた比較表。comparable=false のグループは片側のみで比較不可。",
+                "--sort は現行と同じグループ化を再利用し、同一条件の行グループ内でのみ有効。条件が異なる行は相互に並べ替えない。",
+                "set_recall_at_10 は集合 recall、hit_at_1 は query-level hit@1。ndcg_at_10 は definition（evaluate / cloud_bench）に依存するため条件列を参照。",
+            ],
+            "skipped": skipped,
+            "ab_comparison": _ab_summary(rows),
+            "rows": rows,
+        }
+    else:
+        rows = []
+        for filename, label, definition in DEFAULT_ARTIFACTS:
+            path = HERE / filename
+            if not path.exists():
+                continue
+            data = json.loads(path.read_text(encoding="utf-8"))
+            rows.append(_row(label, definition, data))
 
-    rows = _filtered_rows(rows, args.filter)
-    rows = _sorted_rows(rows, args.sort)
+        rows = _filtered_rows(rows, args.filter)
+        rows = _sorted_rows(rows, args.sort)
 
-    payload = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "notes": [
-            "既存の eval-results*.json を読み取った比較であり、新たな API 呼び出しは無い。",
-            "set_recall_at_10 は集合 recall、hit_at_1 は evaluate.py と同じ query-level hit@1。",
-            "ndcg_at_10 は成果物ごとの定義（evaluate は上位10件・ファイル1回、cloud_bench は top10）に依存するため定義列を参照。",
-            "コーパス / チャンク数 / クエリ数 / repeat が異なる行は直接比較不可であるため、比較条件を揃えてから判定すること。",
-            "--sort はコーパス / チャンク数 / クエリ数 / repeat / 指標定義が同一の行グループ内でのみ有効。条件が異なる行はグループ化して順序を維持し、相互には並べ替えない。",
-            "mode は heldout.summary から指標を採用したモード名（hybrid 優先、無ければ辞書順先頭。cloud_bench 系は null）。",
-        ],
-        "rows": rows,
-    }
+        payload = {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "notes": [
+                "既存の eval-results*.json を読み取った比較であり、新たな API 呼び出しは無い。",
+                "set_recall_at_10 は集合 recall、hit_at_1 は evaluate.py と同じ query-level hit@1。",
+                "ndcg_at_10 は成果物ごとの定義（evaluate は上位10件・ファイル1回、cloud_bench は top10）に依存するため定義列を参照。",
+                "コーパス / チャンク数 / クエリ数 / repeat が異なる行は直接比較不可であるため、比較条件を揃えてから判定すること。",
+                "--sort はコーパス / チャンク数 / クエリ数 / repeat / 指標定義が同一の行グループ内でのみ有効。条件が異なる行はグループ化して順序を維持し、相互には並べ替えない。",
+                "mode は heldout.summary から指標を採用したモード名（hybrid 優先、無ければ辞書順先頭。cloud_bench 系は null）。",
+            ],
+            "rows": rows,
+        }
+
     text = json.dumps(payload, ensure_ascii=False, indent=2)
     if args.output:
         out = Path(args.output).resolve()
         out.write_text(text, encoding="utf-8")
         # ログは stderr へ。stdout は常に JSON のみにする。
         print("[compare] wrote", out, file=sys.stderr, flush=True)
+    if args.run_ab:
+        # 人間向け比較表は stderr へ。stdout は常に JSON のみにする。
+        _print_ab_table(rows, sys.stderr)
     print(text)
     return 0
 

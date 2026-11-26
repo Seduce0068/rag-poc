@@ -171,17 +171,36 @@ recall@10 / nDCG@10 のため取得件数は最大 10 まで引き上げる。
 
 ## 代表的な実測値
 
-元 README の評価章に記載された数値を変更せず転記する。
+元 README の評価章に記載された数値を変更せず転記する。比較条件が表だけ
+で完結するよう definition / コーパス / チャンク / クエリ / repeat の列を
+追加した。出典に値が無い場合は `—` とする。レイテンシは計測対象が
+異なる（クラウドは埋め込み平均、ローカルは `hybrid-rerank` 検索平均）ため、
+definition 列と併せて読むこと。
 
-| 指標 | 値 | 条件・出典 |
-| --- | --- | --- |
-| 全量 qwen `hybrid-rerank` の nDCG@10 | 0.6243 | `rag_poc_full`、held-out 9 クエリ、`RAG_EVAL_REPEAT=10`（`eval-results-baseline.json`） |
-| 全量 Ruri `hybrid-rerank` の nDCG@10 | 0.7542 | `rag_poc_ruri_full`、`qrels.json` 9 クエリ（`eval-results-ruri-full.json`） |
-| クラウド Qdrant 正式パイプライン hybrid の nDCG@10 | 0.8681 | `eval-results-cloud-pipeline.json` |
-| クラウド全量 `text-embedding-3-small` の nDCG@10 | 0.8597 | 91 ファイル／1380 チャンク、`repeat=1`（`eval-results-cloud-full.json`） |
-| rerank nDCG@5 | 0.8819 | 9 クエリ、`rerank_query_count=9`（`eval-results-cloud-full.json`） |
-| `qwen3-embedding-8b` の nDCG@10 | 0.8978 | `cloud_bench top10`、同一サブセット 6 ファイル／81 チャンク |
-| 全量 qwen `hybrid-rerank` のレイテンシ平均 | 6.22 秒 | `RAG_EVAL_REPEAT=10`（ウォームアップ 1 回＋10 回計測＝60 サンプル） |
+| 指標 | 値 | definition | コーパス | チャンク | クエリ | repeat | 出典 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 全量 qwen `hybrid-rerank` の nDCG@10 | 0.6243 | evaluate query-level hit@k | `rag_poc_full`（88 ファイル） | 2200 | 9 | 10 | `eval-results-baseline.json` |
+| 全量 Ruri `hybrid-rerank` の nDCG@10 | 0.7542 | evaluate query-level hit@k | `rag_poc_ruri_full`（88 ファイル） | 2200 | 9 | `—` | `eval-results-ruri-full.json` |
+| クラウド Qdrant 正式パイプライン hybrid の nDCG@10 | 0.8681 | evaluate query-level hit@k | `rag_poc_cloud_full`（88 ファイル） | 214 | 9 | 1 | `eval-results-cloud-pipeline.json` |
+| クラウド全量 `text-embedding-3-small` の nDCG@10 | 0.8597 | cloud_bench top10 + hit@k | 91 ファイル | 1380 | 9 | 1 | `eval-results-cloud-full.json` |
+| rerank nDCG@5 | 0.8819 | cloud_bench top10 + hit@k | 91 ファイル | 1380 | 9（`rerank_query_count=9`） | 1 | `eval-results-cloud-full.json` |
+| `qwen3-embedding-8b` の nDCG@10 | 0.8978 | cloud_bench top10 + hit@k | 6 ファイルのサブセット | 81 | 6 | 1 | `eval-results-cloud-qwen3-subset.json` |
+| 全量 qwen `hybrid-rerank` のレイテンシ平均 | 6.22 秒 | evaluate query-level hit@k | `rag_poc_full`（88 ファイル） | 2200 | 9 | 10 | `eval-results-baseline.json`（ウォームアップ 1 回＋10 回計測＝60 サンプル） |
+
+### レイテンシ実測値
+
+`todo.md` のレイテンシ欠落項目（8.03 / 10.04 / 42.3 / 3.32 秒）を条件列
+付きで追記する。値は既存記録の転記であり、新たな実計測は行っていない。
+
+| レイテンシ | definition | コーパス | チャンク | クエリ | repeat | 出典・照合状況 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 8.03 秒 | cloud_bench top10 + hit@k | 6 ファイルのサブセット | 81 | 6 | 1 | 親提示値（`todo.md` GC-DOCS）。ローカル JSON の `avg` とは計測範囲が異なる可能性があり要照合 |
+| 10.04 秒 | evaluate query-level hit@k | `rag_poc_cloud_full`（88 ファイル） | 214 | 9 | 1 | 親提示値（`todo.md` GC-DOCS）。ローカル JSON の `avg` とは計測範囲が異なる可能性があり要照合 |
+| 42.3 秒 | cloud_bench top10 + hit@k | 91 ファイル | 1380 | 9 | 1 | `eval-results-cloud-full.json` の埋め込み平均 42.259882 秒を丸めた値（一致確認済み） |
+| 3.32 秒 | evaluate query-level hit@k | `rag_poc_ruri_full`（88 ファイル） | 2200 | 9 | `—` | `eval-results-ruri-full.json` の `hybrid-rerank` 検索平均 3.322006 秒を丸めた値（一致確認済み） |
+
+8.03 / 10.04 秒の成果物単位の照合は `compare_cloud_local.py --run-ab` で
+条件を揃えてから行うこと（[A/B 比較の手順](../README.md#ab-比較の手順--run-ab)）。
 
 ## 成果物一覧
 
@@ -219,6 +238,46 @@ recall@10 / nDCG@10 のため取得件数は最大 10 まで引き上げる。
 丸めは `generated_at` だけに適用し、比較条件のキーは変更しない。
 **未丸めの cloud 成果物が残っている場合は公開前に必ずこの丸めを適用する**
 （JSON の直接編集は本担当範囲外のため、公開前の運用で対応する）。
+
+## Rust op の配線状況
+
+`ragcore` の op は 9 件（`chunk` / `cosine` / `cosine_batch` /
+`distribution` / `recall` / `ndcg` / `latency` / `fingerprint` /
+`point_id`）で、本番配線は `cosine_batch` と `distribution` の 2 op だけである。
+`compare_embeddings.py` が `rust_bridge.py` 経由で呼び、`cosine_batch` は
+質問×ファイルのコサイン類似度を 1 回で計算し、`distribution` はスコアの
+min/max/mean/stdev を求める。Rust が無い／失敗した場合は Python 実装へ
+フォールバックする（フォールバック発生は出力 JSON の `notes` に記録される）。
+`cosine` は実計算には使わず、`rust_bridge.available()` の probe
+（`a=[1.0]` / `b=[1.0]` の応答確認）に限られる。
+残り 6 op（`chunk` / `point_id` / `fingerprint` / `recall` / `ndcg` /
+`latency`）は未配線で、`ingest.py` / `evaluate.py` の該当処理は純 Python の
+まま、Rust 実装は同等性テスト（`test_rag.py`）でのみ使われる。
+`check_eval_results` は上記 9 op に含めない、CI ゲート専用の別 op である。
+`python3 rag_poc/rust_bridge.py check_eval_results` が `eval-results-*.json`
+のパスだけを Rust へ渡し、成果物のキー検証をゲートする（Python の検索・評価
+経路では呼ばない）。
+
+## コストと token 推定キー
+
+`cloud_bench.py` が出力する `eval-results-cloud-*.json` の `usage` / `summary`
+には次のキーが入る（根拠: `cloud_bench.py` の `_usage_cost_source` /
+`_estimated_cost_usd` / `_token_cost_usd`）。
+
+| キー | 値 | 意味 |
+| --- | --- | --- |
+| `usage.cost_source` | `api` / `api-zero` / `estimated` / `None` | API 実値／cost 0.0／単価推定／判定不能 |
+| `summary.estimated_cost_usd` | 小数または `None` | API cost を 6 桁で保持。cost が無ければ単価 × total_tokens の 6 桁推定 |
+| `summary.estimated_cost_from_tokens_usd` | 小数（12 桁） | 6 桁丸めで 0.0 に潰れる場合のトークン由来見込み |
+| `usage.estimated_cost_from_tokens_usd` | 小数（12 桁） | 同上（`usage` 側にも記録） |
+
+`cost_source=api-zero` は `cost=0.0` かつ `total_tokens>0` のときに設定する。
+**API が 0.0 を返した理由は未確認**で、実コストがゼロだと断定しない。
+`summary.estimated_cost_usd` は API cost（0.0）を維持し、主指標は
+`estimated_cost_from_tokens_usd` とする。成果物 `notes` に
+「cost_source=api-zero のときは token 推定を参照」を明記する。
+`cost_source=estimated` は cost キーが無い場合、`api` は正の cost、
+`None` は cost が無く単価推定もできない場合を表す。
 
 ## 検証
 
