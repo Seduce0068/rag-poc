@@ -24,6 +24,10 @@ CHUNK_OVERLAP = int(os.environ.get("CHUNK_OVERLAP", "100"))
 TOP_K = int(os.environ.get("RAG_TOP_K", "10"))
 RERANK_MAX_DOCS = int(os.environ.get("RAG_RERANK_MAX_DOCS", "5"))
 
+# 検索モードの唯一の定義（R2-B）。query.SEARCH_MODES / evaluate.MODES は
+# このタプルを直接参照し、ローカル定義との乖離はテストで検出する。
+SEARCH_MODES: tuple[str, ...] = ("dense", "keyword", "hybrid", "hybrid-rerank")
+
 VECTOR_SIZE = int(os.environ.get("RAG_VECTOR_SIZE", "2048"))
 OLLAMA_TIMEOUT = float(os.environ.get("OLLAMA_TIMEOUT", "300"))
 QDRANT_TIMEOUT = float(os.environ.get("QDRANT_TIMEOUT", "300"))

@@ -97,6 +97,57 @@ class ConfigTest(unittest.TestCase):
         self.assertLess(config.CHUNK_OVERLAP, config.CHUNK_SIZE)
 
 
+class ExperimentDefaultsTest(unittest.TestCase):
+    """config.experiment_defaults() が 6+1 キーを返すこと（R2-B）。"""
+
+    EXPECTED_KEYS = {
+        "RRF_K",
+        "SCROLL_PAGE_SIZE",
+        "MAX_SCROLL_PAGES",
+        "EMBED_BATCH_SIZE",
+        "UPSERT_BATCH_SIZE",
+        "RERANK_MAX_CHARS",
+        "COMPARE_MAX_CHARS",
+    }
+
+    def test_returns_seven_keys(self):
+        defaults = config.experiment_defaults()
+
+        self.assertIsInstance(defaults, dict)
+        self.assertEqual(len(defaults), 7)
+        self.assertEqual(set(defaults), self.EXPECTED_KEYS)
+
+    def test_values_match_module_constants(self):
+        defaults = config.experiment_defaults()
+
+        for key in self.EXPECTED_KEYS:
+            with self.subTest(key=key):
+                self.assertEqual(defaults[key], getattr(config, key))
+                self.assertIsInstance(defaults[key], int)
+
+
+class SearchModesContractTest(unittest.TestCase):
+    """query.SEARCH_MODES / evaluate.MODES が config と同値であること（R2-B）。"""
+
+    EXPECTED_MODES = ("dense", "keyword", "hybrid", "hybrid-rerank")
+
+    def test_config_search_modes_exact_tuple(self):
+        self.assertEqual(config.SEARCH_MODES, self.EXPECTED_MODES)
+
+    def test_query_search_modes_equals_config(self):
+        self.assertEqual(query.SEARCH_MODES, config.SEARCH_MODES)
+
+    def test_evaluate_modes_equals_config(self):
+        self.assertEqual(evaluate.MODES, config.SEARCH_MODES)
+
+    def test_both_consumers_expose_four_string_modes(self):
+        for name, modes in (("query", query.SEARCH_MODES), ("evaluate", evaluate.MODES)):
+            with self.subTest(name=name):
+                self.assertIsInstance(modes, tuple)
+                self.assertEqual(len(modes), 4)
+                self.assertTrue(all(isinstance(mode, str) for mode in modes))
+
+
 class RrfFuseTest(unittest.TestCase):
     """rrf_fuse が RRF(k=60) で順位を統合すること。"""
 
@@ -1460,6 +1511,55 @@ class RustSkipGateTest(unittest.TestCase):
                 with self.assertRaises(unittest.SkipTest) as ctx:
                     self._gate_run(value)
                 self.assertIn("Rust binary not built", str(ctx.exception))
+
+
+def _run_dummy_rust_gate(require_rust):
+    """_RustSkipCounter 継承のダミー TestCase を TextTestRunner で実行する。
+
+    実際の Rust テストと同じ skip→ゲート経路を、外部依存なしで再現する。
+    _RUST_SKIP_REASONS は実行ごとに空のリストへ差し替え、他テストの skip と混線しないようにする。
+    """
+    gate_module = sys.modules[__name__]
+
+    class _DummyRustGateCase(_RustSkipCounter, unittest.TestCase):
+        SKIP_GATE_ENV = "RAG_REQUIRE_RUST"
+
+        @classmethod
+        def tearDownClass(cls):
+            super().tearDownClass()
+            if os.environ.get(cls.SKIP_GATE_ENV, "") == "1" and _RUST_SKIP_REASONS:
+                raise AssertionError(
+                    "Rust 同等性テストが skip されました: %d 件 (%s=1)"
+                    % (len(_RUST_SKIP_REASONS), cls.SKIP_GATE_ENV)
+                )
+
+        def test_dummy_rust_skip(self):
+            self.skipTest("Rust binary not built")
+
+    suite = unittest.TestSuite([_DummyRustGateCase("test_dummy_rust_skip")])
+    stream = io.StringIO()
+    with mock.patch.object(gate_module, "_RUST_SKIP_REASONS", []), \
+            mock.patch.dict(os.environ, {"RAG_REQUIRE_RUST": require_rust}):
+        return unittest.TextTestRunner(stream=stream, verbosity=0).run(suite)
+
+
+class RustSkipCounterGateTest(unittest.TestCase):
+    """TextTestRunner でも RAG_REQUIRE_RUST ゲートが成立すること（R2-B）。"""
+
+    def test_require_rust_one_turns_dummy_skip_into_failure(self):
+        result = _run_dummy_rust_gate("1")
+
+        self.assertFalse(result.wasSuccessful())
+        self.assertTrue(result.errors)
+        self.assertTrue(
+            any("RAG_REQUIRE_RUST" in str(error) for _, error in result.errors)
+        )
+
+    def test_require_rust_zero_keeps_dummy_skip_passing(self):
+        result = _run_dummy_rust_gate("0")
+
+        self.assertTrue(result.wasSuccessful())
+        self.assertEqual(len(result.skipped), 1)
 
 
 class LastSearchErrorsContractTest(unittest.TestCase):

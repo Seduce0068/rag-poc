@@ -30,6 +30,7 @@ summary.estimated_cost_usd に課金見込みを記録する（--with-generation
 from __future__ import annotations
 
 import argparse
+import hashlib
 import inspect
 import json
 import math
@@ -50,8 +51,9 @@ QRELS = HERE / "qrels-subset.json"
 OUTPUT = HERE / "eval-results-cloud-subset.json"
 
 # コーパスハッシュはハードコードしない。設定ファイル／環境変数から読み、
-# 無ければ payload へ入れない（eval-results-cloud-pipeline.json の値と
-# 同一にしたい場合は利用側でこの設定を与える）。
+# 無ければ実コーパス（対象 .md の生バイトをパス順に連結）から計算する。
+# 出所は corpus_sha256_source（config / computed）に明記し、設定値がある場合は
+# 従来どおりその値を使う（警告は出さず挙動不変）。
 CORPUS_SHA256_ENV = "RAG_CLOUD_CORPUS_SHA256"
 CORPUS_SHA256_CONFIG = HERE / "cloud-bench-config.json"
 
@@ -403,20 +405,66 @@ def _source(text: str) -> str:
     return first.strip()
 
 
-def _configured_corpus_sha256() -> str | None:
-    """設定された corpus_sha256 を返す（無ければ None＝payload から省略）。"""
+class _CorpusSha256Result(str):
+    """corpus_sha256 の値と出所（config / computed）を保持する str 互換値。
+
+    ``str`` を継承するため、既存の文字列としての利用（比較・JSON 化など）は
+    そのまま成立する。``source`` 属性で出所を参照する（config.py の
+    ``EndpointProblem(str)`` と同じパターン）。
+    """
+
+    source: str
+
+    def __new__(cls, value: str, source: str) -> "_CorpusSha256Result":
+        instance = super().__new__(cls, value)
+        instance.source = source
+        return instance
+
+
+def _compute_corpus_sha256(files: list[Path]) -> str | None:
+    """実コーパスの対象ファイルから SHA-256 を計算する。
+
+    ``evaluate._corpus_fingerprint()`` と同じ方式で、ソート済みの対象 .md
+    ファイルの生バイトを連結してダイジェストを取る。1 件も読めなかった
+    場合は None を返す（payload からの省略を維持）。
+    """
+    digest = hashlib.sha256()
+    counted = 0
+    for path in sorted(files, key=lambda item: str(item)):
+        try:
+            digest.update(path.read_bytes())
+            counted += 1
+        except OSError:
+            continue
+    return digest.hexdigest() if counted else None
+
+
+def _configured_corpus_sha256(
+    files: list[Path] | None = None,
+) -> _CorpusSha256Result | None:
+    """corpus_sha256 とその出所を返す（設定 > 実コーパス計算の順）。
+
+    設定（環境変数 ``RAG_CLOUD_CORPUS_SHA256`` または
+    ``cloud-bench-config.json`` の ``corpus_sha256``）があれば従来どおり
+    その値を返し ``source='config'`` を付与する（警告は出さず挙動不変）。
+    設定が無く ``files`` が与えられれば実コーパスから SHA-256 を計算し
+    ``source='computed'`` を付与する。いずれも無ければ None。
+    """
     value = os.environ.get(CORPUS_SHA256_ENV)
     if value and value.strip():
-        return value.strip()
+        return _CorpusSha256Result(value.strip(), "config")
     try:
         data = json.loads(CORPUS_SHA256_CONFIG.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return None
-    if not isinstance(data, dict):
-        return None
-    raw = data.get("corpus_sha256")
-    if isinstance(raw, (str, int)) and str(raw).strip():
-        return str(raw).strip()
+        data = None
+    if isinstance(data, dict):
+        raw = data.get("corpus_sha256")
+        if isinstance(raw, (str, int)) and str(raw).strip():
+            return _CorpusSha256Result(str(raw).strip(), "config")
+    if files:
+        computed = _compute_corpus_sha256(files)
+        if computed:
+            return _CorpusSha256Result(computed, "computed")
     return None
 
 
@@ -880,7 +928,7 @@ def main() -> int:
             sum(rerank_scores) / len(rerank_scores), 4
         )
 
-    corpus_sha256 = _configured_corpus_sha256()
+    corpus_sha256 = _configured_corpus_sha256(files=files)
     notes = [
         "埋め込みは opencodeGO の OpenAI 互換 /embeddings API を使用。",
         "スコアはコサイン類似度、ファイル単位の best score でランク付け。",
@@ -911,9 +959,22 @@ def main() -> int:
             % RERANK_K
         )
     notes.extend(usage.notes)
-    if not corpus_sha256:
+    if corpus_sha256:
+        # 成果物の notes に corpus_sha256 の出典（config / computed）を明記する。
+        # 設定値がある場合は警告を出さず、source 明示のみで挙動不変。
+        if corpus_sha256.source == "config":
+            origin = "設定（%s / %s）の値" % (
+                CORPUS_SHA256_ENV, CORPUS_SHA256_CONFIG.name
+            )
+        else:
+            origin = "実コーパス（対象 .md ファイルの生バイトをパス順に連結）から計算"
         notes.append(
-            "corpus_sha256 は設定（%s / %s）が無いため省略。"
+            "corpus_sha256 の出典: %s（corpus_sha256_source=%s）。"
+            % (origin, corpus_sha256.source)
+        )
+    else:
+        notes.append(
+            "corpus_sha256 は設定（%s / %s）が無く、実コーパスの計算もできないため省略。"
             % (CORPUS_SHA256_ENV, CORPUS_SHA256_CONFIG.name)
         )
 
@@ -941,7 +1002,9 @@ def main() -> int:
         "notes": notes,
     }
     if corpus_sha256:
-        payload["corpus_sha256"] = corpus_sha256
+        payload["corpus_sha256"] = str(corpus_sha256)
+        # 新規キー: 設定注入（config）か実計算（computed）かを明示する。
+        payload["corpus_sha256_source"] = corpus_sha256.source
     if usage_payload is not None:
         # API cost / 単価推定 / 判定不能(None) を cost_source で明示する。
         usage_payload["cost_source"] = cost_source

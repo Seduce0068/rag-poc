@@ -45,6 +45,7 @@ from config import (
     RETRY_TOTAL,
     RRF_K,
     SCROLL_PAGE_SIZE,
+    SEARCH_MODES,
     TOP_K,
     cloud_chat_enabled,
     embedding_prefixes,
@@ -77,10 +78,9 @@ except ImportError:
 # 唯一の情報源とし、上記 import でモジュール名として公開する（後方互換）。
 DEFAULT_MODE = "hybrid"
 
-# 許容する検索 mode の唯一の定義。CLI の argparse choices と search() 入口の
-# 検証の両方から参照する（config.py は読み取り専用のため、ここに定数を置く）。
-# evaluate.MODES と同じ集合だが、循環 import を避けるため query.py 内で定義する。
-SEARCH_MODES: tuple[str, ...] = ("dense", "keyword", "hybrid", "hybrid-rerank")
+# 許容する検索 mode は config.SEARCH_MODES を唯一の情報源とする（R2-B）。
+# CLI の argparse choices と search() 入口の検証の両方から同じタプルを参照する。
+# from config import によりモジュール名として公開され、既存の参照はそのまま成立する。
 
 # ペイロードキーは config.PAYLOAD_* を優先し、旧キーは後方互換で残す。
 TEXT_KEYS: tuple[str, ...] = (PAYLOAD_TEXT_KEY, "content", "chunk", "body")

@@ -66,7 +66,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
-MODES: tuple[str, ...] = ("dense", "keyword", "hybrid", "hybrid-rerank")
+# 検索モードは config.SEARCH_MODES を唯一の情報源とする（R2-B）。
+# ヘルパー検証は _import_config() が担い、ここでは値の参照だけを行う。
+import config  # type: ignore
+
+MODES: tuple[str, ...] = config.SEARCH_MODES
 
 # held-out の評価深さ。上位 10 件を必要とするため、config.TOP_K が小さくても
 # 取得だけは引き上げる（指標側は k でスライスする）。
