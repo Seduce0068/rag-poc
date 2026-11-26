@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+ragcore/target/
+.ingest-checkpoint.json
+.recreate-audit.json
+.recreate-audit.json.tmp
+eval-results-*.json
+!eval-results-baseline.json
+!eval-results-other-domain.json
+!eval-results-ruri-subset.json
+!eval-results-ruri-full.json
+!eval-results-alt.json
+eval-results.json
+.betterleaksignore
