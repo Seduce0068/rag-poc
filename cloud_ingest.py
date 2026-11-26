@@ -27,6 +27,9 @@ from config import PAYLOAD_TEXT_KEY
 
 HERE = Path(__file__).resolve().parent
 
+# cloud_client と共通の埋め込み次元上書き環境変数（明示値が最優先）。
+ENV_CLOUD_DIMENSIONS = "RAG_CLOUD_DIMENSIONS"
+
 # cloud_client.expected_dim(model) が無いときの最小テーブル。
 # 出典: cloud_client.EMBEDDING_MODELS のコメント（2026-11-26 取得）。
 _MODEL_DIMENSIONS: dict[str, int] = {
@@ -51,11 +54,40 @@ def _warn(message: object) -> None:
     print(f"[cloud-ingest] {config.mask_secrets(message)}", file=sys.stderr, flush=True)
 
 
+def _configured_dimensions() -> int | None:
+    """RAG_CLOUD_DIMENSIONS の明示値を返す（未設定なら None）。
+
+    正規化は cloud_client.resolve_dimensions() へ委譲する。不正値は
+    CloudUnavailable のまま送出する（値自体は例外文に出さない）。
+    cloud_client に resolver が無い場合の最小フォールバックも持つが、
+    通常は cloud_client 側の検証が唯一の情報源となる。
+    """
+    resolver = getattr(cloud_client, "resolve_dimensions", None)
+    if callable(resolver):
+        return resolver()
+    raw = os.environ.get(ENV_CLOUD_DIMENSIONS)
+    if raw is None or not str(raw).strip():
+        return None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        raise RuntimeError(
+            f"{ENV_CLOUD_DIMENSIONS} は正の整数である必要があります"
+        ) from None
+    if value <= 0:
+        raise RuntimeError(f"{ENV_CLOUD_DIMENSIONS} は正の整数である必要があります")
+    return value
+
+
 def _expected_dim(model: str) -> int | None:
-    """モデルの期待次元を解決する（cloud_client を優先し、無ければローカル表）。"""
+    """期待次元を解決する（RAG_CLOUD_DIMENSIONS > cloud_client > ローカル表）。"""
+    configured = _configured_dimensions()
+    if configured is not None:
+        return configured
     resolver = getattr(cloud_client, "expected_dim", None)
     if callable(resolver):
-        return int(resolver(model))
+        resolved = resolver(model)
+        return int(resolved) if resolved is not None else None
     return _MODEL_DIMENSIONS.get(model)
 
 

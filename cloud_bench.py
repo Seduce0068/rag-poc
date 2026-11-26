@@ -7,6 +7,7 @@
   RAG_CLOUD_ENABLED=1 python3 rag_poc/cloud_bench.py
   RAG_CLOUD_ENABLED=1 python3 rag_poc/cloud_bench.py --repeat 3 --with-generation
   RAG_CLOUD_ENABLED=1 python3 rag_poc/cloud_bench.py --with-generation --generation-model deepseek-v4.1-flash
+   RAG_CLOUD_ENABLED=1 python3 rag_poc/cloud_bench.py --with-generation --generation-max-queries 3  # コスト制限時のみ先頭3件
 
 結果は eval-results-cloud-subset.json へ保存する（退避対象）。
 秘密情報の値は出力・保存しない。
@@ -46,7 +47,7 @@ CORPUS_SHA256_CONFIG = HERE / "cloud-bench-config.json"
 RECALL_K = (1, 3, 5, 10)
 NDCG_K = 10
 RERANK_K = 5
-GENERATION_QUERY_LIMIT = 3
+# 生成対象クエリ数は --generation-max-queries で制御する（既定 0＝全件）。
 
 
 USAGE_KEYS: tuple[str, ...] = (
@@ -365,11 +366,12 @@ def _run_generation(
                 for i, src in enumerate(ordered[:RERANK_K])
                 if src in rel
             )
-            # ideal はファイル単位で一意な候補と正解の積集合で算出する。
-            available = len(set(record["rerank_candidates"]) & rel)
+            # ideal は qrels の relevant_sources 全体（最大 RERANK_K 件）を母集団に
+            # 算出する。候補内に正解が無い場合は dcg=0 となり、検索 nDCG と
+            # 比較可能な定義へ揃える（旧来の「候補内の正解数」は使わない）。
             ideal = sum(
                 1.0 / math.log2(i + 2)
-                for i in range(min(available, RERANK_K))
+                for i in range(min(len(rel), RERANK_K))
             )
             if ideal:
                 record["rerank_ndcg_at_5"] = round(dcg / ideal, 4)
@@ -406,6 +408,12 @@ def main() -> int:
         default=None,
         help="生成モデル ID（既定 cloud_client.model()）",
     )
+    parser.add_argument(
+        "--generation-max-queries",
+        type=int,
+        default=0,
+        help="生成モデルで計測するクエリ数（既定0＝全件、N指定で先頭N件に制限）",
+    )
     args = parser.parse_args()
 
     if not cloud_client.enabled():
@@ -413,6 +421,9 @@ def main() -> int:
         return 2
     if args.repeat < 1:
         print("--repeat は1以上を指定してください", file=sys.stderr)
+        return 2
+    if args.generation_max_queries < 0:
+        print("--generation-max-queries は0以上を指定してください", file=sys.stderr)
         return 2
     generation_model = (
         args.generation_model.strip()
@@ -504,10 +515,17 @@ def main() -> int:
             "ndcg_at_10": avg["ndcg_at_10"],
         })
 
-    # 生成モデルはコスト配慮で先頭3クエリのみ（埋め込み repeat とは独立に1回）。
+    # 生成対象は既定で全クエリ。--generation-max-queries N 指定時は
+    # コスト配慮で先頭 N 件のみ（埋め込み repeat とは独立に1回）。
+    # 0（既定）は「制限なし＝全件」を表す。
+    generation_query_count = (
+        len(queries)
+        if args.generation_max_queries == 0
+        else min(args.generation_max_queries, len(queries))
+    )
     generation_latencies: list[float] = []
     if args.with_generation:
-        for qi, record in enumerate(records[:GENERATION_QUERY_LIMIT]):
+        for qi, record in enumerate(records[:generation_query_count]):
             candidates = runs[0]["scored"][qi][:RERANK_K]
             generation_latencies.append(
                 _run_generation(
@@ -522,6 +540,9 @@ def main() -> int:
     denominator = len(records) or 1
     embed_avg = round(sum(r["embedding_sec"] for r in runs) / len(runs), 6)
     search_avg = round(sum(r["search_sec"] for r in runs) / len(runs), 6)
+    # 実効的に生成を実行したクエリ（既定は全件、--generation-max-queries 指定時は
+    # 先頭 N 件）のうち nDCG が算出できたものを集約する。パース失敗などで
+    # キーが無いクエリは除外し、0 として扱わない（record 側の規約を維持）。
     rerank_scores = [
         r["rerank_ndcg_at_5"] for r in records if "rerank_ndcg_at_5" in r
     ]
@@ -538,13 +559,14 @@ def main() -> int:
         "embedding_latency_sec": embed_avg,
         "search_latency_sec": search_avg,
         "total_search_latency_sec": round(embed_avg + search_avg, 6),
-        "rerank_query_count": len(rerank_scores),
+        "rerank_query_count": len(rerank_scores),  # 実効クエリ数（スコア換算できた件数）
     }
     if generation_latencies:
         summary["generation_latency_sec"] = round(
             sum(generation_latencies) / len(generation_latencies), 6
         )
     if rerank_scores:
+        # 実効クエリ数（rerank_query_count）を分母にした平均。
         summary["rerank_ndcg_at_5"] = round(
             sum(rerank_scores) / len(rerank_scores), 4
         )
@@ -562,7 +584,8 @@ def main() -> int:
     ]
     if args.with_generation:
         notes.extend([
-            "生成モデルは opencodeGO の OpenAI 互換 chat completions を使用（先頭3クエリのみ、rerank_query_count を参照）。",
+            "生成モデルは opencodeGO の OpenAI 互換 chat completions を使用"
+            "（生成対象 %d 件、rerank_query_count を参照）。" % generation_query_count,
             "生成リクエストのセッション UUID は cloud_client.chat 側で付与し cloud_bench では生成しない。",
             "rerank は JSON の rank 整数配列のみを採用し、パース失敗時は generation_error に記録して nDCG を 0 としない。",
         ])

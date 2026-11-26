@@ -42,6 +42,10 @@ import ingest
 import ollama_client
 import query
 
+# Rust 同等性テストで skip された理由を集計する（固定メッセージのみ、秘密情報は入れない）。
+# RAG_REQUIRE_RUST=1 の最終ゲートで skip を失敗に変換するために使う。
+_RUST_SKIP_REASONS: list[str] = []
+
 
 @contextlib.contextmanager
 def _temporary_env(**values):
@@ -1177,7 +1181,28 @@ class EmbeddingPrefixNamedTupleTest(unittest.TestCase):
         self.assertEqual((query_prefix, passage_prefix), ("", ""))
 
 
-class RustBridgeTest(unittest.TestCase):
+class _RustSkipCounter:
+    """Rust 同等性テストの skip を集計する mixin。
+
+    ``run()`` 経由で実際に実行されたテストの skip だけを数える。
+    ``RustSkipGateTest`` が意図的に送出する SkipTest は ``run()`` を通らない
+    ため集計せず、通常実行の skip 数とゲートの挙動を分離する。
+    """
+
+    def run(self, result=None):
+        self._rust_skip_counting = True
+        try:
+            return super().run(result)
+        finally:
+            self._rust_skip_counting = False
+
+    def skipTest(self, reason):
+        if getattr(self, "_rust_skip_counting", False):
+            _RUST_SKIP_REASONS.append(str(reason))
+        super().skipTest(reason)
+
+
+class RustBridgeTest(_RustSkipCounter, unittest.TestCase):
     """Rust CLI ブリッジのパス解決と同等性。"""
 
     def test_binary_path_default(self):
@@ -1208,7 +1233,7 @@ class RustBridgeTest(unittest.TestCase):
             bridge.run_op("cosine_batch", {"pairs": [[[1.0], [1.0, 0.0]]]})
 
 
-class RustOpEquivalenceTest(unittest.TestCase):
+class RustOpEquivalenceTest(_RustSkipCounter, unittest.TestCase):
     """CLI op と Python 実装の同等性（Rust バイナリがある場合のみ検証）。
 
     RustBridgeTest と同じ流儀で、バイナリ未ビルド／当該 op 未実装の場合は
@@ -2489,4 +2514,12 @@ class CloudConfigGuardTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    _result = unittest.main(exit=False)
+    if not getattr(_result, "result", _result).wasSuccessful():
+        sys.exit(1)
+    if os.environ.get("RAG_REQUIRE_RUST", "") == "1" and _RUST_SKIP_REASONS:
+        print(
+            "Rust 同等性テストが skip されました: %d 件 (RAG_REQUIRE_RUST=1)"
+            % len(_RUST_SKIP_REASONS)
+        )
+        sys.exit(1)

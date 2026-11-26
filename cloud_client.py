@@ -9,6 +9,9 @@ chat completions と OpenAI 互換 /embeddings の両方を提供する。埋め
 利用可能な埋め込みモデルは EMBEDDING_MODELS 定数を参照する（任意で
 fetch_models() が /v1/models を取得する）。API レスポンスの usage
 （トークン数、あれば cost）は last_usage() から参照できる。
+
+埋め込み次元は明示の dimensions 引数 → RAG_CLOUD_DIMENSIONS → モデル既定
+（dimensions を送らない）の順で解決し、不正値は CloudUnavailable で拒否する。
 """
 
 from __future__ import annotations
@@ -28,6 +31,7 @@ ENV_BASE_URL = "RAG_CLOUD_BASE_URL"
 ENV_MODEL = "RAG_CLOUD_MODEL"
 ENV_ENABLED = "RAG_CLOUD_ENABLED"
 ENV_TIMEOUT = "RAG_CLOUD_TIMEOUT"
+ENV_DIMENSIONS = "RAG_CLOUD_DIMENSIONS"
 
 # 正規（OPENCODE_GO_API_KEY）を優先し、OPENCODE_API_KEY は後方互換として残す。
 KEY_NAMES = ("OPENCODE_GO_API_KEY", "OPENCODE_API_KEY")
@@ -83,6 +87,38 @@ def timeout() -> float:
         return max(1.0, float(os.environ.get(ENV_TIMEOUT, "60")))
     except (TypeError, ValueError):
         return 60.0
+
+
+def _normalize_dimensions(value: object, label: str = "dimensions") -> int:
+    """dimensions を正の int へ正規化する（不正値は CloudUnavailable）。
+
+    値そのものは例外文に含めない（認証情報の誤設定などを漏らさないため）。
+    bool は int の部分クラスだが、次元としては不正な値として扱う。
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise _fail("%s must be a positive integer" % label)
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError):
+        raise _fail("%s must be a positive integer" % label) from None
+    if normalized <= 0:
+        raise _fail("%s must be a positive integer" % label)
+    return normalized
+
+
+def resolve_dimensions(dimensions: int | None = None) -> int | None:
+    """embed() が使う埋め込み次元を解決する。
+
+    優先順: 明示の dimensions 引数 > RAG_CLOUD_DIMENSIONS > None（モデル既定）。
+    環境変数が空文字の場合は未設定として扱う。設定値は正の int へ正規化し、
+    不正値は CloudUnavailable を送出する（値自体は例外文に出さない）。
+    """
+    if dimensions is not None:
+        return _normalize_dimensions(dimensions, "dimensions")
+    raw = os.environ.get(ENV_DIMENSIONS)
+    if raw is None or not str(raw).strip():
+        return None
+    return _normalize_dimensions(raw, ENV_DIMENSIONS)
 
 
 # ---------------------------------------------------------------------------
@@ -322,16 +358,33 @@ def embed(
     埋め込みリクエストには x-opencode-session を付けない（公式仕様）。
     大量入力は batch_size（既定 MAX_BATCH_SIZE）で分割し、入力順序どおりに
     結合する。batch_size=0 は明示的に拒否する。
+    dimensions は明示引数 > RAG_CLOUD_DIMENSIONS > モデル既定（送らない）の順で
+    解決する。バッチ途中で失敗した場合は、成功済みバッチ数をマスク済みの
+    CloudUnavailable メッセージ末尾に (completed_batches=N) として付与する。
     戻り値は従前どおり list[list[float]]。usage は全バッチの合計が last_usage()
     から参照できる（呼び出し直後に読み取ること）。認証情報の値は出さない。
     """
     size = MAX_BATCH_SIZE if batch_size is None else batch_size
     if size < 1:
         raise _fail("batch_size must be positive")
+    dims = resolve_dimensions(dimensions)
     _reset_usage()
     vectors: list[list[float]] = []
+    completed_batches = 0
     for start in range(0, len(texts), size):
-        vectors.extend(
-            _embed_batch(texts[start : start + size], dimensions=dimensions)
-        )
+        try:
+            vectors.extend(
+                _embed_batch(texts[start : start + size], dimensions=dims)
+            )
+        except Exception as exc:
+            reason = (
+                str(exc)
+                if isinstance(exc, CloudUnavailable)
+                else "embed failed: %s" % exc
+            )
+            raise CloudUnavailable(
+                "%s (completed_batches=%d)"
+                % (config.mask_secrets(reason), completed_batches)
+            ) from exc
+        completed_batches += 1
     return vectors
