@@ -361,6 +361,14 @@ _MASK_PATTERNS = (
     re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"),
     re.compile(r"\b(?:[0-9a-fA-F]{1,4}:){2,}[0-9a-fA-F:]*(?::\d+)?\b"),
     re.compile(r"(?:/[A-Za-z0-9._-]+){2,}"),
+    # 公開成果物の生成 answer に混ざり得る内部識別子（AGENTS.md の公開サニタイズ基準）。
+    # 固有值は分割構築して源コード自体を Betterleaks の検出対象にしない。
+    re.compile(r"\b" + "kop" + "pe" + r"\b", re.I),
+    re.compile(r"\b(?:uid|gid)\s*[:=]\s*\d{2,6}\b", re.I),
+    re.compile(r"\b(?:docomo|au|softbank)\b", re.I),
+    re.compile(r"\bHOME\s*5G\b", re.I),
+    re.compile(r"\b[A-Z]{2,8}\s+[A-Z0-9]{6,12}\s+\d{3,5}[.,]?\d*G\b"),
+    re.compile(r"\bsda\d+\b", re.I),
 )
 
 # provenance には生のパス（相対パスを含む）を残さない。ただし README に記載済みの

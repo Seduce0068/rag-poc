@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-26T11:51:13.344321+00:00",
+  "generated_at": "2026-11-26T00:00:00+00:00",
   "model": "text-embedding-3-small",
   "generation_model": "deepseek-v4.1-flash",
   "corpus": "docs",
@@ -284,7 +284,7 @@
         "network-investigation-2026-11-21.md"
       ],
       "rerank_ndcg_at_5": 0.3869,
-      "answer": "参考文書に基づく「Tailscale 到達性」の調査結果は以下です。\n\n- `ts.net` は公共リゾルバでは **NXDOMAIN**。Tailscale DNS（MagicDNS）専用で、ローカルDNSでの上書きは不可。\n- 既存 Serve は **443/tcp のみ**。`/`→3080、`/agent`→3081。\n- `:8080` は python3 が使用中のため**触らない**。\n- 証明書は `~<masked>` の ts.net 証明書（**2027-01-30 期限**）。\n- 独自ドメインは未所有。\n- 本環境は **docomo HOME 5G で IPv4 CGNAT の可能性大** → 自前ポート開放は非現実的。\n- Tailscale 脱却は技術的には可能だが、**パスキーの RP ID 変更（全再登録）が必須**。リモート維持には代替トンネル（Cloudflare Tunnel 等）または VPN(VPS) が必要。\n\n今回の調査では設定変更・プロセス停止・実機操作は行っていません。"
+      "answer": "参考文書に基づく「Tailscale 到達性」の調査結果は以下です。\n\n- `ts.net` は公共リゾルバでは **NXDOMAIN**。Tailscale DNS（MagicDNS）専用で、ローカルDNSでの上書きは不可。\n- 既存 Serve は **443/tcp のみ**。`/`→3080、`/agent`→3081。\n- `:8080` は python3 が使用中のため**触らない**。\n- 証明書は `~<masked>` の ts.net 証明書（**2027-01-30 期限**）。\n- 独自ドメインは未所有。\n- 本環境は **<carrier> <plan> で IPv4 CGNAT の可能性大** → 自前ポート開放は非現実的。\n- Tailscale 脱却は技術的には可能だが、**パスキーの RP ID 変更（全再登録）が必須**。リモート維持には代替トンネル（Cloudflare Tunnel 等）または VPN(VPS) が必要。\n\n今回の調査では設定変更・プロセス停止・実機操作は行っていません。"
     },
     {
       "id": "h08-health-report",
@@ -320,7 +320,7 @@
         "system-health-anomalies-2026-11-09.md"
       ],
       "rerank_ndcg_at_5": 0.6309,
-      "answer": "## HDD `<masked>` の pending セクター\n\n- **デバイス**: TOSHIBA DT01ACA100 931.5G（`<masked>`、`sda1` は未マウント・NTFS/ラベル「新加卷」、fstab登録なし）\n- **検出内容**: 未読（pending）セクター**8件**。smartd が「8 Currently unreadable (pending) sectors」を24hで**51回**警告（健康点検表示は alerts=48）\n- **意味**: 読み出し不能セクターが代替処理待ちで存在。**劣化のサイン**\n- **影響**: 現在 `sda1` は未使用のため直ちの実害なし。ただし使い続ける場合はリスク。重要データ非配置を推奨\n- **確認コマンド**:\n  ```bash\n  sudo <masked> -a <masked>   # Reallocated<masked>, 温度, 時間\n  sudo <masked> -t long <masked>\n  ```\n\n## 健康点検・監視の状況\n\n- 健康点検に `disk pending sectors` と `boot update` を追加 → **SUMMARY: warn=2 fail=0**（別表示では warn=6 fail=0）\n- 他のWARN: serve mappings 4件、boot update 失敗（Warp aptリポジトリのRelease.gpg/鍵エラーで `apt update` が status=1。鍵再導入かリポジトリ無効化で解消）、security scan、journal size 3.9G（vacuum推奨）、failed system units 1件\n- watchdog失敗は11/8 16:35–44の移行作業中のみで現在正常。failed user units/amd_pstate等は無害\n- 詳細: `docs/system-health-anomalies-2026-11-09.md`"
+      "answer": "## HDD `<masked>` の pending セクター\n\n- **デバイス**: <storage>  <size>（`<masked>`、`<device>` は未マウント・NTFS/ラベル「<label>」、fstab登録なし）\n- **検出内容**: 未読（pending）セクター**8件**。smartd が「8 Currently unreadable (pending) sectors」を24hで**51回**警告（健康点検表示は alerts=48）\n- **意味**: 読み出し不能セクターが代替処理待ちで存在。**劣化のサイン**\n- **影響**: 現在 `<device>` は未使用のため直ちの実害なし。ただし使い続ける場合はリスク。重要データ非配置を推奨\n- **確認コマンド**:\n  ```bash\n  sudo <masked> -a <masked>   # Reallocated<masked>, 温度, 時間\n  sudo <masked> -t long <masked>\n  ```\n\n## 健康点検・監視の状況\n\n- 健康点検に `disk pending sectors` と `boot update` を追加 → **SUMMARY: warn=2 fail=0**（別表示では warn=6 fail=0）\n- 他のWARN: serve mappings 4件、boot update 失敗（Warp aptリポジトリのRelease.gpg/鍵エラーで `apt update` が status=1。鍵再導入かリポジトリ無効化で解消）、security scan、journal size 3.9G（vacuum推奨）、failed system units 1件\n- watchdog失敗は11/8 16:35–44の移行作業中のみで現在正常。failed user units/amd_pstate等は無害\n- 詳細: `docs/system-health-anomalies-2026-11-09.md`"
     },
     {
       "id": "h09-container-tools",
@@ -356,7 +356,7 @@
         "sudoers-proposal.md"
       ],
       "rerank_ndcg_at_5": 1.0,
-      "answer": "参考文書に基づく要点は以下です。\n\n- **権限の性質**: `kiri` グループは `docker` グループと同様に **root 同等の権限**を持ちます。`docker` グループ所属も Docker API 経由で任意操作が可能なため実質 root 相当で、sudo を絞っても Docker 権限が残る点は別途検討が必要です。\n- **所属状況**: ユーザー `koppe` は `kiri`（gid 980）と `docker`（gid 129、既存）の両方に所属しています。\n- **ソケット分離**: 既存 Docker は `<masked>`（root:docker）、Kiri は `<masked>`（root:kiri）で分離されています。\n- **サービス状態**: `kiri.service` は enabled かつ active。GUI（`kiri ui`）は未起動で、エンジン設定は完了済みです。\n- **更新方法**: Kiri の apt リポジトリは未登録のため、更新時は手動で `.deb` を導入します。"
+      "answer": "参考文書に基づく要点は以下です。\n\n- **権限の性質**: `kiri` グループは `docker` グループと同様に **root 同等の権限**を持ちます。`docker` グループ所属も Docker API 経由で任意操作が可能なため実質 root 相当で、sudo を絞っても Docker 権限が残る点は別途検討が必要です。\n- **所属状況**: ユーザー `<user>` は `kiri`（gid <gid>）と `docker`（gid <gid>、既存）の両方に所属しています。\n- **ソケット分離**: 既存 Docker は `<masked>`（root:docker）、Kiri は `<masked>`（root:kiri）で分離されています。\n- **サービス状態**: `kiri.service` は enabled かつ active。GUI（`kiri ui`）は未起動で、エンジン設定は完了済みです。\n- **更新方法**: Kiri の apt リポジトリは未登録のため、更新時は手動で `.deb` を導入します。"
     }
   ],
   "metric_definition": {
