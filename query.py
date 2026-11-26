@@ -31,6 +31,7 @@ from config import (
     OLLAMA_URL,
     PAYLOAD_SOURCE_KEY,
     QUESTION_MAX_CHARS,
+    RAG_ANSWER_TIMEOUT,
     validate_question_length,
     PAYLOAD_TEXT_KEY,
     PAYLOAD_TITLE_KEY,
@@ -45,10 +46,12 @@ from config import (
     RRF_K,
     SCROLL_PAGE_SIZE,
     TOP_K,
+    cloud_chat_enabled,
     embedding_prefixes,
     is_fatal_endpoint_problem,
     mask_secrets,
     qdrant_collection_path,
+    require_cloud_settings,
     validate_endpoint,
     validate_settings,
 )
@@ -61,10 +64,12 @@ except ImportError:  # 共通クライアント未導入でも --help / 設定�
     _ollama_embed = None  # type: ignore[assignment]
 
 try:
-    # クラウド埋め込み（opencodeGO、opt-in）。既定はローカル Ollama を維持。
+    # クラウド埋め込み / チャット（opencodeGO、opt-in）。既定はローカル Ollama を維持。
+    from cloud_client import chat as _cloud_chat
     from cloud_client import embed as _cloud_embed
     from cloud_client import enabled as _cloud_enabled
 except ImportError:
+    _cloud_chat = None  # type: ignore[assignment]
     _cloud_embed = None  # type: ignore[assignment]
     _cloud_enabled = lambda: False  # type: ignore[assignment]
 
@@ -92,6 +97,12 @@ _last_search_errors: contextvars.ContextVar[list[dict[str, Any]]] = contextvars.
 )
 _last_scroll_truncated: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "rag_poc_last_scroll_truncated", default=False
+)
+# generate_answer が設定する 1 呼び出し分の HTTP タイムアウト。
+# モジュール変数 OLLAMA_TIMEOUT を書き換えずに context 単位で上書きするため、
+# 並行呼び出し間で混入せず evaluate.py の既存グローバル差し替え也不要になる（R2-B）。
+_answer_timeout: contextvars.ContextVar[float | None] = contextvars.ContextVar(
+    "rag_poc_answer_timeout", default=None
 )
 
 
@@ -242,8 +253,16 @@ def _shared_session() -> Any:
 
 
 def _post(url: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """共有 Session で JSON を POST し、レスポンスを dict として返す。"""
-    response = _shared_session().post(url, json=payload, timeout=_timeout_for(url))
+    """共有 Session で JSON を POST し、レスポンスを dict として返す。
+
+    generate_answer が _answer_timeout contextvar を設定している場合だけその値を
+    使い、それ以外は従来どおり _timeout_for(url) を使う。OLLAMA_TIMEOUT の
+    グローバル書き換えは行わない（R2-B）。
+    """
+    timeout = _answer_timeout.get()
+    if timeout is None:
+        timeout = _timeout_for(url)
+    response = _shared_session().post(url, json=payload, timeout=timeout)
     response.raise_for_status()
     return response.json()
 
@@ -368,6 +387,8 @@ def embed_query(question: str) -> list[float]:
     rerank / generate_answer の LLM プロンプトへは混入させない。
     """
     if _cloud_enabled() and _cloud_embed is not None:
+        # R2-B: EMBED_MODEL と cloud_client.embed_model() の不整合をfail-closedで拒否。
+        require_cloud_settings()
         vectors = _cloud_embed([question])
         if vectors and vectors[0]:
             return [float(value) for value in vectors[0]]
@@ -606,6 +627,65 @@ def _parse_scores(data: Any, expected: int) -> list[float | None]:
     return scores
 
 
+def _resolve_answer_timeout(timeout: float | None) -> float | None:
+    """generate_answer の実効 HTTP タイムアウトを決める（値を長くしない）。
+
+    明示 timeout が無い場合は環境変数 RAG_ANSWER_TIMEOUT
+    （config.RAG_ANSWER_TIMEOUT を既定値として参照）を使う。ベースとなる
+    OLLAMA_TIMEOUT 以上に長くする値は既存の安全優先挙動に合わせて無視する。
+    不正値・非有限値は None（＝既存の _timeout_for に委譲）。
+    """
+    base = _timeout_for(OLLAMA_URL)
+    raw: Any = timeout if timeout is not None else os.environ.get(
+        "RAG_ANSWER_TIMEOUT", str(RAG_ANSWER_TIMEOUT)
+    )
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(value) or value <= 0:
+        return None
+    return value if value < base else None
+
+
+def _llm_content(
+    messages: list[dict[str, str]],
+    *,
+    temperature: float = 0.2,
+    json_format: bool = False,
+    stage: str | None = None,
+) -> str:
+    """LLM 呼び出しのアダプタ（R2-B）。
+
+    RAG_CLOUD_CHAT_ENABLED=1 のときは cloud_client.chat() へ差し替え、
+    無効時は既存 Ollama /api/chat の payload / レスポンス解釈を維持する。
+    これにより既存テストの _post モック、回答スキーマ、スコア 3 層化、
+    answer_error 分離（evaluate.py 側）はそのまま成立する。
+    """
+    if cloud_chat_enabled():
+        if _cloud_chat is None:
+            raise RuntimeError("cloud_client.chat を import できませんでした")
+        # クラウド有効時の embed / chat 設定不整合は fail-closed で拒否する。
+        require_cloud_settings()
+        return _cloud_chat(messages, temperature=temperature)
+
+    payload: dict[str, Any] = {
+        "model": CHAT_MODEL,
+        "messages": messages,
+        "stream": False,
+        "options": {"temperature": temperature},
+    }
+    if json_format:
+        payload["format"] = "json"
+    data = _post(f"{OLLAMA_URL}/api/chat", payload)
+    if isinstance(data, dict):
+        if data.get("error") and stage:
+            _record_error(stage, None, f"LLM error: {data['error']}")
+        message = data.get("message") or {}
+        return str(message.get("content", "")) if isinstance(message, dict) else ""
+    return ""
+
+
 def rerank(question: str, points: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """hybrid 結果の上位 RERANK_MAX_DOCS 件だけを LLM で再ランクする。
 
@@ -682,24 +762,16 @@ def rerank(question: str, points: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     scores: list[float | None] | None = None
     try:
-        data = _post(
-            f"{OLLAMA_URL}/api/chat",
-            {
-                "model": CHAT_MODEL,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                "stream": False,
-                "format": "json",
-                "options": {"temperature": 0},
-            },
+        # LLM 呼び出しはアダプタ経由（RAG_CLOUD_CHAT_ENABLED で cloud_client.chat へ切替）。
+        content = _llm_content(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0,
+            json_format=True,
+            stage="rerank",
         )
-        content = ""
-        if isinstance(data, dict):
-            content = data.get("message", {}).get("content", "")
-            if data.get("error"):
-                _record_error("rerank", None, f"LLM error: {data['error']}")
         extracted = _extract_json(content)
         if extracted is None:
             # 生 content は出力しない。長さ・ハッシュ・理由のみを残す。
@@ -750,8 +822,16 @@ def _unique_sources(hits: list[dict[str, Any]]) -> list[str]:
     return sources
 
 
-def generate_answer(question: str, hits: list[dict[str, Any]]) -> str:
-    """上位チャンクをコンテキストとして Ollama /api/chat で回答を生成する。"""
+def generate_answer(
+    question: str, hits: list[dict[str, Any]], *, timeout: float | None = None
+) -> str:
+    """上位チャンクをコンテキストとして回答を生成する。
+
+    LLM 呼び出しはアダプタ経由（RAG_CLOUD_CHAT_ENABLED で cloud_client.chat へ
+    切替、無効時は既存 Ollama /api/chat）。``timeout`` は後方互換のキーワード引数で、
+    evaluate.py の --with-answer が明示渡しする想定（R2-B）。未指定時は環境変数
+    RAG_ANSWER_TIMEOUT を参照する。モジュール変数 OLLAMA_TIMEOUT は書き換えない。
+    """
     if not hits:
         return "該当する情報が見つかりませんでした。"
 
@@ -775,24 +855,22 @@ def generate_answer(question: str, hits: list[dict[str, Any]]) -> str:
         "<chunks>\n" + chunks + "\n</chunks>\n"
     )
 
+    # 1 呼び出し分だけ contextvar を設定（グローバル書き換えなし・並行安全）。
+    token = _answer_timeout.set(_resolve_answer_timeout(timeout))
     try:
-        data = _post(
-            f"{OLLAMA_URL}/api/chat",
-            {
-                "model": CHAT_MODEL,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                "stream": False,
-                "options": {"temperature": 0.2},
-            },
+        answer = _llm_content(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.2,
         )
-        answer = data.get("message", {}).get("content", "") if isinstance(data, dict) else ""
         if isinstance(answer, str) and answer.strip():
             return answer.strip()
     except Exception as exc:  # noqa: BLE001 - LLM 障害時も hits は返す
         _warn(f"回答生成の LLM 呼び出しに失敗しました: {exc}")
+    finally:
+        _answer_timeout.reset(token)
     return "回答を生成できませんでした。"
 
 

@@ -31,6 +31,22 @@ QDRANT_TIMEOUT = float(os.environ.get("QDRANT_TIMEOUT", "300"))
 # 放置すると 60 × 300 秒になる最悪ケースを防ぐ。タイムアウトを長くはしない。
 RAG_ANSWER_TIMEOUT = float(os.environ.get("RAG_ANSWER_TIMEOUT", "60"))
 
+# クラウド（opencodeGO）設定。既定はすべて無効／ローカル Ollama を維持する。
+ENV_CLOUD_ENABLED = "RAG_CLOUD_ENABLED"
+ENV_CLOUD_CHAT_ENABLED = "RAG_CLOUD_CHAT_ENABLED"
+ENV_CLOUD_EMBED_MODEL = "RAG_CLOUD_EMBED_MODEL"
+ENV_CLOUD_EMBED_DIMENSION = "RAG_CLOUD_EMBED_DIMENSION"
+RAG_CLOUD_ENABLED = os.environ.get(ENV_CLOUD_ENABLED, "0") == "1"
+RAG_CLOUD_CHAT_ENABLED = os.environ.get(ENV_CLOUD_CHAT_ENABLED, "0") == "1"
+RAG_CLOUD_EMBED_MODEL = os.environ.get(ENV_CLOUD_EMBED_MODEL, "")
+CLOUD_DEFAULT_EMBED_MODEL = "text-embedding-3-small"
+
+# cloud_client.EMBEDDING_MODELS のうち既定次元が確定しているものだけを保持する。
+# 未知のモデルは RAG_CLOUD_EMBED_DIMENSION による明示指定が無い限り fail-closed。
+CLOUD_EMBED_DIMENSIONS: dict[str, int] = {
+    CLOUD_DEFAULT_EMBED_MODEL: 1536,
+}
+
 # 全 HTTP クライアント（ollama_client / query / ingest）で共有する Retry 設定。
 # query.py の _make_session() と同じ値を 1 箇所へ集約する（既存挙動は不変）。
 RETRY_TOTAL = 3
@@ -93,6 +109,121 @@ def expected_vector_size(model: str) -> int:
         if key in lowered:
             return value
     return VECTOR_SIZE
+
+
+# ---------------------------------------------------------------------------
+# クラウド設定の検証（fail-closed）
+# ---------------------------------------------------------------------------
+
+
+class CloudConfigError(RuntimeError):
+    """クラウド設定の不整合を示す明示エラー（R2-B）。"""
+
+
+def cloud_enabled() -> bool:
+    """RAG_CLOUD_ENABLED を呼び出し時に再読する（既定 0 = ローカル Ollama）。"""
+    return os.environ.get(ENV_CLOUD_ENABLED, "0") == "1"
+
+
+def cloud_chat_enabled() -> bool:
+    """RAG_CLOUD_CHAT_ENABLED を呼び出し時に再読する（既定 0 = Ollama /api/chat 維持）。"""
+    return os.environ.get(ENV_CLOUD_CHAT_ENABLED, "0") == "1"
+
+
+def cloud_embed_model_explicit() -> bool:
+    """RAG_CLOUD_EMBED_MODEL が明示指定されているか。"""
+    return bool(os.environ.get(ENV_CLOUD_EMBED_MODEL, "").strip())
+
+
+def cloud_embed_model() -> str:
+    """cloud_client.embed_model() と同一のモデル ID を返す。
+
+    cloud_client は config.mask_secrets を import するため、循環 import を避ける
+    目的で遅延 import する（関数呼び出し時には config の読み込みが完了している）。
+    import 不能なら環境変数／既定値へフォールバックする。
+    """
+    try:
+        import cloud_client
+
+        return cloud_client.embed_model()
+    except Exception:
+        return os.environ.get(ENV_CLOUD_EMBED_MODEL, "") or CLOUD_DEFAULT_EMBED_MODEL
+
+
+def validate_cloud_settings() -> list[str]:
+    """クラウド有効時の設定不整合を検出し、問題文の list を返す（空なら正常）。
+
+    対象は次に示す R2-B の 2 条件と、chat の前提整合である。
+
+    1. Ruri 系 EMBED_MODEL でクラウド既定モデルを使う場合（暗黙既定も含む）
+    2. クラウド埋め込みモデルの期待次元が VECTOR_SIZE と異なる場合
+    3. RAG_CLOUD_CHAT_ENABLED=1 なのに RAG_CLOUD_ENABLED=0 の場合
+
+    RAG_CLOUD_EMBED_MODEL はクラウド有効時に必須化する（暗黙の既定モデル使用を
+    禁じる）。期待次元が表に無いモデルは RAG_CLOUD_EMBED_DIMENSION の明示を要求し、
+    不明なままなら fail-closed とする。値は mask_secrets 済みで返す。
+    """
+    problems: list[str] = []
+    enabled = cloud_enabled()
+    chat = cloud_chat_enabled()
+    if chat and not enabled:
+        problems.append(
+            "RAG_CLOUD_CHAT_ENABLED=1 を使うには RAG_CLOUD_ENABLED=1 も必要です"
+        )
+    if not enabled:
+        return problems
+
+    model = cloud_embed_model()
+    explicit = cloud_embed_model_explicit()
+    ruri = "ruri" in EMBED_MODEL.lower()
+    if not explicit:
+        if ruri:
+            problems.append(
+                "EMBED_MODEL が ruri 系なのに RAG_CLOUD_EMBED_MODEL が未指定です。"
+                "クラウド既定モデル(%s)には ruri の prefix / 768 次元が反映されず"
+                "不整合のため使用できません" % CLOUD_DEFAULT_EMBED_MODEL
+            )
+        else:
+            problems.append(
+                "RAG_CLOUD_ENABLED=1 では RAG_CLOUD_EMBED_MODEL の明示指定が必要です"
+                "（既定の %s を暗黙に使うことはできません）" % CLOUD_DEFAULT_EMBED_MODEL
+            )
+
+    # 既知モデルは表を唯一の情報源とする（embed_query は dimensions を渡さないため
+    # 既定次元が確定）。未知モデルだけ RAG_CLOUD_EMBED_DIMENSION の明示を要求する。
+    expected_dim: int | None = CLOUD_EMBED_DIMENSIONS.get(model)
+    if expected_dim is None:
+        raw_dim = os.environ.get(ENV_CLOUD_EMBED_DIMENSION, "")
+        if raw_dim.strip():
+            try:
+                expected_dim = int(raw_dim)
+            except (TypeError, ValueError):
+                expected_dim = None
+            if expected_dim is None or expected_dim <= 0:
+                problems.append(
+                    "RAG_CLOUD_EMBED_DIMENSION は正の整数である必要があります: %s"
+                    % mask_secrets(raw_dim)
+                )
+                expected_dim = None
+    if expected_dim is None:
+        problems.append(
+            "クラウド埋め込みモデル %s の期待次元が不明です。"
+            "RAG_CLOUD_EMBED_DIMENSION を明示してください" % mask_secrets(model)
+        )
+    elif expected_dim != VECTOR_SIZE:
+        problems.append(
+            "クラウド埋め込みモデル %s の期待次元(%d)が RAG_VECTOR_SIZE(%d) と一致しません。"
+            "コレクション側の次元と揃えてください"
+            % (mask_secrets(model), expected_dim, VECTOR_SIZE)
+        )
+    return problems
+
+
+def require_cloud_settings() -> None:
+    """不整合があれば CloudConfigError を送出する（直接 API 呼び出し用の fail-closed）。"""
+    problems = validate_cloud_settings()
+    if problems:
+        raise CloudConfigError("クラウド設定の不整合: " + "; ".join(problems))
 
 
 def resolve_corpus_dir() -> Path:
@@ -324,6 +455,15 @@ def current_settings() -> dict[str, object]:
         "QDRANT_URL": os.environ.get("QDRANT_URL", QDRANT_URL),
         "COLLECTION": os.environ.get("RAG_COLLECTION", COLLECTION),
         "CORPUS_DIR": os.environ.get("RAG_CORPUS_DIR", CORPUS_DIR),
+        # クラウド設定キー（R2-B）。値は mask_secrets 済みで返す。
+        # enabled / chat_enabled は "1"/"0" 文字列、embed_model はモデル ID。
+        ENV_CLOUD_ENABLED: mask_secrets(
+            os.environ.get(ENV_CLOUD_ENABLED, "1" if RAG_CLOUD_ENABLED else "0")
+        ),
+        ENV_CLOUD_EMBED_MODEL: mask_secrets(cloud_embed_model()),
+        ENV_CLOUD_CHAT_ENABLED: mask_secrets(
+            os.environ.get(ENV_CLOUD_CHAT_ENABLED, "1" if RAG_CLOUD_CHAT_ENABLED else "0")
+        ),
     }
 
 
@@ -350,6 +490,8 @@ def validate_settings() -> list[str]:
             f"EMBED_MODEL が ruri の場合 CHUNK_SIZE は 512 以下である必要があります"
             f"（Ruri は 512 トークン context、現在: {CHUNK_SIZE}）"
         )
+    # クラウド有効時の embed / chat 不整合も同じ fail-closed 経路に載せる（R2-B）。
+    problems.extend(validate_cloud_settings())
     return problems
 
 
