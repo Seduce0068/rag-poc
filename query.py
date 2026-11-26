@@ -871,7 +871,9 @@ def generate_answer(
             temperature=0.2,
         )
         if isinstance(answer, str) and answer.strip():
-            return answer.strip()
+            # 生成テキストにはコーパス由来の内部識別子が混入し得るため、
+            # 公開成果物へ保存される前に共通マスクを適用する。
+            return mask_secrets(answer).strip()
     except Exception as exc:  # noqa: BLE001 - LLM 障害時も hits は返す
         _warn(f"回答生成の LLM 呼び出しに失敗しました: {exc}")
     finally:
