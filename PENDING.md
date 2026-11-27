@@ -99,6 +99,20 @@ gh run watch --exit-status
    （`/console/api/v2/usage/export`）を使う。権限あるキーが必要なため
    ユーザー確認後に実施する。
 
+## 次アクション（markdownlint の CI ゲート化）
+
+2026-11-27 時点で、CI の `rust-gates.yml@v1` に markdownlint ゲートが無く、
+ローカルの `markdownlint-cli2` 検証と CI の間に差がある
+（Betterleaks は `secret-gates.yml@v1` の追加で CI 化済み）。
+§5 の方針（ゲートの複製を避ける）に従い、対応は次の順で行う。
+
+1. 提供側 `Seduce0068/workflows` の `rust-gates.yml` に任意の
+   lint 入力（例 `markdown_gates`）を追加するか、新規再利用ワークフロー
+   （例 `doc-gates.yml`）を切る。
+2. `self-test.yml` の fixtures で回帰テストしてからタグ `v1` を付け替える
+   （互換更新のため。破壊的変更の場合は `v2` を切る）。
+3. 呼び出し側（本リポジトリほか）の参照を更新し、CI の通過を確認する。
+
 ## 完了記録
 
 1. 3件はいずれも完了（`todo.md` の完了項目と git 履歴を参照）。

@@ -26,3 +26,6 @@ jobs:
         python3 ../rust_bridge.py check_eval_results
         python3 ../compare_cloud_local.py --run-ab --output /tmp/cloud-local-comparison.json
         python3 -c 'import json,sys,os; p="/tmp/cloud-local-comparison.json"; d=json.load(open(p,encoding="utf-8")) if os.path.isfile(p) else {}; m=[k for k in ("rows","notes","generated_at") if k not in d]; [print(p,k,file=sys.stderr) for k in m]; sys.exit(1 if m else 0)'
+
+  secret-scan:
+    uses: Seduce0068/workflows/.github/workflows/secret-gates.yml@v1
