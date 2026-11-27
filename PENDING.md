@@ -80,6 +80,25 @@ gh run watch --exit-status
 `gh run watch` が成功するまでマージしない。CI は `Seduce0068/workflows` の
 `rust-gates.yml@v1` へ委譲しているため、ローカルの 2 / 3 と同じゲートが走る。
 
+## 次アクション（クラウド cost の実測記録）
+
+2026-11-27 の調査で、Go 上限内の要求では API の `usage.cost` が `0` になる
+仕様（[公式 Cost 定義](https://opencode.ai/docs/console/api/inference/#cost)）が
+確定した。実消費は `usage.opencode.allowance`（月額上限に対するドル）と
+`opencode.billing_source` / `opencode.list_cost` で別途報告されるが、現行の
+`cloud_client.py` / `cloud_bench.py` はこれらを破棄している。対応は次のとおり。
+
+1. `_accumulate_usage` / `_normalize_usage` に `opencode.allowance` /
+   `billing_source` / `list_cost` を通し、成果物へ記録する（要コード変更）。
+2. `cost_source` に Go 上限内を表す値（例 `go-allowance-zero`）を追加し、
+   notes の「理由は未確認」を公式仕様ベースの記述へ置き換える。
+3. 生レスポンスの usage をマスク済みで 1 件保存し、`opencode` フィールドの
+   実在と allowance 値を Runtime Proof として確認する
+   （`OPENCODE_GO_API_KEY` は一時環境変数のみへ読み込む）。
+4. 実請求との突き合わせは Console の Usage export API
+   （`/console/api/v2/usage/export`）を使う。権限あるキーが必要なため
+   ユーザー確認後に実施する。
+
 ## 完了記録
 
 1. 3件はいずれも完了（`todo.md` の完了項目と git 履歴を参照）。
