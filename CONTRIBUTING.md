@@ -48,6 +48,14 @@ markdownlint-cli2 README.md CONTRIBUTING.md SECURITY.md docs/*.md
 betterleaks git
 ```
 
+クラウド経路の設定が中途半端に残っていると、通常のローカル検証も fail-closed で停止する。
+検証前に次を実行して既定（ローカルのみ・外部送信なし）へ戻すこと。
+
+```bash
+unset RAG_CLOUD_ENABLED RAG_CLOUD_CHAT_ENABLED RAG_CLOUD_EMBED_MODEL
+unset RAG_CLOUD_EMBED_DIMENSION RAG_CLOUD_DIMENSIONS OPENCODE_GO_API_KEY OPENCODE_API_KEY
+```
+
 文書のみの変更では 2〜4 を省略してよいが、markdownlint とシークレットスキャンは必ず実行する。
 失敗時は既存 baseline と新規失敗を区別し、原因とともに報告する。
 自動修正と再レビューは最大 2 回を目安とする。

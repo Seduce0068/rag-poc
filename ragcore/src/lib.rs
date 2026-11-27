@@ -7,6 +7,7 @@
 //!
 //! `unsafe` ブロック・関数・トレイトは一切使用しない。
 
+pub mod cloud;
 pub mod config;
 pub mod evaluate;
 pub mod ingest;

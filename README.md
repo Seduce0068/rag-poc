@@ -1,7 +1,7 @@
 # rag_poc — Rust のみのローカル RAG
 
-> - **何か**: llama.cpp (llama-server) + Qdrant を使う RAG を Rust だけで実装したもの。
-> - **前提**: llama-server / Qdrant がローカル起動済み、Rust toolchain。
+> - **何か**: llama.cpp (llama-server) または opencodeGO の埋め込み + Qdrant を使う RAG を Rust だけで実装したもの。
+> - **前提**: 既定は llama-server / Qdrant がローカル起動済み、Rust toolchain。
 > - **最初のコマンド**: `cargo build --manifest-path ragcore/Cargo.toml` → `ragcore/target/debug/ragcore ingest --corpus-dir <DIR>` → `ragcore/target/debug/ragcore query '質問' --json`
 > - **検証**: `cargo test --manifest-path ragcore/Cargo.toml` と `cargo clippy --manifest-path ragcore/Cargo.toml -- -D warnings -D clippy::undocumented_unsafe_blocks`
 
@@ -34,9 +34,14 @@ ragcore/target/debug/ragcore query 'Pin<&mut Self> が必要な理由は？' \
 
 ## 目的
 
-Markdown の知識源を llama-server でベクトル化して Qdrant に保存し、質問に対して
-関連する文章を返す。Python は使わない。検索モードは
+Markdown の知識源を llama-server（既定）または opencodeGO（opt-in）でベクトル化して
+Qdrant に保存し、質問に対して関連する文章を返す。Python は使わない。検索モードは
 `dense` / `keyword` / `hybrid` の 3 種が実装済み。
+
+埋め込みの切り替えは `RAG_CLOUD_ENABLED=1` で行う。既定 `0` では外部送信・課金は
+一切発生しない。クラウドを使う場合は `RAG_CLOUD_EMBED_MODEL` と
+`OPENCODE_GO_API_KEY` が必須で、埋め込み次元と `RAG_VECTOR_SIZE` が一致しないと
+起動前に拒否される。API キー値はログ・エラー・成果物へ出力しない。
 
 未実装（旧 Python 実装にあった機能）:
 
@@ -44,6 +49,10 @@ Markdown の知識源を llama-server でベクトル化して Qdrant に保存�
 - 回答生成（`answer` / `sources`）と `--with-answer`
 - 接続先のリモート制限（`RAG_ALLOW_REMOTE_ENDPOINTS` 等）と
   コーパス範囲制限（`RAG_ALLOW_EXTERNAL_CORPUS`）
+- クラウド埋め込みのリトライ（429/5xx で即失敗）
+- `RAG_CLOUD_CHAT_ENABLED` は受け付けるが no-op（chat クライアント未実装）
+- ハイブリッド検索で dense / keyword が失敗した場合は部分結果を返し、
+  その理由は stderr にも JSON にも残さない
 
 ## CLI
 
@@ -74,6 +83,11 @@ stdin JSON の op モード（`{"op":"cosine","a":[1.0],"b":[1.0]}`）も後方�
 | `RAG_TOP_K` | `10` |
 | `RAG_RERANK_MAX_DOCS` | `5` |
 | `RAG_EMBED_PREFIX_QUERY` / `PASSAGE` | 空 |
+| `RAG_CLOUD_ENABLED` | `0`（`"1"` のみ有効） |
+| `RAG_CLOUD_EMBED_MODEL` | 空（有効時は必須） |
+| `RAG_CLOUD_EMBED_DIMENSION` | 未設定（モデル表から解決） |
+| `RAG_CLOUD_BASE_URL` | `https://opencode.ai/inference/go/openai/v1` |
+| `OPENCODE_GO_API_KEY` | 未設定（クラウド時に必須） |
 
 Ruri 系モデルを使う場合は `RAG_VECTOR_SIZE=768` かつ `CHUNK_SIZE<=512` が必須。
 
@@ -90,4 +104,4 @@ betterleaks git
 
 - `docs/` 配下は旧 Python 実装の設計・実測資料。現行 CLI の仕様は本 README と
   `ragcore/src/` のコードを正とする。
-- `ragcore/src/` — `config` / `llama` / `qdrant` / `search` / `ingest` / `query` / `evaluate`
+- `ragcore/src/` — `config` / `llama` / `cloud` / `qdrant` / `search` / `ingest` / `query` / `evaluate`

@@ -33,6 +33,9 @@ stdin JSON の op モードも後方互換で残しています。
 
 `hybrid-rerank` は `hybrid` と同一動作（LLM 再ランク未実装）です。
 回答生成・リモート接続制限・コーパス範囲制限も未実装です。
+クラウド埋め込みは opt-in で利用可能ですが、リトライ、回答生成（chat）、
+ハイブリッド検索の部分失敗の構造化記録は未実装です。
+`RAG_CLOUD_CHAT_ENABLED` は設定を受け付けますが no-op です。
 
 ```bash
 echo '{"op":"chunk","text":"あいうえおかきく","chunk_size":3,"overlap":1}' \
@@ -67,6 +70,7 @@ diagnostics にはファイル名とキー名のみ含めます（値は含め�
 | --- | --- |
 | `config.rs` | 環境変数と検証 |
 | `llama.rs` | llama-server の OpenAI 互換 `/v1/embeddings` |
+| `cloud.rs` | opencodeGO の `/embeddings`（`RAG_CLOUD_ENABLED=1` のときだけ生成） |
 | `qdrant.rs` | コレクション／points API |
 | `search.rs` | keyword / RRF / rerank の純粋計算 |
 | `ingest.rs` | コーパス走査・投入 |

@@ -1,4 +1,5 @@
-//! コーパスをチャンク化し llama-server で埋め込み Qdrant へ投入する。
+//! コーパスをチャンク化し埋め込み Qdrant へ投入する。
+//! 埋め込み器はローカル llama.cpp / クラウド opencodeGO を設定で切り替える。
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -6,7 +7,6 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value};
 
 use crate::config::Config;
-use crate::llama::LlamaClient;
 use crate::qdrant::QdrantClient;
 use crate::{chunk_text, point_id};
 
@@ -118,6 +118,63 @@ pub fn iter_chunks(path: &Path, root: &Path, chunk_size: usize, overlap: usize) 
     points
 }
 
+/// 埋め込み器の経路。`cloud.enabled` で一度だけ選び、バッチ間で使い回す。
+enum Embedder {
+    Local(crate::llama::LlamaClient),
+    Cloud(crate::cloud::CloudClient),
+}
+
+/// クラウド経路を選ぶかどうか（IO を伴わない純粋判定）。
+fn use_cloud_embedder(config: &Config) -> bool {
+    config.cloud.enabled
+}
+
+/// Qdrant コレクションの次元。クラウド経路では解決済み次元を優先する。
+fn resolved_vector_size(config: &Config) -> usize {
+    if use_cloud_embedder(config) {
+        config.cloud_embed_dimension().unwrap_or(config.vector_size)
+    } else {
+        config.vector_size
+    }
+}
+
+impl Embedder {
+    fn from_config(config: &Config) -> Result<Self, String> {
+        if use_cloud_embedder(config) {
+            Ok(Self::Cloud(crate::cloud::CloudClient::from_config(config)?))
+        } else {
+            Ok(Self::Local(crate::llama::LlamaClient::new(
+                &config.llama_server_url,
+                &config.embed_model,
+                config.llama_timeout_secs,
+            )))
+        }
+    }
+
+    fn embed(
+        &self,
+        texts: &[String],
+        prefix: &str,
+        config: &Config,
+    ) -> Result<Vec<Vec<f64>>, String> {
+        match self {
+            Self::Local(client) => client.embed(texts, prefix, None),
+            Self::Cloud(client) => {
+                // 旧 Python 契約に合わせ、クラウド経路では prefix を付与しない。
+                let inputs: Vec<String> = texts.to_vec();
+                let vectors = client.embed(&inputs)?;
+                if config
+                    .cloud_embed_dimension()
+                    .is_some_and(|dim| vectors.iter().any(|vector| vector.len() != dim))
+                {
+                    return Err("埋め込みベクトルの次元が一致しません".to_string());
+                }
+                Ok(vectors)
+            }
+        }
+    }
+}
+
 pub fn run(config: &Config, corpus_dir: &Path, recreate: bool, yes: bool) -> Result<(), String> {
     if recreate && !yes {
         return Err("--recreate には --yes が必要です".to_string());
@@ -126,11 +183,7 @@ pub fn run(config: &Config, corpus_dir: &Path, recreate: bool, yes: bool) -> Res
         return Err("corpus dir not found".to_string());
     }
 
-    let llama = LlamaClient::new(
-        &config.llama_server_url,
-        &config.embed_model,
-        config.llama_timeout_secs,
-    );
+    let embedder = Embedder::from_config(config)?;
     let qdrant = QdrantClient::new(
         &config.qdrant_url,
         &config.collection,
@@ -141,7 +194,7 @@ pub fn run(config: &Config, corpus_dir: &Path, recreate: bool, yes: bool) -> Res
         qdrant.delete_collection()?;
     }
     if !qdrant.collection_exists()? {
-        qdrant.create_collection(config.vector_size)?;
+        qdrant.create_collection(resolved_vector_size(config))?;
     }
 
     let files = collect_markdown(corpus_dir)?;
@@ -166,7 +219,7 @@ pub fn run(config: &Config, corpus_dir: &Path, recreate: bool, yes: bool) -> Res
                     .to_string()
             })
             .collect();
-        let vectors = llama.embed(&texts, &config.embed_prefix_passage, None)?;
+        let vectors = embedder.embed(&texts, &config.embed_prefix_passage, config)?;
         if vectors.len() != batch.len() {
             return Err("embedded vector count mismatch".to_string());
         }
@@ -184,6 +237,68 @@ pub fn run(config: &Config, corpus_dir: &Path, recreate: bool, yes: bool) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::CloudConfig;
+
+    fn test_config() -> Config {
+        Config {
+            corpus_dir: PathBuf::from("docs"),
+            collection: "c".to_string(),
+            llama_server_url: "http://127.0.0.1:8090".to_string(),
+            qdrant_url: "http://127.0.0.1:6333".to_string(),
+            embed_model: "qwen2.5:3b".to_string(),
+            chat_model: "qwen2.5:3b".to_string(),
+            vector_size: 2048,
+            chunk_size: 800,
+            chunk_overlap: 100,
+            top_k: 10,
+            question_max_chars: 2000,
+            rerank_max_docs: 5,
+            embed_prefix_query: String::new(),
+            embed_prefix_passage: String::new(),
+            llama_timeout_secs: 300.0,
+            qdrant_timeout_secs: 300.0,
+            answer_timeout_secs: 60.0,
+            cloud: CloudConfig {
+                enabled: false,
+                chat_enabled: false,
+                base_url: "https://opencode.ai/inference/go/openai/v1".to_string(),
+                embed_model: String::new(),
+                embed_dimension: None,
+                model: "deepseek-v4.1-flash".to_string(),
+                timeout_secs: 60.0,
+                api_key: None,
+                api_key_name: None,
+            },
+        }
+    }
+
+    #[test]
+    fn embedder_selection_follows_cloud_enabled_flag() {
+        let mut config = test_config();
+        assert!(!use_cloud_embedder(&config));
+        // ローカル経路は HTTP を送らずに生成できる。
+        assert!(matches!(
+            Embedder::from_config(&config),
+            Ok(Embedder::Local(_))
+        ));
+
+        config.cloud.enabled = true;
+        assert!(use_cloud_embedder(&config));
+    }
+
+    #[test]
+    fn cloud_path_uses_resolved_embed_dimension() {
+        let mut config = test_config();
+        assert_eq!(resolved_vector_size(&config), 2048);
+
+        config.cloud.enabled = true;
+        config.cloud.embed_model = "text-embedding-3-small".to_string();
+        config.vector_size = 1536;
+        assert_eq!(resolved_vector_size(&config), 1536);
+
+        config.cloud.embed_dimension = Some(4096);
+        assert_eq!(resolved_vector_size(&config), 4096);
+    }
 
     #[test]
     fn iter_chunks_uses_character_windows() {
