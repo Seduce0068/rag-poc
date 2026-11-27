@@ -9,7 +9,7 @@ use std::path::Path;
 
 use ragcore::{
     check_eval_results, chunk_text, corpus_fingerprint, cosine, distribution, latency_stats,
-    ndcg_at, point_id, recall_at,
+    ndcg_at, point_id, recall_at, rrf_fuse,
 };
 use serde_json::{json, Value};
 
@@ -39,6 +39,7 @@ fn main() {
         "fingerprint" => run_fingerprint(&value),
         "point_id" => run_point_id(&value),
         "check_eval_results" => run_check_eval_results(&value),
+        "rrf_fuse" => run_rrf_fuse(&value),
         other => Err(format!("未知の op: {other}")),
     };
 
@@ -245,4 +246,21 @@ fn run_check_eval_results(value: &Value) -> Result<String, String> {
         files.push((name, content));
     }
     to_json_string(&check_eval_results(&files))
+}
+
+/// 複数の順位付きリストを受け取り、RRF(k=60) で統合した配列を返す。
+fn run_rrf_fuse(value: &Value) -> Result<String, String> {
+    let rankings_value = value
+        .get("rankings")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "missing or invalid array field: rankings".to_string())?;
+    let mut rankings: Vec<Vec<Value>> = Vec::with_capacity(rankings_value.len());
+    for (index, ranking) in rankings_value.iter().enumerate() {
+        let points = ranking
+            .as_array()
+            .ok_or_else(|| format!("rankings[{index}] must be an array"))?;
+        rankings.push(points.clone());
+    }
+    let top_k = require_usize(value, "top_k")?;
+    to_json_string(&rrf_fuse(&rankings, top_k))
 }

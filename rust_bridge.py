@@ -248,6 +248,84 @@ def check_eval_results(paths: Sequence[str | Path]) -> dict:
     return result
 
 
+def chunk(text: str, chunk_size: int, overlap: int) -> list[str]:
+    """Rust op で文字ウィンドウ分割する。失敗時は RustUnavailable を送出する。"""
+    result = run_op(
+        "chunk", {"text": text, "chunk_size": chunk_size, "overlap": overlap}
+    )
+    if not isinstance(result, list) or not all(isinstance(item, str) for item in result):
+        raise _fail("chunk returned unexpected result")
+    return result
+
+
+def point_id(source: str, chunk_index: int) -> int:
+    """安定 ID を Rust op で計算する。失敗時は RustUnavailable を送出する。"""
+    result = run_op("point_id", {"source": source, "chunk_index": chunk_index})
+    if not isinstance(result, int):
+        raise _fail("point_id returned unexpected result")
+    return result
+
+
+def fingerprint(paths: Sequence[tuple[str, str]]) -> dict:
+    """(path, content) の組からコーパス fingerprint を Rust op で計算する。"""
+    request = [{"path": path, "content": content} for path, content in paths]
+    result = run_op("fingerprint", {"paths": request})
+    if (
+        not isinstance(result, dict)
+        or not isinstance(result.get("count"), int)
+        or not isinstance(result.get("sha256"), str)
+    ):
+        raise _fail("fingerprint returned unexpected result")
+    return result
+
+
+def recall(relevant: Sequence[str], retrieved: Sequence[str], k: int) -> float:
+    """query-level hit@k を Rust op で計算する。"""
+    result = run_op(
+        "recall",
+        {
+            "relevant": list(relevant),
+            "retrieved": list(retrieved),
+            "k": k,
+        },
+    )
+    if not isinstance(result, (int, float)):
+        raise _fail("recall returned unexpected result")
+    return float(result)
+
+
+def ndcg(relevant: Sequence[str], retrieved: Sequence[str], k: int) -> float:
+    """nDCG@k を Rust op で計算する（CLI 側で 6 桁丸め済み）。"""
+    result = run_op(
+        "ndcg",
+        {
+            "relevant": list(relevant),
+            "retrieved": list(retrieved),
+            "k": k,
+        },
+    )
+    if not isinstance(result, (int, float)):
+        raise _fail("ndcg returned unexpected result")
+    return float(result)
+
+
+def latency(samples: Sequence[float]) -> dict:
+    """レイテンシ統計を Rust op で計算する。"""
+    result = run_op("latency", {"samples": list(samples)})
+    required = ("count", "avg", "median", "min", "max", "stdev")
+    if not isinstance(result, dict) or any(key not in result for key in required):
+        raise _fail("latency returned unexpected result")
+    return result
+
+
+def rrf_fuse(rankings: Sequence[Sequence[dict]], top_k: int) -> list[dict]:
+    """RRF(k=60) で順位を統合する。失敗時は RustUnavailable を送出する。"""
+    result = run_op("rrf_fuse", {"rankings": rankings, "top_k": top_k})
+    if not isinstance(result, list) or not all(isinstance(item, dict) for item in result):
+        raise _fail("rrf_fuse returned unexpected result")
+    return result
+
+
 def _discover_eval_results(root: Path) -> list[Path]:
     """指定ツリーの公開対象 eval-results*.json をファイル名順に列挙する。
 

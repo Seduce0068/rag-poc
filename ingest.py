@@ -38,6 +38,8 @@ import json
 import os
 import re
 import sys
+
+import rust_bridge
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Iterator, Sequence
@@ -203,8 +205,8 @@ def _heading_text(line: str) -> str:
     return match.group(2).strip() if match else line.strip()
 
 
-def _split_long_text(text: str) -> list[str]:
-    """CHUNK_SIZE / CHUNK_OVERLAP で文字単位のウィンドウに分割する。"""
+def _split_long_text_python(text: str) -> list[str]:
+    """文字単位ウィンドウ分割の Python 参照実装（同等性テスト用）。"""
     if len(text) <= CHUNK_SIZE:
         return [text] if text else []
     step = CHUNK_SIZE - CHUNK_OVERLAP
@@ -226,12 +228,28 @@ def _split_long_text(text: str) -> list[str]:
     return pieces
 
 
-def _point_id(source: str, chunk_index: int) -> int:
-    """再実行しても同じになる安定 ID（blake2b 64bit、Qdrant の uint64 に収まる）。"""
+def _split_long_text(text: str) -> list[str]:
+    """CHUNK_SIZE / CHUNK_OVERLAP で分割する（Rust 優先・Python フォールバック）。"""
+    try:
+        return rust_bridge.chunk(text, CHUNK_SIZE, CHUNK_OVERLAP)
+    except rust_bridge.RustUnavailable:
+        return _split_long_text_python(text)
+
+
+def _point_id_python(source: str, chunk_index: int) -> int:
+    """安定 ID の Python 参照実装（同等性テスト用）。"""
     digest = hashlib.blake2b(
         f"{source}\0{chunk_index}".encode("utf-8"), digest_size=8
     ).digest()
     return int.from_bytes(digest, byteorder="big")
+
+
+def _point_id(source: str, chunk_index: int) -> int:
+    """再実行しても同じになる安定 ID（Rust 優先・Python フォールバック）。"""
+    try:
+        return rust_bridge.point_id(source, chunk_index)
+    except rust_bridge.RustUnavailable:
+        return _point_id_python(source, chunk_index)
 
 
 def iter_chunks(path: Path, root: Path) -> Iterator[dict]:

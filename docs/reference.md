@@ -360,22 +360,22 @@ definition 列と併せて読むこと。
 
 ## Rust op の配線状況
 
-`ragcore` の op は 9 件（`chunk` / `cosine` / `cosine_batch` /
+`ragcore` の op は 11 件（`chunk` / `cosine` / `cosine_batch` /
 `distribution` / `recall` / `ndcg` / `latency` / `fingerprint` /
-`point_id`）で、本番配線は `cosine_batch` と `distribution` の 2 op だけである。
-`compare_embeddings.py` が `rust_bridge.py` 経由で呼び、`cosine_batch` は
-質問×ファイルのコサイン類似度を 1 回で計算し、`distribution` はスコアの
-min/max/mean/stdev を求める。Rust が無い／失敗した場合は Python 実装へ
-フォールバックする（フォールバック発生は出力 JSON の `notes` に記録される）。
+`point_id` / `check_eval_results` / `rrf_fuse`）で、本番配線は
+`cosine_batch` / `distribution` / `chunk` / `point_id` / `recall` / `ndcg` /
+`rrf_fuse` の 7 op である。`compare_embeddings.py` が `cosine_batch` /
+`distribution` を、`ingest.py` が `chunk` / `point_id` を、`query.py` が
+`rrf_fuse` を、`evaluate.py` が `recall` / `ndcg` を `rust_bridge.py` 経由で
+呼ぶ。Rust が無い／失敗した場合は Python 実装へフォールバックする
+（フォールバック発生は出力 JSON の `notes` に記録される）。
 `cosine` は実計算には使わず、`rust_bridge.available()` の probe
 （`a=[1.0]` / `b=[1.0]` の応答確認）に限られる。
-残り 6 op（`chunk` / `point_id` / `fingerprint` / `recall` / `ndcg` /
-`latency`）は未配線で、`ingest.py` / `evaluate.py` の該当処理は純 Python の
+残り 2 op（`fingerprint` / `latency`）は未配線で、該当処理は純 Python の
 まま、Rust 実装は同等性テスト（`test_rag.py`）でのみ使われる。
-`check_eval_results` は上記 9 op に含めない、CI ゲート専用の別 op である。
+`check_eval_results` は検索・評価経路では呼ばず、CI ゲート専用である。
 `python3 rag_poc/rust_bridge.py check_eval_results` が `eval-results-*.json`
-のパスだけを Rust へ渡し、成果物のキー検証をゲートする（Python の検索・評価
-経路では呼ばない）。
+のパスだけを Rust へ渡し、成果物のキー検証をゲートする。
 
 ## 埋め込み単価
 

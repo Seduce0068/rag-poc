@@ -85,6 +85,8 @@ RETRY_STATUS_FORCELIST = (429, 500, 502, 503, 504)
 RETRY_ALLOWED_METHODS = frozenset({"GET", "POST", "PUT"})
 
 CORPUS_DIR = os.environ.get("RAG_CORPUS_DIR", "passkey-gateway/docs")
+# 明示的な opt-in がある場合のみ、リポジトリ配下以外のコーパスを許可する。
+ENV_ALLOW_EXTERNAL_CORPUS = "RAG_ALLOW_EXTERNAL_CORPUS"
 QUESTION_MAX_CHARS = int(os.environ.get("RAG_QUESTION_MAX_CHARS", "2000"))
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -409,10 +411,12 @@ def resolve_corpus_dir() -> Path:
         resolved = (REPO_ROOT / path).resolve()
     root = REPO_ROOT.resolve()
     if not resolved.is_relative_to(root):
-        raise ValueError(
-            "CORPUS_DIR はリポジトリ配下である必要があります: "
-            f"{mask_secrets(str(resolved))}"
-        )
+        if os.environ.get(ENV_ALLOW_EXTERNAL_CORPUS, "") != "1":
+            raise ValueError(
+                "CORPUS_DIR はリポジトリ配下である必要があります: "
+                f"{mask_secrets(str(resolved))}"
+                f"（外部ディレクトリを使う場合は {ENV_ALLOW_EXTERNAL_CORPUS}=1 を指定）"
+            )
     return resolved
 
 SCHEMA_VERSION = 2  # eval-results.json のスキーマバージョン（必須キー欠落で再計測）

@@ -69,6 +69,7 @@ if HERE not in sys.path:
 # 検索モードは config.SEARCH_MODES を唯一の情報源とする（R2-B）。
 # ヘルパー検証は _import_config() が担い、ここでは値の参照だけを行う。
 import config  # type: ignore
+import rust_bridge  # type: ignore
 
 MODES: tuple[str, ...] = config.SEARCH_MODES
 
@@ -1081,13 +1082,22 @@ def _evaluate_heldout_one(
     record["matched_sources"] = sorted({s for s in sources if _source_matches(s, relevant)})
 
     # recall@k: 上位 k 件に正解が 1 件でもあれば 1（クエリ平均の hit@k）。
+    # Rust op を優先し、利用できなければ Python 参照実装へフォールバックする。
     for k in HELD_OUT_RECALL_K:
-        record["recall_at"][str(k)] = any(_source_matches(s, relevant) for s in sources[:k])
+        try:
+            record["recall_at"][str(k)] = rust_bridge.recall(relevant, sources, k) == 1.0
+        except rust_bridge.RustUnavailable:
+            record["recall_at"][str(k)] = any(_source_matches(s, relevant) for s in sources[:k])
 
     # nDCG@k: gain=1 / discount=log2(rank+1)（rank は 1 起点）。
     # 正解はファイル単位なので、同じファイルの複数チャンクは最上位の1回だけ数え、
     # 1 ファイルにつき最大 1 gain とする（nDCG が 1 を超えないようにする）。
     for k in HELD_OUT_NDCG_K:
+        try:
+            record["ndcg_at"][str(k)] = rust_bridge.ndcg(relevant, sources, k)
+            continue
+        except rust_bridge.RustUnavailable:
+            pass
         dcg = 0.0
         credited: set[str] = set()
         for rank, source in enumerate(sources[:k], start=1):

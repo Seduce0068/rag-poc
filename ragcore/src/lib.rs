@@ -9,6 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 
 /// スコア分布（min / max / mean / stdev、6 桁丸め）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -267,6 +268,62 @@ pub fn point_id(source: &str, chunk_index: u64) -> u64 {
         .finalize_variable(&mut digest)
         .expect("buffer length equals digest size");
     u64::from_be_bytes(digest)
+}
+
+/// Reciprocal Rank Fusion（k=60）。順位のみを統合し、各 point の score を上書きする。
+/// Python `query.rrf_fuse` と同じく、タイブレークは `str(id)` の辞書順。
+pub fn rrf_fuse(rankings: &[Vec<serde_json::Value>], top_k: usize) -> Vec<serde_json::Value> {
+    const RRF_K: f64 = 60.0;
+    let mut scores: HashMap<String, f64> = HashMap::new();
+    let mut items: HashMap<String, serde_json::Value> = HashMap::new();
+
+    for ranking in rankings {
+        for (index, point) in ranking.iter().enumerate() {
+            let rank = index + 1;
+            let key = point
+                .get("id")
+                .map(serde_json::Value::to_string)
+                .unwrap_or_else(|| "null".to_string());
+            *scores.entry(key.clone()).or_insert(0.0) += 1.0 / (RRF_K + rank as f64);
+            items.entry(key).or_insert_with(|| point.clone());
+        }
+    }
+
+    for (key, score) in &scores {
+        if let Some(item) = items.get_mut(key) {
+            if let Some(object) = item.as_object_mut() {
+                object.insert("score".to_string(), serde_json::json!(score));
+            }
+        }
+    }
+
+    let mut fused: Vec<serde_json::Value> = items.into_values().collect();
+    fused.sort_by(|a, b| {
+        let score_a = a
+            .get("score")
+            .and_then(serde_json::Value::as_f64)
+            .unwrap_or(0.0);
+        let score_b = b
+            .get("score")
+            .and_then(serde_json::Value::as_f64)
+            .unwrap_or(0.0);
+        score_b
+            .partial_cmp(&score_a)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| {
+                let id_a = a
+                    .get("id")
+                    .map(serde_json::Value::to_string)
+                    .unwrap_or_default();
+                let id_b = b
+                    .get("id")
+                    .map(serde_json::Value::to_string)
+                    .unwrap_or_default();
+                id_a.cmp(&id_b)
+            })
+    });
+    fused.truncate(top_k);
+    fused
 }
 
 /// eval-results-*.json の公開ゲート結果。
@@ -772,5 +829,27 @@ mod tests {
         let report = check_eval_results(&beyond);
         assert!(report.ok);
         assert!(report.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn rrf_fuse_uses_k60_and_top_k() {
+        let first = vec![serde_json::json!({"id": "x"})];
+        let second = vec![
+            serde_json::json!({"id": "y"}),
+            serde_json::json!({"id": "x"}),
+        ];
+        let fused = rrf_fuse(&[first, second], 5);
+        assert_eq!(fused.len(), 2);
+        let x = fused
+            .iter()
+            .find(|item| item.get("id").and_then(serde_json::Value::as_str) == Some("x"))
+            .unwrap();
+        let score = x.get("score").and_then(serde_json::Value::as_f64).unwrap();
+        assert!((score - (1.0 / 61.0 + 1.0 / 62.0)).abs() < 1e-12);
+
+        let five: Vec<serde_json::Value> = (0..5)
+            .map(|index| serde_json::json!({"id": index}))
+            .collect();
+        assert_eq!(rrf_fuse(&[five], 2).len(), 2);
     }
 }

@@ -97,7 +97,7 @@ curl -fsS http://127.0.0.1:6333/collections
 `evaluate.py` が明示エラーで終了する。
 
 Rust バイナリは `rag_poc/ragcore/target/debug/ragcore` に生成される。
-op の配線状況（本番配線は `cosine_batch` と `distribution` の 2 op）、
+op の配線状況（本番配線は `cosine_batch` / `distribution` / `chunk` / `point_id` / `recall` / `ndcg` / `rrf_fuse` の 7 op）、
 同等性テスト件数、CI ゲート専用 `check_eval_results`、および
 `RAG_RUST_BIN` / `RAG_RUST_TIMEOUT` / `RAG_REQUIRE_RUST` の詳細は
 [Rust op の配線状況](docs/reference.md#rust-op-の配線状況)と

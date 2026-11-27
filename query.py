@@ -24,6 +24,7 @@ import requests
 
 # 样式切替（R2-A）は config モジュール経由で参照する（from import との併用）。
 import config
+import rust_bridge
 
 from config import (
     CHAT_MODEL,
@@ -531,8 +532,10 @@ def search_keyword(question: str, top_k: int) -> list[dict[str, Any]]:
 # hybrid: RRF (k=60) で順位のみを統合
 # ---------------------------------------------------------------------------
 
-def rrf_fuse(*rankings: list[dict[str, Any]], top_k: int) -> list[dict[str, Any]]:
-    """複数の順位付きリストを Reciprocal Rank Fusion で統合する。"""
+def _rrf_fuse_python(
+    *rankings: list[dict[str, Any]], top_k: int
+) -> list[dict[str, Any]]:
+    """RRF(k=60) の Python 参照実装（同等性テスト用）。"""
     fused_scores: dict[Any, float] = {}
     fused_items: dict[Any, dict[str, Any]] = {}
 
@@ -551,6 +554,14 @@ def rrf_fuse(*rankings: list[dict[str, Any]], top_k: int) -> list[dict[str, Any]
         key=lambda item: (-item["score"], str(item["id"])),
     )
     return ranked[:top_k]
+
+
+def rrf_fuse(*rankings: list[dict[str, Any]], top_k: int) -> list[dict[str, Any]]:
+    """複数順位を RRF で統合する（Rust 優先・Python フォールバック）。"""
+    try:
+        return rust_bridge.rrf_fuse(rankings, top_k)
+    except rust_bridge.RustUnavailable:
+        return _rrf_fuse_python(*rankings, top_k=top_k)
 
 
 # ---------------------------------------------------------------------------

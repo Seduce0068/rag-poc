@@ -1404,7 +1404,7 @@ class RustOpEquivalenceTest(_RustSkipCounter, unittest.TestCase):
         )
         with mock.patch.object(ingest, "CHUNK_SIZE", size), \
                 mock.patch.object(ingest, "CHUNK_OVERLAP", overlap):
-            expected = ingest._split_long_text(text)
+            expected = ingest._split_long_text_python(text)
         self.assertEqual(rust, expected)
         self.assertGreater(len(expected), 1)
 
@@ -1415,7 +1415,7 @@ class RustOpEquivalenceTest(_RustSkipCounter, unittest.TestCase):
         )
         with mock.patch.object(ingest, "CHUNK_SIZE", 5), \
                 mock.patch.object(ingest, "CHUNK_OVERLAP", 1):
-            expected_blank = ingest._split_long_text(blank)
+            expected_blank = ingest._split_long_text_python(blank)
         self.assertEqual(rust_blank, [])
         self.assertEqual(rust_blank, expected_blank)
 
@@ -1431,7 +1431,7 @@ class RustOpEquivalenceTest(_RustSkipCounter, unittest.TestCase):
                 rust = self._run_op(
                     "point_id", {"source": source, "chunk_index": index}
                 )
-                self.assertEqual(rust, ingest._point_id(source, index))
+                self.assertEqual(rust, ingest._point_id_python(source, index))
 
     def test_fingerprint_matches_python_and_sorts_by_path(self):
         with tempfile.TemporaryDirectory() as tmp:
