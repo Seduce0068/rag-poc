@@ -413,19 +413,25 @@ opencodeGO の OpenAI 互換 `/embeddings` API で利用できる埋め込みモ
 
 | キー | 値 | 意味 |
 | --- | --- | --- |
-| `usage.cost_source` | `api` / `api-zero` / `estimated` / `None` | API 実値／cost 0.0／単価推定／判定不能 |
+| `usage.cost_source` | `api` / `go-allowance-zero` / `api-zero` / `estimated` / `None` | API 実値／Go 上限内／cost 0.0（手掛かりなし）／単価推定／判定不能 |
+| `usage.allowance_usd` | 小数 | Go の上限に対する要求単位の消費ドル（API の `opencode.allowance`） |
+| `usage.list_cost_usd` | 小数 | モデルの定価ドル（API の `opencode.list_cost`） |
+| `usage.billing_source` | `free` / `balance` / `go` / `go-plus` / `byok` | 課金ソース（API の `opencode.billing_source`）。列挙外は破棄 |
+| `usage_raw_sample` | リスト（最大2件） | 直近リクエストの生 usage ホワイトリスト（秘密値不含、全バッチ代表ではない） |
 | `summary.estimated_cost_usd` | 小数または `None` | API cost を 6 桁で保持。cost が無ければ単価 × total_tokens の 6 桁推定 |
 | `summary.estimated_cost_from_tokens_usd` | 小数（12 桁） | 6 桁丸めで 0.0 に潰れる場合のトークン由来見込み |
 | `usage.estimated_cost_from_tokens_usd` | 小数（12 桁） | 同上（`usage` 側にも記録） |
 
-`cost_source=api-zero` は `cost=0.0` かつ `total_tokens>0` のときに設定する。
-理由は [Inference API / Cost](https://opencode.ai/docs/console/api/inference/#cost)
+`cost_source=go-allowance-zero` は `cost=0.0` かつ `allowance_usd` が存在する
+か `billing_source` が `go` / `go-plus` のときに設定する。
+[Inference API / Cost](https://opencode.ai/docs/console/api/inference/#cost)
 の仕様で、`usage.cost` は残高請求額であり Go の上限内利用では `0` になる。
-実質の消費額は `opencode.allowance`（月額上限に対するドル）で別途報告される
-が、現行コードはこのフィールドを記録しないため成果物からは読み取れない。
-課金ゼロを意味しない点に注意する。`summary.estimated_cost_usd` は
-API cost（0.0）を維持し、主指標は `estimated_cost_from_tokens_usd` とする。
-成果物 `notes` に「cost_source=api-zero のときは token 推定を参照」を明記する。
+実質の消費額の目安は `allowance_usd`（要求単位の貢献ドル）、`billing_source`、
+`list_cost_usd`（定価ドル）で別途報告され、成果物の `usage` と
+`usage_raw_sample` に記録される。課金ゼロを意味しない点に注意する。
+`cost_source=api-zero` は `cost=0.0` でこれらの手掛かりが無い場合に設定し、
+実コストがゼロだと断定しない。`summary.estimated_cost_usd` は API cost（0.0）
+を維持し、主指標は `estimated_cost_from_tokens_usd` とする。
 `cost_source=estimated` は cost キーが無い場合、`api` は正の cost、
 `None` は cost が無く単価推定もできない場合を表す。
 `estimated_cost_from_tokens_usd` は埋め込み単価（0.02 / 0.01 / 0.20 USD

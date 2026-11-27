@@ -300,14 +300,17 @@ token 課金が発生するため、ローカル Ruri と同等の品質を別�
 `gemini-embedding-2`（3072 次元、1M 入力トークン $0.20）も
 同一サブセットで計測し、`hit@1=1.0` / `nDCG@10=1.0` だった。
 
-`cost_source=api-zero`（`cost=0.0` かつ `total_tokens>0`）の理由は、
-OpenCode Go の仕様で確定した。公式の [Inference API / Cost](https://opencode.ai/docs/console/api/inference/#cost)
+`cost=0.0` の理由は OpenCode Go の仕様で確定した。公式の
+[Inference API / Cost](https://opencode.ai/docs/console/api/inference/#cost)
 によれば `usage.cost` は「残高から請求した米ドル」で、Go の上限内の
-利用では `0` を返す。上限に対する消費額は `usage.opencode.allowance`
-（月額上限に対するドル）と `opencode.billing_source=go` に別途記録される。
+利用では `0` を返す。要求単位の消費額は `usage.opencode.allowance` と
+`opencode.billing_source=go` / `opencode.list_cost` に別途報告される。
 つまり `0.0` は課金ゼロを意味せず、Go 枠を消費したことを表す。
-ただし本 PoC の `cloud_client.py` / `cloud_bench.py` は `allowance` 等を
-成果物へ記録しないため、実レスポンスでの値は未確認である。
+本 PoC はこれらを `usage.allowance_usd` / `usage.billing_source` /
+`usage.list_cost_usd` として成果物へ記録し、手掛かりがある場合は
+`cost_source=go-allowance-zero` を付ける。`usage_raw_sample` には
+直近リクエストのホワイトリストを最大 2 件残すため、実レスポンスの
+確認にも使える（`usage` は全バッチ合算、生値は最後バッチである点に注意）。
 `summary.estimated_cost_usd` は API cost（0.0）を維持するため、
 6 桁丸めで 0.0 に潰れる場合は `estimated_cost_from_tokens_usd` を
 主指標として読む（キーの使い分けは

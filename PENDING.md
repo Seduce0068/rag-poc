@@ -80,24 +80,28 @@ gh run watch --exit-status
 `gh run watch` が成功するまでマージしない。CI は `Seduce0068/workflows` の
 `rust-gates.yml@v1` へ委譲しているため、ローカルの 2 / 3 と同じゲートが走る。
 
-## 次アクション（クラウド cost の実測記録）
+## 完了記録（クラウド cost の実測記録 / 2026-11-27）
 
 2026-11-27 の調査で、Go 上限内の要求では API の `usage.cost` が `0` になる
 仕様（[公式 Cost 定義](https://opencode.ai/docs/console/api/inference/#cost)）が
-確定した。実消費は `usage.opencode.allowance`（月額上限に対するドル）と
-`opencode.billing_source` / `opencode.list_cost` で別途報告されるが、現行の
-`cloud_client.py` / `cloud_bench.py` はこれらを破棄している。対応は次のとおり。
+確定した。実消費は `usage.opencode.allowance`（要求単位の貢献ドル）と
+`opencode.billing_source` / `opencode.list_cost` で別途報告される。
+swarm-coding（完全無制限プロファイル）の R1〜R6 で次の対応を完了した。
 
-1. `_accumulate_usage` / `_normalize_usage` に `opencode.allowance` /
-   `billing_source` / `list_cost` を通し、成果物へ記録する（要コード変更）。
-2. `cost_source` に Go 上限内を表す値（例 `go-allowance-zero`）を追加し、
-   notes の「理由は未確認」を公式仕様ベースの記述へ置き換える。
-3. 生レスポンスの usage をマスク済みで 1 件保存し、`opencode` フィールドの
-   実在と allowance 値を Runtime Proof として確認する
-   （`OPENCODE_GO_API_KEY` は一時環境変数のみへ読み込む）。
-4. 実請求との突き合わせは Console の Usage export API
+1. ✅ `cloud_client._accumulate_usage` / `_normalize_usage` に `opencode.allowance`
+   / `billing_source` / `list_cost` を通し、成果物へ記録する実装を追加。
+   `billing_source` は既知列挙値のみ「最後の値」として保持し、数値は
+   per-request 値として加算する（公式定義に準拠）。
+2. ✅ `cost_source` に `go-allowance-zero` を追加。notes の「理由は未確認」を
+   公式仕様ベースの記述へ置き換えた。既存の `api` / `api-zero` / `estimated`
+   / `None` は後方互換のため維持。
+3. ✅ 生 usage のホワイトリストを `usage_raw_sample`（最大 2 件）へ保存。
+   実レスポンスの確認材料として残す。テスト 290 件（旧 270 + 新 20）が
+   外部サービス接続なしで通過。クラウド実 RUN は未実施のため、
+   実レスポンスでの `opencode` フィールドの実在は依然として未確認。
+4. ⬜ 実請求との突き合わせは Console の Usage export API
    （`/console/api/v2/usage/export`）を使う。権限あるキーが必要なため
-   ユーザー確認後に実施する。
+   ユーザー確認後に実施する（未完了）。
 
 ## 次アクション（markdownlint の CI ゲート化）
 
