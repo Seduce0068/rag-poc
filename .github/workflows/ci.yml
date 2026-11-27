@@ -18,6 +18,7 @@ jobs:
     uses: Seduce0068/workflows/.github/workflows/rust-gates.yml@v1
     with:
       working_directory: ragcore
+      clippy_args: -D clippy::undocumented_unsafe_blocks
       extra_gates: |
         python3 ../test_rag.py
         cargo build --locked
