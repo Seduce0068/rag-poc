@@ -1337,7 +1337,7 @@ class RustBridgeTest(_RustSkipCounter, unittest.TestCase):
         import rust_bridge as bridge
 
         path = bridge.rust_binary_path()
-        self.assertTrue(str(path).endswith("rag_poc/ragcore/target/debug/ragcore"), str(path))
+        self.assertEqual(path, HERE / "ragcore/target/debug/ragcore")
         self.assertTrue(path.is_absolute())
 
     def test_cosine_batch_matches_python(self):
