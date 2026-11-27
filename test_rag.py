@@ -2270,14 +2270,22 @@ class CloudClientTest(unittest.TestCase):
     def setUp(self):
         self._old_session = getattr(cloud_client, "_SESSION", None)
         self._old_usage = getattr(cloud_client, "_LAST_USAGE", None)
+        self._old_billing_source = getattr(
+            cloud_client, "_LAST_BILLING_SOURCE", None
+        )
+        self._old_raw_usage = getattr(cloud_client, "_LAST_RAW_USAGE", None)
         self._handler = None
         self._session = self._make_fake_session()
         cloud_client._SESSION = self._session
         cloud_client._LAST_USAGE = None
+        cloud_client._LAST_BILLING_SOURCE = None
+        cloud_client._LAST_RAW_USAGE = None
 
     def tearDown(self):
         cloud_client._SESSION = self._old_session
         cloud_client._LAST_USAGE = self._old_usage
+        cloud_client._LAST_BILLING_SOURCE = self._old_billing_source
+        cloud_client._LAST_RAW_USAGE = self._old_raw_usage
 
     def _make_fake_session(self):
         """config.RETRY_* に従い status code をリトライする fake Session。"""
@@ -2638,6 +2646,100 @@ class CloudClientTest(unittest.TestCase):
         text = self._usage_text(observed)
         self.assertIn("222", text)
         self.assertIn("229", text)
+
+    def test_billing_source_is_kept_from_opencode_block(self):
+        """usage.opencode.billing_source の既知列挙値を最後の値として保持する。"""
+
+        def handler(url, **kwargs):
+            return self._response({
+                "data": [{"embedding": [0.1]}],
+                "usage": {
+                    "prompt_tokens": 5,
+                    "total_tokens": 5,
+                    "opencode": {
+                        "allowance": 0.03,
+                        "billing_source": "go",
+                        "list_cost": 0.05,
+                    },
+                },
+            })
+
+        with self._cloud_env(), \
+                mock.patch.object(
+                    cloud_client, "requests", self._fake_requests(handler)
+                ):
+            cloud_client.embed(["a"], batch_size=1)
+
+        observed = cloud_client.last_usage()
+        self.assertEqual(observed["opencode.billing_source"], "go")
+        self.assertAlmostEqual(observed["opencode.allowance"], 0.03)
+        self.assertAlmostEqual(observed["opencode.list_cost"], 0.05)
+
+    def test_unknown_billing_source_string_is_dropped(self):
+        """列挙外の文字列は保持しない（秘密値の偶発保持を防ぐ）。"""
+
+        def handler(url, **kwargs):
+            return self._response({
+                "data": [{"embedding": [0.1]}],
+                "usage": {
+                    "total_tokens": 5,
+                    "opencode": {"billing_source": "sk-live-secret-value"},
+                },
+            })
+
+        with self._cloud_env(), \
+                mock.patch.object(
+                    cloud_client, "requests", self._fake_requests(handler)
+                ):
+            cloud_client.embed(["a"], batch_size=1)
+
+        observed = cloud_client.last_usage()
+        self.assertNotIn("opencode.billing_source", observed)
+
+    def test_billing_source_only_usage_is_returned(self):
+        """数値が無く billing_source のみでも last_usage() は dict を返す。"""
+        cloud_client._accumulate_usage({"opencode": {"billing_source": "go"}})
+        observed = cloud_client.last_usage()
+        self.assertEqual(observed, {"opencode.billing_source": "go"})
+
+    def test_last_raw_usage_whitelist_and_reset(self):
+        """last_raw_usage() はホワイトリストのみ返し、_reset_usage で消える。"""
+
+        def handler(url, **kwargs):
+            return self._response({
+                "data": [{"embedding": [0.1]}],
+                "usage": {
+                    "prompt_tokens": 7,
+                    "total_tokens": 7,
+                    "cost": 0.0,
+                    "session_token": "should-not-appear",
+                    "opencode": {
+                        "allowance": 0.01,
+                        "list_cost": 0.02,
+                        "billing_source": "go-plus",
+                        "extra_secret": "should-not-appear",
+                    },
+                },
+            })
+
+        with self._cloud_env(), \
+                mock.patch.object(
+                    cloud_client, "requests", self._fake_requests(handler)
+                ):
+            cloud_client.embed(["a"], batch_size=1)
+
+        raw = cloud_client.last_raw_usage()
+        self.assertIsNotNone(raw)
+        self.assertEqual(raw["prompt_tokens"], 7)
+        self.assertEqual(raw["cost"], 0.0)
+        self.assertAlmostEqual(raw["opencode.allowance"], 0.01)
+        self.assertEqual(raw["opencode.billing_source"], "go-plus")
+        self.assertNotIn("session_token", raw)
+        self.assertNotIn("extra_secret", raw)
+        self.assertNotIn("should-not-appear", str(raw))
+
+        cloud_client._reset_usage()
+        self.assertIsNone(cloud_client.last_raw_usage())
 
     def test_error_messages_mask_key_value_and_endpoint(self):
         secret_value = "ZZZKEYVALUEZZZ"
@@ -3225,6 +3327,44 @@ class UsageCollectorTest(unittest.TestCase):
         self.assertIsNone(collector.payload())
         self.assertTrue(any("last_usage()" in note for note in collector.notes))
 
+    def test_normalize_usage_passes_opencode_fields(self):
+        """opencode の allowance / list_cost / billing_source を正規化する。"""
+        normalized = cloud_bench._normalize_usage({
+            "prompt_tokens": 10,
+            "total_tokens": 10,
+            "opencode.allowance": 0.02,
+            "opencode.list_cost": 0.05,
+            "opencode.billing_source": "go",
+        })
+        self.assertEqual(normalized["allowance_usd"], 0.02)
+        self.assertEqual(normalized["list_cost_usd"], 0.05)
+        self.assertEqual(normalized["billing_source"], "go")
+
+    def test_normalize_usage_drops_unknown_billing_source(self):
+        """列挙外の billing_source は破棄する。"""
+        normalized = cloud_bench._normalize_usage({
+            "opencode.billing_source": "sk-secret-token",
+        })
+        self.assertNotIn("billing_source", normalized or {})
+
+    def test_billing_source_uses_last_value_not_sum(self):
+        """billing_source は文字列のため加算せず最後の値を採用する。"""
+        collector = self._collector([
+            {"calls": 1, "opencode.billing_source": "go"},
+            {"calls": 1, "opencode.billing_source": "balance"},
+        ])
+        payload = collector.payload()
+        self.assertEqual(payload["billing_source"], "balance")
+
+    def test_allowance_is_summed_per_call(self):
+        """allowance_usd は per-request 値として数値キーと同じ集計に従う。"""
+        collector = self._collector([
+            {"calls": 1, "opencode.allowance": 0.01},
+            {"calls": 1, "opencode.allowance": 0.02},
+        ])
+        payload = collector.payload()
+        self.assertAlmostEqual(payload["allowance_usd"], 0.03)
+
 
 class ExtractRankIdsTest(unittest.TestCase):
     """_extract_rank_ids と _run_generation の rank 境界処理。"""
@@ -3549,7 +3689,8 @@ class CloudIngestRunIngestTest(unittest.TestCase):
 
 
 class UsageCostSourceTest(unittest.TestCase):
-    """cloud_bench._usage_cost_source の api / estimated / None 3 分岐（R2-B）。"""
+    """cloud_bench._usage_cost_source の api / go-allowance-zero / api-zero /
+    estimated / None 分岐（R2-B + opencodeGO の allowance 契約）。"""
 
     MODEL = "text-embedding-3-small"
 
@@ -3573,6 +3714,75 @@ class UsageCostSourceTest(unittest.TestCase):
     def test_none_when_usage_or_tokens_are_missing(self):
         self.assertIsNone(cloud_bench._usage_cost_source({"calls": 2}, self.MODEL))
         self.assertIsNone(cloud_bench._usage_cost_source(None, self.MODEL))
+
+    def test_api_zero_without_hints(self):
+        """cost=0.0 + total_tokens>0 で手掛かりが無ければ api-zero。"""
+        value = cloud_bench._usage_cost_source(
+            {"cost": 0.0, "total_tokens": 100}, self.MODEL
+        )
+        self.assertEqual(value, "api-zero")
+
+    def test_go_allowance_zero_with_allowance(self):
+        """cost=0.0 + allowance_usd があれば go-allowance-zero。"""
+        value = cloud_bench._usage_cost_source(
+            {"cost": 0.0, "total_tokens": 100, "allowance_usd": 0.02}, self.MODEL
+        )
+        self.assertEqual(value, "go-allowance-zero")
+
+    def test_go_allowance_zero_with_billing_source_go(self):
+        """cost=0.0 + billing_source=go なら go-allowance-zero。"""
+        value = cloud_bench._usage_cost_source(
+            {"cost": 0.0, "total_tokens": 100, "billing_source": "go"}, self.MODEL
+        )
+        self.assertEqual(value, "go-allowance-zero")
+
+    def test_billing_source_balance_is_not_go_hint(self):
+        """balance は Go の手掛かりに数えない（api-zero のまま）。"""
+        value = cloud_bench._usage_cost_source(
+            {"cost": 0.0, "total_tokens": 100, "billing_source": "balance"},
+            self.MODEL,
+        )
+        self.assertEqual(value, "api-zero")
+
+    def test_positive_cost_beats_allowance(self):
+        """cost が正なら allowance があっても api を優先する。"""
+        value = cloud_bench._usage_cost_source(
+            {"cost": 0.5, "total_tokens": 100, "allowance_usd": 0.02}, self.MODEL
+        )
+        self.assertEqual(value, "api")
+
+    def test_go_plus_is_go_hint(self):
+        """billing_source=go-plus も go と同様に手掛かりとして扱う。"""
+        value = cloud_bench._usage_cost_source(
+            {"cost": 0.0, "total_tokens": 100, "billing_source": "go-plus"},
+            self.MODEL,
+        )
+        self.assertEqual(value, "go-allowance-zero")
+
+    def test_zero_allowance_is_present_hint(self):
+        """allowance_usd=0.0 でもキーが存在すれば手掛かり成立。"""
+        value = cloud_bench._usage_cost_source(
+            {"cost": 0.0, "total_tokens": 100, "allowance_usd": 0.0}, self.MODEL
+        )
+        self.assertEqual(value, "go-allowance-zero")
+
+    def test_free_and_byok_are_not_go_hints(self):
+        """free / byok は Go の手掛かりに数えない。"""
+        for source in ("free", "byok"):
+            with self.subTest(source=source):
+                value = cloud_bench._usage_cost_source(
+                    {"cost": 0.0, "total_tokens": 100, "billing_source": source},
+                    self.MODEL,
+                )
+                self.assertEqual(value, "api-zero")
+
+    def test_unknown_billing_source_is_not_go_hint(self):
+        """列挙外の billing_source は Go の手掛かりに数えない。"""
+        value = cloud_bench._usage_cost_source(
+            {"cost": 0.0, "total_tokens": 100, "billing_source": "unknown"},
+            self.MODEL,
+        )
+        self.assertEqual(value, "api-zero")
 
 
 class EstimatedCostUsdTest(unittest.TestCase):
@@ -3808,7 +4018,7 @@ class CloudBenchPayloadTest(unittest.TestCase):
 
     def _invoke(self, *, usage_samples=None, generation_fn=None, argv_extra=None,
                 embed_model="text-embedding-3-small", corpus_sha_env=None,
-                sha_config_value=None):
+                sha_config_value=None, raw_samples=None):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             corpus = root / "corpus"
@@ -3852,6 +4062,11 @@ class CloudBenchPayloadTest(unittest.TestCase):
             def fake_last_usage():
                 return samples.pop(0) if samples else None
 
+            raws = list(raw_samples or [])
+
+            def fake_last_raw_usage():
+                return raws.pop(0) if raws else None
+
             def default_generation(record, query, candidates, **kwargs):
                 record["rerank_ndcg_at_5"] = 1.0
                 return 0.01
@@ -3865,6 +4080,9 @@ class CloudBenchPayloadTest(unittest.TestCase):
                 ),
                 mock.patch.object(
                     cloud_client, "last_usage", side_effect=fake_last_usage
+                ),
+                mock.patch.object(
+                    cloud_client, "last_raw_usage", side_effect=fake_last_raw_usage
                 ),
                 mock.patch.object(
                     cloud_client, "embed_model", return_value=embed_model
@@ -3975,6 +4193,56 @@ class CloudBenchPayloadTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(payload["corpus_sha256_source"], "computed")
         self.assertEqual(len(payload["corpus_sha256"]), 64)
+
+    def test_payload_records_go_allowance_zero(self):
+        """cost=0.0 + allowance で go-allowance-zero と usage キーが記録される。"""
+        code, payload = self._invoke(usage_samples=[{
+            "calls": 1,
+            "cost": 0.0,
+            "total_tokens": 1000,
+            "opencode.allowance": 0.03,
+            "opencode.list_cost": 0.05,
+            "opencode.billing_source": "go",
+        }])
+        self.assertEqual(code, 0)
+        usage = payload["usage"]
+        self.assertEqual(usage["cost_source"], "go-allowance-zero")
+        self.assertAlmostEqual(usage["allowance_usd"], 0.03)
+        self.assertAlmostEqual(usage["list_cost_usd"], 0.05)
+        self.assertEqual(usage["billing_source"], "go")
+        joined = " ".join(payload["notes"])
+        self.assertIn("go-allowance-zero", joined)
+        self.assertIn(
+            "https://opencode.ai/docs/console/api/inference/#cost", joined
+        )
+
+    def test_payload_keeps_api_zero_without_go_hints(self):
+        """手掛かりが無い cost=0.0 は従来どおり api-zero。"""
+        code, payload = self._invoke(usage_samples=[{
+            "calls": 1, "cost": 0.0, "total_tokens": 1000,
+        }])
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["usage"]["cost_source"], "api-zero")
+        joined = " ".join(payload["notes"])
+        self.assertIn("api-zero", joined)
+
+    def test_payload_records_usage_raw_sample(self):
+        """usage_raw_sample が最大2件まで payload に残る。"""
+        raw = {
+            "prompt_tokens": 10,
+            "total_tokens": 10,
+            "cost": 0.0,
+            "opencode.allowance": 0.01,
+            "opencode.billing_source": "go",
+        }
+        code, payload = self._invoke(
+            usage_samples=[{"calls": 1, "cost": 0.0, "total_tokens": 10}] * 3,
+            raw_samples=[raw, raw, raw],
+        )
+        self.assertEqual(code, 0)
+        samples = payload["usage_raw_sample"]
+        self.assertEqual(len(samples), 2)
+        self.assertEqual(samples[0]["opencode.billing_source"], "go")
 
 
 class CheckEvalResultsDelegationTest(_RustSkipCounter, unittest.TestCase):

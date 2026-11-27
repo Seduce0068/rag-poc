@@ -25,10 +25,13 @@ cloud_client.chat 側で付与し、ここでは生成しない。cloud_client.l
 利用可能なら呼び出し回数・トークン使用量・cost を payload.usage へ集計し、
 summary.estimated_cost_usd に課金見込みを記録する（--with-generation 指定時は
 生成対象件数と見込みを stderr へ警告する）。
-cost=0.0 かつ total_tokens>0 のときは cost_source を 'api-zero' として
-'api' と区別し、summary.estimated_cost_usd は API cost を維持したうえで
-summary.estimated_cost_from_tokens_usd を主指標として参照する。
-API が 0.0 を返す理由は未確認のため、課金ゼロと断定しない。
+cost=0.0 の場合は cost_source で出所を区別する: allowance_usd が存在する
+か billing_source が go / go-plus なら 'go-allowance-zero'（Go 上限内利用で
+残高請求額 cost が 0 になる公式仕様。実消費の目安は usage.allowance_usd /
+usage.billing_source / usage.list_cost）、手掛かりが無ければ 'api-zero'。
+いずれも summary.estimated_cost_usd は API cost を維持し、token 由来の
+見込みは estimated_cost_from_tokens_usd を主指標として参照する。
+出典: https://opencode.ai/docs/console/api/inference/#cost
 """
 
 from __future__ import annotations
@@ -43,6 +46,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import cloud_client
 import config
@@ -95,6 +99,18 @@ USAGE_KEYS: tuple[str, ...] = (
     "completion_tokens",
     "total_tokens",
     "cost",
+    "allowance_usd",
+    "list_cost_usd",
+    "billing_source",
+)
+# opencodeGO の公式仕様で usage.opencode 直下に報告される課金ソースの既知列挙値。
+# 出典: https://opencode.ai/docs/console/api/inference/#cost
+BILLING_SOURCE_VALUES: tuple[str, ...] = (
+    "free",
+    "balance",
+    "go",
+    "go-plus",
+    "byok",
 )
 USAGE_ALIASES: dict[str, tuple[str, ...]] = {
     "calls": ("calls", "call_count", "request_count", "requests", "num_calls"),
@@ -108,6 +124,11 @@ USAGE_ALIASES: dict[str, tuple[str, ...]] = {
     "total_tokens": ("total_tokens", "totalTokens"),
     # cloud_client._accumulate_usage() は nested な cost を "cost.usd" へ平坦化する。
     "cost": ("cost", "cost_usd", "cost.usd"),
+    # opencodeGO は usage.opencode の allowance / list_cost / billing_source を
+    # 平坦化キー "opencode.allowance" 等で報告する（公式仕様）。
+    "allowance_usd": ("opencode.allowance",),
+    "list_cost_usd": ("opencode.list_cost",),
+    "billing_source": ("opencode.billing_source",),
 }
 
 
@@ -136,18 +157,35 @@ def _usage_cost(value: object) -> float | None:
     return number if math.isfinite(number) and number >= 0 else None
 
 
-def _normalize_usage(raw: object) -> dict[str, int | float] | None:
-    """last_usage() の戻り値を既知キーへ正規化する（解釈不能なら None）。"""
+def _usage_billing_source(value: object) -> str | None:
+    """billing_source を既知列挙値のみ通す（列挙外・非文字列は破棄）。"""
+    if isinstance(value, str) and value in BILLING_SOURCE_VALUES:
+        return value
+    return None
+
+
+def _normalize_usage(raw: object) -> dict[str, int | float | str] | None:
+    """last_usage() の戻り値を既知キーへ正規化する（解釈不能なら None）。
+
+    数値キーは int / cost 系は非負有限 float へ正規化する。billing_source は
+    BILLING_SOURCE_VALUES の既知列挙値のみ通し、列挙外は破棄する。複数辞書の
+    合算では数値は従来どおり合算し、billing_source は「後の値で上書き」する
+    （文字列の加算は行わない）。
+    """
     if raw is None:
         return None
     if isinstance(raw, (list, tuple)):
-        merged: dict[str, int | float] = {}
+        merged: dict[str, int | float | str] = {}
         for item in raw:
             part = _normalize_usage(item)
             if not part:
                 continue
             for key, value in part.items():
-                merged[key] = merged.get(key, 0) + value
+                if key == "billing_source":
+                    # billing_source は数値ではないため合算せず後の値で上書き。
+                    merged[key] = value
+                else:
+                    merged[key] = merged.get(key, 0) + value
         if not merged:
             return None
     else:
@@ -172,10 +210,17 @@ def _normalize_usage(raw: object) -> dict[str, int | float] | None:
                     if key == "cost" and isinstance(raw_value, dict):
                         # 入れ子の {"cost": {"usd": ...}} も解釈する。
                         raw_value = raw_value.get("usd")
-                    # cost は小数（例 0.01）を保持するため int 正規化を使わない。
+                    if key == "billing_source":
+                        billing = _usage_billing_source(raw_value)
+                        if billing is not None:
+                            merged[key] = billing
+                            break
+                        continue
+                    # cost / allowance_usd / list_cost_usd は小数を保持する
+                    # ため int 正規化ではなく _usage_cost を使う。
                     number = (
                         _usage_cost(raw_value)
-                        if key == "cost"
+                        if key in ("cost", "allowance_usd", "list_cost_usd")
                         else _usage_int(raw_value)
                     )
                     if number is not None:
@@ -187,8 +232,12 @@ def _normalize_usage(raw: object) -> dict[str, int | float] | None:
                 part = _normalize_usage(value)
                 if not part:
                     continue
-                for key, number in part.items():
-                    merged[key] = merged.get(key, 0) + number
+                for key, value2 in part.items():
+                    if key == "billing_source":
+                        # billing_source は数値ではないため合算せず後の値で上書き。
+                        merged[key] = value2
+                    else:
+                        merged[key] = merged.get(key, 0) + value2
         if not merged:
             return None
     if "total_tokens" not in merged:
@@ -205,7 +254,7 @@ def _warn(message: object) -> None:
 
 
 def _estimated_cost_usd(
-    usage_payload: dict[str, int | float] | None, embed_model: str
+    usage_payload: dict[str, int | float | str] | None, embed_model: str
 ) -> float | None:
     """API の cost を優先し、無ければ単価 × total_tokens で推定する。
 
@@ -230,26 +279,48 @@ def _estimated_cost_usd(
 
 
 def _usage_cost_source(
-    usage_payload: dict[str, int | float] | None, embed_model: str
+    usage_payload: dict[str, int | float | str] | None, embed_model: str
 ) -> str | None:
-    """usage のコスト出所を 'api' / 'api-zero' / 'estimated' / None で返す。
+    """usage のコスト出所を判定する（優先順に 'api' > 'go-allowance-zero' >
+    'api-zero' > 'estimated' > None）。
 
-    API が cost を返していれば実値（'api'）を優先する。ただし cost が 0.0 で
-    total_tokens が正の場合は、API が 0.0 を返す理由が未確認のため実コスト
-    として断定せず、既存の 'api' と区別する 'api-zero' を返す（token 推定
-    キーを参照する手掛かり）。cost が無く、既知の埋め込み単価と total_tokens
-    があれば単価推定（'estimated'）。どちらも無ければ None（判定不能として
-    usage に None を残す）。
+    opencodeGO の公式仕様では usage.cost は残高請求額（balance への請求額）
+    を表し、Go 上限内の利用では 0 を返す。実消費の目安は
+    usage.opencode.allowance（要請単位の貢献ドル。公式原文: "how much the
+    request counted toward your usage limits"）、opencode.billing_source
+    （free / balance / go / go-plus / byok）、opencode.list_cost（定価ドル）
+    で別途報告される。
+    出典: https://opencode.ai/docs/console/api/inference/#cost
+
+    判定順:
+      1. api_cost が正 → 'api'（残高請求額の実値）。
+      2. api_cost == 0.0 かつ allowance_usd が存在、または billing_source が
+         "go" / "go-plus" → 'go-allowance-zero'（usage.allowance_usd /
+         usage.billing_source を参照。Go 上限内で cost が 0 になる仕様）。
+      3. api_cost == 0.0 で手掛かりが無く total_tokens>0 の場合 → 従来どおり
+         'api-zero'（token 推定キーを参照する手掛かり）。total_tokens が 0
+         または欠落の場合は後方互換のため 'api' を返す。
+      4. cost が無く、既知の埋め込み単価と total_tokens があれば 'estimated'。
+      5. どちらも無ければ None（判定不能として usage に None を残す）。
     """
     if not usage_payload:
         return None
     api_cost = _usage_cost(usage_payload.get("cost"))
     if api_cost is not None:
         tokens = _usage_cost(usage_payload.get("total_tokens"))
-        if api_cost == 0.0 and tokens is not None and tokens > 0:
-            # 実コストが 0 かどうかは未確認。'api' と混同せず token 推定
-            # キーへの参照を促すため、別値 'api-zero' を設定する。
-            return "api-zero"
+        if api_cost == 0.0:
+            # Go 上限内の利用では残高請求額 cost が 0 を返す公式仕様のため、
+            # allowance / billing_source の手掛かりがある場合は実消費の目安を
+            # usage.allowance_usd へ案内する別値を設定する。
+            if (
+                _usage_cost(usage_payload.get("allowance_usd")) is not None
+                or usage_payload.get("billing_source") in ("go", "go-plus")
+            ):
+                return "go-allowance-zero"
+            if tokens is not None and tokens > 0:
+                # 手掛かりが無い場合は実コスト 0 を断定せず、'api' と混同しない
+                # 'api-zero' を返す（token 推定キーへの参照を促す）。
+                return "api-zero"
         return "api"
     if (
         _usage_cost(usage_payload.get("total_tokens")) is not None
@@ -277,7 +348,7 @@ def _warn_generation_billing(
     total: int,
     generation_model: str,
     embed_model: str,
-    usage_payload: dict[str, int | float] | None,
+    usage_payload: dict[str, int | float | str] | None,
 ) -> None:
     """生成対象件数と課金見込みをマスク済み stderr で警告する。
 
@@ -313,7 +384,11 @@ class _UsageCollector:
     def __init__(self) -> None:
         getter = getattr(cloud_client, "last_usage", None)
         self._getter = getter if callable(getter) else None
-        self._samples: list[dict[str, int | float]] = []
+        raw_getter = getattr(cloud_client, "last_raw_usage", None)
+        self._raw_getter = raw_getter if callable(raw_getter) else None
+        self._samples: list[dict[str, int | float | str]] = []
+        # 生 usage ホワイトリストは最大 2 件だけ保持する（実測の判別材料）。
+        self._raw_samples: list[dict[str, Any]] = []
         self._notes: list[str] = []
         if self._getter is None:
             self._note("cloud_client.last_usage() が未提供のため usage 集計をスキップ")
@@ -322,13 +397,30 @@ class _UsageCollector:
     def notes(self) -> list[str]:
         return list(self._notes)
 
+    @property
+    def raw_samples(self) -> list[dict[str, Any]]:
+        """直近リクエストの生 usage ホワイトリスト（最大 2 件）を返す。"""
+        return [dict(sample) for sample in self._raw_samples]
+
     def _note(self, text: str) -> None:
         message = mask_secrets("usage: " + text)
         if message not in self._notes:
             self._notes.append(message)
 
+    def _capture_raw(self) -> None:
+        """生 usage ホワイトリストを最大 2 件まで保持する。"""
+        if self._raw_getter is None or len(self._raw_samples) >= 2:
+            return
+        try:
+            raw = self._raw_getter()
+        except Exception:  # 記録失敗で本体の計測は止めない
+            return
+        if isinstance(raw, dict) and raw:
+            self._raw_samples.append(dict(raw))
+
     def sample(self) -> None:
         """各クラウド呼び出し直後にスナップショットを記録する。"""
+        self._capture_raw()
         if self._getter is None:
             return
         try:
@@ -344,8 +436,13 @@ class _UsageCollector:
         if normalized:
             self._samples.append(normalized)
 
-    def payload(self) -> dict[str, int | float] | None:
-        """集計結果を返す（可能なデータが無ければ None）。"""
+    def payload(self) -> dict[str, int | float | str] | None:
+        """集計結果を返す（可能なデータが無ければ None）。
+
+        数値キーは per-call 形式なら合計、累積形式なら最終値（最大値）を採る。
+        billing_source は文字列で加算できないため、サンプル順で最後の非 None
+        値を採用する。
+        """
         if not self._samples:
             return None
         calls = [s["calls"] for s in self._samples if "calls" in s]
@@ -355,8 +452,16 @@ class _UsageCollector:
             and all(a <= b for a, b in zip(calls, calls[1:]))
             and calls[-1] > calls[0]
         )
-        result: dict[str, int | float] = {}
+        result: dict[str, int | float | str] = {}
         for key in USAGE_KEYS:
+            if key == "billing_source":
+                # 文字列は加算できないため、最後の非 None 値を採用する。
+                for sample in reversed(self._samples):
+                    source = sample.get(key)
+                    if isinstance(source, str):
+                        result[key] = source
+                        break
+                continue
             values = [s[key] for s in self._samples if key in s]
             if values:
                 result[key] = max(values) if cumulative else sum(values)
@@ -990,15 +1095,34 @@ def main() -> int:
         "レイテンシは time.perf_counter で計測し repeat 回の平均を summary に記録。",
         "秘密情報の値は出力・保存しない（生成テキストは mask_secrets を通過）。",
     ]
-    if cost_source == "api-zero":
-        # API cost が 0.0 でも理由は未確認。summary.estimated_cost_usd は
-        # API cost を維持し、token 由来の見込みを主指標として読むよう明記する。
+    if cost_source == "go-allowance-zero":
+        # Go 上限内の利用では残高請求額 cost が 0 を返す公式仕様。
+        # 実消費の目安は allowance_usd / billing_source 側に記録する。
+        notes.append(
+            "cost_source=go-allowance-zero のときは usage.allowance_usd / "
+            "usage.billing_source を参照: API の usage.cost は残高請求額で、"
+            "Go の上限内の利用では 0 を返す（公式仕様 "
+            "https://opencode.ai/docs/console/api/inference/#cost）。"
+            "実消費の目安は usage.allowance_usd（要請単位の貢献ドル）と "
+            "usage.billing_source で別途報告される。"
+            "summary.estimated_cost_usd は API cost=0.0 を維持するため、"
+            "token 由来の見込みは estimated_cost_from_tokens_usd を読む。"
+        )
+    elif cost_source == "api-zero":
+        # cost=0.0 で allowance / billing_source の手掛かりが無い場合。
         notes.append(
             "cost_source=api-zero のときは token 推定を参照: "
             "summary.estimated_cost_usd は API 応答の cost=0.0 を維持するため、"
             "summary / usage の estimated_cost_from_tokens_usd を主指標として読む。"
-            "API が 0.0 を返す理由は未確認で、課金が無いと断定するものではない。"
+            "usage.cost は残高請求額で Go 上限内では 0 を返す仕様だが、"
+            "この成果物には allowance / billing_source の手掛かりが無いため、"
+            "課金が無いと断定するものではない。"
         )
+    notes.append(
+        "usage は embed の全バッチを合算した値、usage_raw_sample は各 embed の"
+        "直近リクエスト（最後バッチ）のホワイトリストである。生値は全バッチの"
+        "代表値ではないため、合算値との比較には注意する。"
+    )
     if args.with_generation:
         notes.extend([
             "生成モデルは opencodeGO の OpenAI 互換 chat completions を使用"
@@ -1083,6 +1207,11 @@ def main() -> int:
         if token_cost_applicable:
             usage_payload["estimated_cost_from_tokens_usd"] = token_cost
         payload["usage"] = usage_payload
+    # 生 usage のホワイトリストを最大 2 件残す（allowance の実測値と
+    # per-request / 累積の判別材料。秘密値は含まない）。
+    raw_samples = usage.raw_samples
+    if raw_samples:
+        payload["usage_raw_sample"] = raw_samples
 
     output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     print("[cloud] summary:", summary)

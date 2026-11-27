@@ -169,24 +169,57 @@ def _shared_session() -> Any:
     return _SESSION
 
 
+# opencodeGO が usage.opencode.billing_source で報告する課金ソースの既知列挙値。
+# この列挙以外の文字列は秘密値になり得るため保持しない（ホワイトリスト）。
+# 出典: https://opencode.ai/docs/console/api/inference/#cost
+BILLING_SOURCE_VALUES: tuple[str, ...] = (
+    "free",
+    "balance",
+    "go",
+    "go-plus",
+    "byok",
+)
+
 # 直近の chat() / embed() が受け取った usage の数値項目（呼び出し単位で加算）。
 _LAST_USAGE: dict[str, Any] | None = None
+# 直近の usage.opencode.billing_source（加算しない「最後の値」・リセットで None）。
+_LAST_BILLING_SOURCE: str | None = None
+# 直近 1 リクエストの生 usage ホワイトリスト（last_raw_usage() の正本）。
+_LAST_RAW_USAGE: dict[str, Any] | None = None
 
 
 def _reset_usage() -> None:
-    global _LAST_USAGE
+    global _LAST_USAGE, _LAST_BILLING_SOURCE, _LAST_RAW_USAGE
     _LAST_USAGE = None
+    _LAST_BILLING_SOURCE = None
+    _LAST_RAW_USAGE = None
 
 
 def _accumulate_usage(usage: object) -> None:
     """API の usage から数値項目だけを取り出し、呼び出し単位で加算保持する。
 
-    文字列値や長いキー名（認証情報になり得る値）は保持しない。cost が返る
-    実装では cost / cost_usd 等の数値項目もそのまま加算される。
-    nested な辞書（例: cost: {"usd": 0.01}）は "cost.usd" として平坦化する。
+    文字列値は opencode.billing_source の既知列挙値のみ保持する
+    （BILLING_SOURCE_VALUES のホワイトリスト）。cost が返る実装では
+    cost / cost_usd 等の数値項目もそのまま加算される。nested な辞書
+    （例: cost: {"usd": 0.01}）は "cost.usd" として平坦化する。
+
+    opencode.allowance は opencodeGO の公式仕様で「要請単位の貢献ドル」
+    （公式原文: "how much the request counted toward your usage limits"）
+    と定義されるため、per-request 値と解釈して加算する。
+    出典: https://opencode.ai/docs/console/api/inference/#cost
     """
+    global _LAST_BILLING_SOURCE
     if not isinstance(usage, dict):
         return
+    opencode = usage.get("opencode")
+    if isinstance(opencode, dict):
+        # billing_source は数値ではないため加算せず「最後の値」を保持する。
+        # 列挙外・非文字列・長さ 32 超は無視し、保持は _reset_usage で None へ
+        # クリアされる。
+        source = opencode.get("billing_source")
+        if (isinstance(source, str) and len(source) <= 32
+                and source in BILLING_SOURCE_VALUES):
+            _LAST_BILLING_SOURCE = source
     additions: dict[str, Any] = {}
     for key, value in usage.items():
         if not isinstance(key, str) or len(key) > 64:
@@ -216,13 +249,84 @@ def last_usage() -> dict[str, Any] | None:
     """直近の chat() / embed() が保持した usage のコピーを返す（通信なし）。
 
     戻り値は API の usage に含まれていた数値項目だけ（例: prompt_tokens,
-    completion_tokens, total_tokens, cost / cost_usd）。embed() は複数バッチの
-    値を合計する。usage が無いレスポンスなら None。認証情報の値は含まない。
+    completion_tokens, total_tokens, cost / cost_usd）。opencodeGO が
+    usage.opencode.billing_source を報告した場合のみ、既知列挙値を
+    "opencode.billing_source" として含める（文字列値はこのホワイトリストのみ
+    保持）。embed() は複数バッチの値を合計する。usage が無いレスポンスなら
+    None。認証情報の値は含まない。
 
     cloud_bench 等の呼び出し側は chat() / embed() の直後に本関数を呼び、
     record / summary へ格納すれば良い（戻り値の str / list は従来どおり）。
     """
-    return dict(_LAST_USAGE) if _LAST_USAGE is not None else None
+    if _LAST_USAGE is None and _LAST_BILLING_SOURCE is None:
+        return None
+    result = dict(_LAST_USAGE or {})
+    if _LAST_BILLING_SOURCE is not None:
+        result["opencode.billing_source"] = _LAST_BILLING_SOURCE
+    return result
+
+
+# last_raw_usage() の抽出ホワイトリスト（秘密値になり得る項目を通さない）。
+_RAW_USAGE_TOP_KEYS: tuple[str, ...] = (
+    "prompt_tokens",
+    "completion_tokens",
+    "total_tokens",
+    "cost",
+    "cost_usd",
+)
+_RAW_USAGE_OPENCODE_NUMERIC_KEYS: tuple[str, ...] = ("allowance", "list_cost")
+
+
+def _extract_raw_usage(usage: object) -> dict[str, Any] | None:
+    """直近 1 リクエストの usage からホワイトリスト項目のみを抽出する。
+
+    ホワイトリスト: トップレベル数値の prompt_tokens / completion_tokens /
+    total_tokens / cost / cost_usd、ネスト opencode の allowance / list_cost
+    （数値）と billing_source（既知列挙値）。それ以外のキー・値は破棄する
+    ため秘密値を含まない。usage が辞書でない場合・該当項目が無い場合は None。
+    """
+    if not isinstance(usage, dict):
+        return None
+    extracted: dict[str, Any] = {}
+    for key in _RAW_USAGE_TOP_KEYS:
+        value = usage.get(key)
+        if (isinstance(value, (int, float)) and not isinstance(value, bool)
+                and math.isfinite(value)):
+            extracted[key] = value
+    opencode = usage.get("opencode")
+    if isinstance(opencode, dict):
+        for key in _RAW_USAGE_OPENCODE_NUMERIC_KEYS:
+            value = opencode.get(key)
+            if (isinstance(value, (int, float)) and not isinstance(value, bool)
+                    and math.isfinite(value)):
+                extracted["opencode.%s" % key] = value
+        source = opencode.get("billing_source")
+        if (isinstance(source, str) and len(source) <= 32
+                and source in BILLING_SOURCE_VALUES):
+            extracted["opencode.billing_source"] = source
+    return extracted or None
+
+
+def _record_raw_usage(usage: object) -> None:
+    """直近 1 リクエストの usage ホワイトリストを保持する（内部用）。
+
+    _request が _accumulate_usage(data.get("usage")) を呼ぶのと同じタイミ
+    ングで呼ぶ。usage が辞書でなければ保持を None へ戻す（直近リクエストに
+    usage が無いことを反映する）。保持は _reset_usage でクリアされる。
+    """
+    global _LAST_RAW_USAGE
+    _LAST_RAW_USAGE = _extract_raw_usage(usage)
+
+
+def last_raw_usage() -> dict[str, Any] | None:
+    """直近 1 リクエストの生 usage ホワイトリストを返す（通信なし）。
+
+    _request が usage を受け取ったタイミングで保持し、_reset_usage で
+    クリアする。embed() で複数バッチに分割した場合は直近 1 リクエスト
+    （最後のバッチ）の値を返す。ホワイトリスト以外のキーは含まないため
+    秘密値を含まない。usage が無ければ None。
+    """
+    return dict(_LAST_RAW_USAGE) if _LAST_RAW_USAGE is not None else None
 
 
 def _request(
@@ -269,6 +373,10 @@ def _request(
     if not isinstance(data, dict):
         raise _fail("unexpected API response type: %s" % type(data).__name__)
     _accumulate_usage(data.get("usage"))
+    # 直近 1 リクエストの生 usage ホワイトリストを同じタイミングで保持する
+    # （last_raw_usage() の正本。allowance の実測値と per-request / 累積の判別
+    # 材料として成果物側へ記録する）。
+    _record_raw_usage(data.get("usage"))
     return data
 
 
