@@ -482,7 +482,8 @@ cp rag_poc/eval-results.json rag_poc/eval-results-other-domain.json
 ここでは ARID（意図的な要約の重複）に従い要点のみ再掲する。
 
 - クラウド有効化時は質問文・チャンク本文・ベクトルが外部 API へ送信され、
-  token 課金が発生する。キーの有効性・レート制限・コストは未検証で、
+  Go 枠を消費する（Go 上限内では `usage.cost` が `0` になる仕様）。
+  キーの有効性・レート制限・Go 枠の実消費は未検証で、
   長時間の連続評価は避ける。
 - 共有 `dsh.env` 全体を `set -a; source ...; set +a` で export すると
   他サービスのキーまで子プロセスへ継承されるリスクがあるため、

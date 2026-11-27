@@ -3,7 +3,7 @@
 > - **何か**: ローカル Ollama + Qdrant で日本語特化埋め込み Ruri の RAG を試す PoC。
 > - **前提**: Ollama / Qdrant がローカル起動済み、Python 3.10 以降（クラウドは既定無効）。
 > - **最初のコマンド**: `python3 -m pip install -r rag_poc/requirements.txt` → `ollama pull kun432/cl-nagoya-ruri-base` → `python3 rag_poc/ingest.py`。
-> - **検証**: `python3 rag_poc/test_rag.py`（全 259 件、外部サービス接続なし）。
+> - **検証**: `python3 rag_poc/test_rag.py`（全 270 件、外部サービス接続なし）。
 > - **docs への導線**: [docs/index.md](docs/index.md) → [背景](docs/explanation.md) / [設定・実測値](docs/reference.md)。
 
 ## まず動かす（5分）
@@ -289,7 +289,7 @@ RAG_REQUIRE_RUST=1 python3 rag_poc/test_rag.py
 ```
 
 外部サービスへ接続せず、`unittest` のみで設定・RRF・JSON 解析・チャンク分割・
-評価クエリ・held-out 指標・rerank のフォールバックを検証する（全 259 件）。
+評価クエリ・held-out 指標・rerank のフォールバックを検証する（全 270 件）。
 Rust 同等性テスト 9+8件のうち、バイナリを要する 8 件は未ビルド時に skip される。
 第2のコマンドは skip を失敗へ切り替える CI ゲートである（`binary_path_default`
 や `RustSkipGateTest` の 3 件など、未ビルドでも skip しないテストもある）。

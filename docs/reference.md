@@ -381,7 +381,9 @@ min/max/mean/stdev を求める。Rust が無い／失敗した場合は Python 
 
 opencodeGO の OpenAI 互換 `/embeddings` API で利用できる埋め込みモデルの
 1M 入力トークン単価（[公式 Go ドキュメント](https://opencode.ai/docs/console/go/)、
-2026-11-26 取得）。実コストは API 応答に依存し未検証である。
+2026-11-26 取得）。Go 上限内の要求では API の `usage.cost` が `0` になる
+（仕様。消費は `opencode.allowance` 側に報告される）。本 PoC はこの
+フィールドを記録しないため、Go 枠の実消費は未検証である。
 
 | モデル ID | 1M 入力トークン単価 |
 | --- | --- |
