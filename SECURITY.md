@@ -19,7 +19,9 @@ stale_after: "2026-12-26"
 
 ## 報告先
 
-脆弱性または機微情報の漏えいに気付いた場合は、公開の Issue を作成せず、GitHub リポジトリの **Security** タブにある「Report a vulnerability」から非公開で報告する。報告には再現手順、影響範囲、想定される修正方針を添える。秘密情報そのものを報告文へ貼り付けないこと。
+対象は `https://github.com/Seduce0068/rag-poc` である。脆弱性または機微情報の漏えいに気付いた場合は、公開の Issue を作成せず、同リポジトリの **Security** タブにある「Report a vulnerability」から非公開で報告する。報告には再現手順、影響範囲、想定される修正方針を添える。秘密情報そのものを報告文へ貼り付けないこと。
+
+「Report a vulnerability」が表示されない場合は、まず同タブで private vulnerability reporting が有効かを確認する。未認証のブラウザでは報告画面へアクセスできないため、リポジトリ管理者が Console で設定を確認する。公開の Issue や Discord 等へ機微情報を書かないこと。
 
 ## 対応方針
 

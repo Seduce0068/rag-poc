@@ -417,12 +417,22 @@ opencodeGO の OpenAI 互換 `/embeddings` API で利用できる埋め込みモ
 | `usage.estimated_cost_from_tokens_usd` | 小数（12 桁） | 同上（`usage` 側にも記録） |
 
 `cost_source=api-zero` は `cost=0.0` かつ `total_tokens>0` のときに設定する。
-**API が 0.0 を返した理由は未確認**で、実コストがゼロだと断定しない。
-`summary.estimated_cost_usd` は API cost（0.0）を維持し、主指標は
-`estimated_cost_from_tokens_usd` とする。成果物 `notes` に
-「cost_source=api-zero のときは token 推定を参照」を明記する。
+理由は [Inference API / Cost](https://opencode.ai/docs/console/api/inference/#cost)
+の仕様で、`usage.cost` は残高請求額であり Go の上限内利用では `0` になる。
+実質の消費額は `opencode.allowance`（月額上限に対するドル）で別途報告される
+が、現行コードはこのフィールドを記録しないため成果物からは読み取れない。
+課金ゼロを意味しない点に注意する。`summary.estimated_cost_usd` は
+API cost（0.0）を維持し、主指標は `estimated_cost_from_tokens_usd` とする。
+成果物 `notes` に「cost_source=api-zero のときは token 推定を参照」を明記する。
 `cost_source=estimated` は cost キーが無い場合、`api` は正の cost、
 `None` は cost が無く単価推定もできない場合を表す。
+`estimated_cost_from_tokens_usd` は埋め込み単価（0.02 / 0.01 / 0.20 USD
+per 1M）を `total_tokens` に掛けた 12 桁の概算で、`--with-generation` では
+生成トークンが混在し請求額との照合には使えない。
+単価は [Go / embedding models](https://opencode.ai/docs/console/go/#embedding-models)
+に一致する。実請求との照合には
+[Usage export API](https://opencode.ai/docs/console/api/usage-export/)
+（モデル別 `cost_usd` / トークン）と Go の usage percent を使う。
 
 ## 検証
 

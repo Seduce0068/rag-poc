@@ -36,4 +36,6 @@ stale_after: "2026-12-26"
 ## 入口へのリンク
 
 - [rag_poc/README.md](../README.md) — セットアップ・使い方・検索モードの入口。「詳細ドキュメント」節から本文書へのリンクを配置済み。
+- [CONTRIBUTING.md](../CONTRIBUTING.md) — 検証ループ・コミット規約・author 匿名化手順。
+- [SECURITY.md](../SECURITY.md) — 脆弱性の報告先と対応方針。
 - README のリンク先 [Ruri での再現手順](explanation.md#ruri-での再現手順) — explanation.md の該当見出しへ接続している。

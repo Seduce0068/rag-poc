@@ -199,8 +199,10 @@ OpenAI 互換 `/embeddings` API で、`dimensions` 指定が可能。`encoding_f
 export RAG_CLOUD_EMBED_MODEL=text-embedding-3-small
 ```
 
-重要な制約: 認証情報は環境変数名のみを参照し値を出力しない。キーの有効性・
-レート制限・コストは未検証で、長時間の連続評価は避ける。既定は埋め込みも生成も
+重要な制約: 認証情報は環境変数名のみを参照し値を出力しない。キーの有効性と
+レート制限は未検証で、長時間の連続評価は避ける。Go 上限内の要求では API の
+`usage.cost` が `0` になる（仕様）。実請求との照合には Console の Usage export
+API を使うが、認証情報を扱うため本 PoC では未実施である。既定は埋め込みも生成も
 ローカル Ollama で、クラウドを使う場合は `RAG_CLOUD_ENABLED=1` を明示する。
 
 ### コストと token 推定キーの使い分け
@@ -300,6 +302,8 @@ Rust 同等性テスト 9+8件のうち、バイナリを要する 8 件は未�
 - [docs/reference.md](docs/reference.md) — 検索モード、全設定項目（35変数）、実測値の単一情報源、成果物一覧
 - [docs/explanation.md](docs/explanation.md) — 構成図、設計判断（なぜハイブリッド／Ruri／クラウドか）、既知の制限、モデル比較実験、別ドメインベンチマーク、入力と設定の検証
 - [ragcore/README.md](ragcore/README.md) — Rust 純粋計算クレートの CLI 仕様
+- [CONTRIBUTING.md](CONTRIBUTING.md) — 検証ループとコミット規約
+- [SECURITY.md](SECURITY.md) — 脆弱性の報告先と対応方針
 - ドキュメント設計の判断根拠: `passkey-gateway/docs/documentation-references-extra-2026-11-26.md`
 
 実測値は [docs/reference.md の代表的な実測値](docs/reference.md#代表的な実測値)を
