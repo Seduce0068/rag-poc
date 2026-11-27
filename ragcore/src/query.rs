@@ -3,7 +3,7 @@
 use serde_json::{json, Value};
 
 use crate::config::Config;
-use crate::ollama::OllamaClient;
+use crate::llama::LlamaClient;
 use crate::qdrant::QdrantClient;
 use crate::search::{keyword_score, query_terms, rank_hybrid, rank_keyword, source_of};
 
@@ -28,12 +28,12 @@ fn to_hit(point: &Value) -> Value {
 }
 
 fn dense_points(config: &Config, question: &str, top_k: usize) -> Result<Vec<Value>, String> {
-    let ollama = OllamaClient::new(
-        &config.ollama_url,
+    let llama = LlamaClient::new(
+        &config.llama_server_url,
         &config.embed_model,
-        config.ollama_timeout_secs,
+        config.llama_timeout_secs,
     );
-    let vectors = ollama.embed(&[question.to_string()], &config.embed_prefix_query, None)?;
+    let vectors = llama.embed(&[question.to_string()], &config.embed_prefix_query, None)?;
     let vector = vectors.into_iter().next().ok_or("no embedding returned")?;
     let qdrant = QdrantClient::new(
         &config.qdrant_url,
@@ -102,7 +102,7 @@ mod tests {
         let mut config = Config {
             corpus_dir: std::path::PathBuf::from("docs"),
             collection: "c".to_string(),
-            ollama_url: "http://127.0.0.1:11434".to_string(),
+            llama_server_url: "http://127.0.0.1:8090".to_string(),
             qdrant_url: "http://127.0.0.1:6333".to_string(),
             embed_model: "qwen2.5:3b".to_string(),
             chat_model: "qwen2.5:3b".to_string(),
@@ -114,7 +114,7 @@ mod tests {
             rerank_max_docs: 5,
             embed_prefix_query: String::new(),
             embed_prefix_passage: String::new(),
-            ollama_timeout_secs: 300.0,
+            llama_timeout_secs: 300.0,
             qdrant_timeout_secs: 300.0,
             answer_timeout_secs: 60.0,
         };

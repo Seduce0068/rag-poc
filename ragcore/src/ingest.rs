@@ -1,4 +1,4 @@
-//! コーパスをチャンク化し Ollama で埋め込み Qdrant へ投入する。
+//! コーパスをチャンク化し llama-server で埋め込み Qdrant へ投入する。
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value};
 
 use crate::config::Config;
-use crate::ollama::OllamaClient;
+use crate::llama::LlamaClient;
 use crate::qdrant::QdrantClient;
 use crate::{chunk_text, point_id};
 
@@ -126,10 +126,10 @@ pub fn run(config: &Config, corpus_dir: &Path, recreate: bool, yes: bool) -> Res
         return Err("corpus dir not found".to_string());
     }
 
-    let ollama = OllamaClient::new(
-        &config.ollama_url,
+    let llama = LlamaClient::new(
+        &config.llama_server_url,
         &config.embed_model,
-        config.ollama_timeout_secs,
+        config.llama_timeout_secs,
     );
     let qdrant = QdrantClient::new(
         &config.qdrant_url,
@@ -166,7 +166,7 @@ pub fn run(config: &Config, corpus_dir: &Path, recreate: bool, yes: bool) -> Res
                     .to_string()
             })
             .collect();
-        let vectors = ollama.embed(&texts, &config.embed_prefix_passage, None)?;
+        let vectors = llama.embed(&texts, &config.embed_prefix_passage, None)?;
         if vectors.len() != batch.len() {
             return Err("embedded vector count mismatch".to_string());
         }

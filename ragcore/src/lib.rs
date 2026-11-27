@@ -10,7 +10,7 @@
 pub mod config;
 pub mod evaluate;
 pub mod ingest;
-pub mod ollama;
+pub mod llama;
 pub mod qdrant;
 pub mod query;
 pub mod search;

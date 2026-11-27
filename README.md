@@ -1,17 +1,22 @@
 # rag_poc — Rust のみのローカル RAG
 
-> - **何か**: Ollama + Qdrant を使う RAG を Rust だけで実装したもの。
-> - **前提**: Ollama / Qdrant がローカル起動済み、Rust toolchain。
+> - **何か**: llama.cpp (llama-server) + Qdrant を使う RAG を Rust だけで実装したもの。
+> - **前提**: llama-server / Qdrant がローカル起動済み、Rust toolchain。
 > - **最初のコマンド**: `cargo build --manifest-path ragcore/Cargo.toml` → `ragcore/target/debug/ragcore ingest --corpus-dir <DIR>` → `ragcore/target/debug/ragcore query '質問' --json`
 > - **検証**: `cargo test --manifest-path ragcore/Cargo.toml` と `cargo clippy --manifest-path ragcore/Cargo.toml -- -D warnings -D clippy::undocumented_unsafe_blocks`
 
 ## まず動かす
 
 リポジトリルートで次を実行する（Kubuntu 想定）。
+別ターミナルで llama-server を起動しておく（Ruri の GGUF を使う例）。
+
+```bash
+llama-server -m ~/models/ruri-F16.gguf --embedding --port 8090 --host 127.0.0.1 -ngl 0 -c 512
+```
 
 ```bash
 cargo build --manifest-path ragcore/Cargo.toml
-export OLLAMA_URL=http://127.0.0.1:11434
+export LLAMA_SERVER_URL=http://127.0.0.1:8090
 export QDRANT_URL=http://127.0.0.1:6333
 export EMBED_MODEL=kun432/cl-nagoya-ruri-base
 export RAG_VECTOR_SIZE=768
@@ -29,7 +34,7 @@ ragcore/target/debug/ragcore query 'Pin<&mut Self> が必要な理由は？' \
 
 ## 目的
 
-Markdown の知識源を Ollama でベクトル化して Qdrant に保存し、質問に対して
+Markdown の知識源を llama-server でベクトル化して Qdrant に保存し、質問に対して
 関連する文章を返す。Python は使わない。検索モードは
 `dense` / `keyword` / `hybrid` の 3 種が実装済み。
 
@@ -59,7 +64,7 @@ stdin JSON の op モード（`{"op":"cosine","a":[1.0],"b":[1.0]}`）も後方�
 
 | 変数 | 既定値 |
 | --- | --- |
-| `OLLAMA_URL` | `http://127.0.0.1:11434` |
+| `LLAMA_SERVER_URL` | `http://127.0.0.1:8090` |
 | `QDRANT_URL` | `http://127.0.0.1:6333` |
 | `EMBED_MODEL` | `qwen2.5:3b` |
 | `CHAT_MODEL` | `qwen2.5:3b` |
@@ -85,4 +90,4 @@ betterleaks git
 
 - `docs/` 配下は旧 Python 実装の設計・実測資料。現行 CLI の仕様は本 README と
   `ragcore/src/` のコードを正とする。
-- `ragcore/src/` — `config` / `ollama` / `qdrant` / `search` / `ingest` / `query` / `evaluate`
+- `ragcore/src/` — `config` / `llama` / `qdrant` / `search` / `ingest` / `query` / `evaluate`

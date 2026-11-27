@@ -7,7 +7,7 @@ use std::path::PathBuf;
 pub struct Config {
     pub corpus_dir: PathBuf,
     pub collection: String,
-    pub ollama_url: String,
+    pub llama_server_url: String,
     pub qdrant_url: String,
     pub embed_model: String,
     pub chat_model: String,
@@ -19,7 +19,7 @@ pub struct Config {
     pub rerank_max_docs: usize,
     pub embed_prefix_query: String,
     pub embed_prefix_passage: String,
-    pub ollama_timeout_secs: f64,
+    pub llama_timeout_secs: f64,
     pub qdrant_timeout_secs: f64,
     pub answer_timeout_secs: f64,
 }
@@ -57,7 +57,7 @@ impl Config {
         let config = Self {
             corpus_dir: PathBuf::from(env_str("RAG_CORPUS_DIR", "passkey-gateway/docs")),
             collection: env_str("RAG_COLLECTION", "rag_poc_docs"),
-            ollama_url: env_str("OLLAMA_URL", "http://127.0.0.1:11434"),
+            llama_server_url: env_str("LLAMA_SERVER_URL", "http://127.0.0.1:8090"),
             qdrant_url: env_str("QDRANT_URL", "http://127.0.0.1:6333"),
             embed_model,
             chat_model: env_str("CHAT_MODEL", "qwen2.5:3b"),
@@ -69,7 +69,7 @@ impl Config {
             rerank_max_docs: env_usize("RAG_RERANK_MAX_DOCS", 5)?,
             embed_prefix_query: env_str("RAG_EMBED_PREFIX_QUERY", default_query),
             embed_prefix_passage: env_str("RAG_EMBED_PREFIX_PASSAGE", default_passage),
-            ollama_timeout_secs: env_f64("OLLAMA_TIMEOUT", 300.0)?,
+            llama_timeout_secs: env_f64("LLAMA_TIMEOUT", 300.0)?,
             qdrant_timeout_secs: env_f64("QDRANT_TIMEOUT", 300.0)?,
             answer_timeout_secs: env_f64("RAG_ANSWER_TIMEOUT", 60.0)?,
         };
@@ -110,7 +110,7 @@ mod tests {
         Config {
             corpus_dir: PathBuf::from("docs"),
             collection: "c".to_string(),
-            ollama_url: "http://127.0.0.1:11434".to_string(),
+            llama_server_url: "http://127.0.0.1:11434".to_string(),
             qdrant_url: "http://127.0.0.1:6333".to_string(),
             embed_model: "qwen2.5:3b".to_string(),
             chat_model: "qwen2.5:3b".to_string(),
@@ -122,7 +122,7 @@ mod tests {
             rerank_max_docs: 5,
             embed_prefix_query: String::new(),
             embed_prefix_passage: String::new(),
-            ollama_timeout_secs: 300.0,
+            llama_timeout_secs: 300.0,
             qdrant_timeout_secs: 300.0,
             answer_timeout_secs: 60.0,
         }
@@ -149,7 +149,7 @@ mod tests {
     fn defaults_match_python_config() {
         let config = base();
         assert_eq!(config.rerank_max_docs, 5);
-        assert_eq!(config.ollama_timeout_secs, 300.0);
+        assert_eq!(config.llama_timeout_secs, 300.0);
         assert_eq!(config.qdrant_timeout_secs, 300.0);
     }
 }

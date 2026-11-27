@@ -12,7 +12,7 @@ stale_after: "2027-02-28T00:00:00+09:00"
 
 ## 概要
 
-`ragcore` は Ollama + Qdrant を使う RAG を Rust だけで実装した crate です。
+`ragcore` は llama.cpp (llama-server) + Qdrant を使う RAG を Rust だけで実装した crate です。
 `unsafe` は使用していません。依存は `serde` / `serde_json` / `sha2` / `blake2` /
 `reqwest` / `clap` / `url` / `chrono` です。
 
@@ -66,7 +66,7 @@ diagnostics にはファイル名とキー名のみ含めます（値は含め�
 | ファイル | 役割 |
 | --- | --- |
 | `config.rs` | 環境変数と検証 |
-| `ollama.rs` | 埋め込み API（部分再利用付きフォールバック） |
+| `llama.rs` | llama-server の OpenAI 互換 `/v1/embeddings` |
 | `qdrant.rs` | コレクション／points API |
 | `search.rs` | keyword / RRF / rerank の純粋計算 |
 | `ingest.rs` | コーパス走査・投入 |
