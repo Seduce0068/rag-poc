@@ -16,6 +16,9 @@ status: "stable"
 stale_after: "2026-12-26"
 ---
 
+> **注意**: 本文書以下は旧 Python 実装の設計・実測資料のアーカイブである。
+> 現行 CLI の仕様は [README.md](../README.md) と `ragcore/src/` を正とする。
+
 ## この索引の目的
 
 `rag_poc/` の入口は [README.md](../README.md) である。本文書は詳細ドキュメントへの

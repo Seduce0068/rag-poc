@@ -1,7 +1,7 @@
 ---
 type: Playbook
 title: "rag_poc コントリビューションガイド"
-description: "rag_poc への変更を提案するときの検証ループ、コミット規約、公開リポジトリの author 匿名化手順。"
+description: "Rust のみの rag_poc への変更を提案するときの検証ループ、コミット規約、公開リポジトリの author 匿名化手順。"
 tags:
   - contributing
   - verification
@@ -15,43 +15,42 @@ stale_after: "2026-12-26"
 
 ## はじめに
 
-[README.md](README.md) は入口、[docs/index.md](docs/index.md) は詳細ドキュメントの索引である。変更の前に双方を確認すること。本リポジトリは公開リポジトリのため、秘密情報・内部パス・ホスト名を Issue・PR・コミット・成果物へ記載しない。クラウド機能の注意は[README のクラウド章](README.md#クラウドモデルopencodego)に集約されている。
+[README.md](README.md) は入口、`ragcore/src/` が現行仕様の正本である。
+`docs/` 配下は旧 Python 実装のアーカイブ資料であり、現行 CLI の手順には使わない。
+本リポジトリは公開リポジトリのため、秘密情報・内部パス・ホスト名を
+Issue・PR・コミット・成果物へ記載しない。
 
 ## 検証ループ
 
-変更後は次の順で実行する。コマンド名はリポジトリで定義済みのものを使い、推測しない。
-パスは PoC が `default-workspace/rag_poc/` として置かれている前提で workspace
-ルートから実行する。単体 clone した場合は `rag_poc/` プレフィックスを外し、
-リポジトリ直下で同じコマンドを実行すること。
+変更後は次の順で実行する。コマンド名はプロジェクトで定義済みのものを使い、推測しない。
+リポジトリ直下を cwd とする。
 
 ```bash
-# 1. フォーマット（Rust クレート）
-cargo fmt --manifest-path rag_poc/ragcore/Cargo.toml -- --check
+# 1. フォーマット
+cargo fmt --manifest-path ragcore/Cargo.toml -- --check
 
-# 2. Python 構文チェック
-python3 -m py_compile rag_poc/*.py
+# 2. テスト
+cargo test --manifest-path ragcore/Cargo.toml
 
-# 3. テスト（外部サービスへ接続しない）
-python3 rag_poc/test_rag.py
-RAG_REQUIRE_RUST=1 python3 rag_poc/test_rag.py
-cargo test --manifest-path rag_poc/ragcore/Cargo.toml
+# 3. 静的解析（unsafe の新規使用を禁止）
+cargo clippy --manifest-path ragcore/Cargo.toml -- -D warnings -D clippy::undocumented_unsafe_blocks
 
-# 4. 静的解析
-cargo clippy --manifest-path rag_poc/ragcore/Cargo.toml -- -D warnings -D clippy::undocumented_unsafe_blocks
+# 4. ビルドと CLI スモーク
+cargo build --manifest-path ragcore/Cargo.toml
+ragcore/target/debug/ragcore --help
+echo '{"op":"cosine","a":[1.0],"b":[1.0]}' | ragcore/target/debug/ragcore
+echo '{"op":"check_eval_results","paths":["eval-results.json"]}' | ragcore/target/debug/ragcore
 
 # 5. ドキュメント lint
-markdownlint-cli2 rag_poc/README.md rag_poc/docs/*.md rag_poc/CONTRIBUTING.md rag_poc/SECURITY.md
+markdownlint-cli2 README.md CONTRIBUTING.md SECURITY.md docs/*.md
 
 # 6. シークレットスキャン（コミット履歴全体）
 betterleaks git
-
-# 7. CI と同じ追加ゲート（外部サービスへの接続なし）
-cargo build --manifest-path rag_poc/ragcore/Cargo.toml
-python3 rag_poc/rust_bridge.py check_eval_results
-python3 rag_poc/compare_cloud_local.py --run-ab --output /tmp/cloud-local-comparison.json
 ```
 
-設定やドキュメントのみの変更では Python 構文チェックとテストを省略してよいが、Markdown lint とシークレットスキャンは必ず実行する。失敗時は既存 baseline と新規失敗を区別し、原因とともに報告する。自動修正と再レビューは最大 2 回を目安とし、曖昧な指摘や設計判断が必要な事項、破壊的操作は無理に反復しない。
+文書のみの変更では 2〜4 を省略してよいが、markdownlint とシークレットスキャンは必ず実行する。
+失敗時は既存 baseline と新規失敗を区別し、原因とともに報告する。
+自動修正と再レビューは最大 2 回を目安とする。
 
 ## コミット規約
 
@@ -76,4 +75,4 @@ git -c user.name=dsh-agent \
 
 - [SECURITY.md](SECURITY.md) — 脆弱性の報告先と対応方針
 - [README.md](README.md) — セットアップ・使い方
-- [docs/index.md](docs/index.md) — 詳細ドキュメントの索引
+- `docs/` — 旧 Python 実装の設計・実測資料（履歴アーカイブ）

@@ -1,33 +1,141 @@
-//! stdin JSON → stdout JSON の薄い CLI ラッパー。
-//!
-//! 入力: `{"op":"chunk","text":"...","chunk_size":300,"overlap":50}`
-//! 入力: `{"op":"cosine_batch","pairs":[[[1,0],[1,0]],[[1,0],[0,1]]]}`
-//! 出力: op ごとの結果値、失敗時は `{"error":"..."}` を出して終了コード 1。
+//! Rust のみの RAG CLI。stdin JSON の op モードも後方互換で維持する。
 
 use std::io::{self, Read};
 use std::path::Path;
+
+use clap::{Parser, Subcommand};
+use serde_json::{json, Value};
 
 use ragcore::{
     check_eval_results, chunk_text, corpus_fingerprint, cosine, distribution, latency_stats,
     ndcg_at, point_id, recall_at, rrf_fuse,
 };
-use serde_json::{json, Value};
+
+#[derive(Parser)]
+#[command(name = "ragcore", about = "Rust-only RAG CLI")]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// コーパスを埋め込みして Qdrant へ投入する
+    Ingest {
+        #[arg(long, env = "RAG_CORPUS_DIR")]
+        corpus_dir: Option<String>,
+        #[arg(long, env = "RAG_COLLECTION")]
+        collection: Option<String>,
+        #[arg(long)]
+        recreate: bool,
+        #[arg(long)]
+        yes: bool,
+    },
+    /// 質問して検索結果を返す
+    Query {
+        question: String,
+        #[arg(long, default_value = "hybrid")]
+        mode: String,
+        #[arg(long, env = "RAG_TOP_K")]
+        top_k: Option<usize>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// qrels で検索品質を評価する
+    Evaluate {
+        #[arg(long)]
+        qrels: String,
+        #[arg(long)]
+        output: String,
+    },
+}
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let first = args.get(1).map(String::as_str).unwrap_or_default();
+    let is_cli = matches!(
+        first,
+        "ingest" | "query" | "evaluate" | "--help" | "-h" | "help"
+    );
+    if is_cli {
+        match Cli::try_parse() {
+            Ok(cli) => {
+                if let Err(err) = run_cli(cli) {
+                    eprintln!("error: {err}");
+                    std::process::exit(1);
+                }
+            }
+            Err(err) => err.exit(),
+        }
+        return;
+    }
+    run_op_mode();
+}
+
+fn run_cli(cli: Cli) -> Result<(), String> {
+    let mut config = ragcore::config::Config::from_env()?;
+    match cli.command {
+        Command::Ingest {
+            corpus_dir,
+            collection,
+            recreate,
+            yes,
+        } => {
+            if let Some(dir) = corpus_dir {
+                config.corpus_dir = std::path::PathBuf::from(dir);
+            }
+            if let Some(name) = collection {
+                config.collection = name;
+            }
+            ragcore::ingest::run(&config, &config.corpus_dir, recreate, yes)
+        }
+        Command::Query {
+            question,
+            mode,
+            top_k,
+            json: as_json,
+        } => {
+            if question.chars().count() > config.question_max_chars {
+                return Err("question too long".to_string());
+            }
+            let k = top_k.filter(|&value| value > 0).unwrap_or(config.top_k);
+            let hits = ragcore::query::search(&config, &question, &mode, k)?;
+            if as_json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({
+                        "mode": mode,
+                        "hits": hits,
+                    }))
+                    .map_err(|e| e.to_string())?
+                );
+            } else {
+                for hit in hits {
+                    println!("{}\t{}\t{}", hit["score"], hit["source"], hit["text"]);
+                }
+            }
+            Ok(())
+        }
+        Command::Evaluate { qrels, output } => {
+            ragcore::evaluate::run(&config, Path::new(&qrels), Path::new(&output))
+        }
+    }
+}
+
+fn run_op_mode() {
     let mut input = String::new();
     if let Err(err) = io::stdin().read_to_string(&mut input) {
-        fail(&format!("stdin の読み込みに失敗: {err}"));
+        fail(&format!("stdin read failed: {err}"));
     }
     let value: Value = match serde_json::from_str(&input) {
         Ok(value) => value,
-        Err(err) => fail(&format!("入力 JSON の解析に失敗: {err}")),
+        Err(err) => fail(&format!("invalid JSON: {err}")),
     };
     let op = value
         .get("op")
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string();
-
     let result = match op.as_str() {
         "chunk" => run_chunk(&value),
         "cosine" => run_cosine(&value),
@@ -40,16 +148,14 @@ fn main() {
         "point_id" => run_point_id(&value),
         "check_eval_results" => run_check_eval_results(&value),
         "rrf_fuse" => run_rrf_fuse(&value),
-        other => Err(format!("未知の op: {other}")),
+        other => Err(format!("unknown op: {other}")),
     };
-
     match result {
         Ok(output) => println!("{output}"),
         Err(message) => fail(&message),
     }
 }
 
-/// エラー JSON を stdout に出し、終了コード 1 で終了する。
 fn fail(message: &str) -> ! {
     println!("{}", json!({ "error": message }));
     std::process::exit(1);
@@ -71,11 +177,10 @@ fn require_usize(value: &Value, key: &str) -> Result<usize, String> {
 }
 
 fn require_f64_array(value: &Value, key: &str) -> Result<Vec<f64>, String> {
-    let array = value
+    value
         .get(key)
         .and_then(Value::as_array)
-        .ok_or_else(|| format!("missing or invalid array field: {key}"))?;
-    array
+        .ok_or_else(|| format!("missing or invalid array field: {key}"))?
         .iter()
         .map(|item| {
             item.as_f64()
@@ -85,11 +190,10 @@ fn require_f64_array(value: &Value, key: &str) -> Result<Vec<f64>, String> {
 }
 
 fn require_string_array(value: &Value, key: &str) -> Result<Vec<String>, String> {
-    let array = value
+    value
         .get(key)
         .and_then(Value::as_array)
-        .ok_or_else(|| format!("missing or invalid array field: {key}"))?;
-    array
+        .ok_or_else(|| format!("missing or invalid array field: {key}"))?
         .iter()
         .map(|item| {
             item.as_str()
@@ -116,12 +220,10 @@ fn run_cosine(value: &Value) -> Result<String, String> {
     to_json_string(&cosine(&a, &b)?)
 }
 
-/// `Value` を数値配列として解釈する（`require_f64_array` のキー無し版）。
 fn f64_array_from(value: &Value, context: &str) -> Result<Vec<f64>, String> {
-    let array = value
+    value
         .as_array()
-        .ok_or_else(|| format!("{context} must be an array"))?;
-    array
+        .ok_or_else(|| format!("{context} must be an array"))?
         .iter()
         .map(|item| {
             item.as_f64()
@@ -130,8 +232,6 @@ fn f64_array_from(value: &Value, context: &str) -> Result<Vec<f64>, String> {
         .collect()
 }
 
-/// 複数のコサイン類似度を一括計算し、配列そのものを返す（丸めなし）。
-/// 不正なペアがあれば 1 件も返さずエラーとする。
 fn run_cosine_batch(value: &Value) -> Result<String, String> {
     let pairs = value
         .get("pairs")
@@ -147,17 +247,13 @@ fn run_cosine_batch(value: &Value) -> Result<String, String> {
         }
         let a = f64_array_from(&elements[0], &format!("pairs[{index}][0]"))?;
         let b = f64_array_from(&elements[1], &format!("pairs[{index}][1]"))?;
-        if a.is_empty() || b.is_empty() {
-            return Err(format!("pairs[{index}] vectors must not be empty"));
-        }
         scores.push(cosine(&a, &b).map_err(|err| format!("pairs[{index}]: {err}"))?);
     }
     to_json_string(&scores)
 }
 
 fn run_distribution(value: &Value) -> Result<String, String> {
-    let scores = require_f64_array(value, "scores")?;
-    to_json_string(&distribution(&scores)?)
+    to_json_string(&distribution(&require_f64_array(value, "scores")?)?)
 }
 
 fn run_recall(value: &Value) -> Result<String, String> {
@@ -171,14 +267,12 @@ fn run_ndcg(value: &Value) -> Result<String, String> {
     let relevant = require_string_array(value, "relevant")?;
     let retrieved = require_string_array(value, "retrieved")?;
     let k = require_usize(value, "k")?;
-    // metrics 側は丸めない。CLI は呼び出し側として 6 桁に揃える。
     let raw = ndcg_at(&relevant, &retrieved, k);
     to_json_string(&((raw * 1_000_000.0).round() / 1_000_000.0))
 }
 
 fn run_latency(value: &Value) -> Result<String, String> {
-    let samples = require_f64_array(value, "samples")?;
-    to_json_string(&latency_stats(&samples)?)
+    to_json_string(&latency_stats(&require_f64_array(value, "samples")?)?)
 }
 
 fn run_fingerprint(value: &Value) -> Result<String, String> {
@@ -186,31 +280,21 @@ fn run_fingerprint(value: &Value) -> Result<String, String> {
         .get("paths")
         .and_then(Value::as_array)
         .ok_or_else(|| "missing or invalid array field: paths".to_string())?;
-    let mut parsed: Vec<(String, Vec<u8>)> = Vec::new();
-    for (index, item) in paths.iter().enumerate() {
+    let mut parsed = Vec::with_capacity(paths.len());
+    for item in paths {
         let path = item
             .get("path")
             .and_then(Value::as_str)
-            .ok_or_else(|| format!("paths[{index}].path must be a string"))?
+            .unwrap_or_default()
             .to_string();
-        let bytes = if let Some(text) = item.get("content").and_then(Value::as_str) {
-            text.as_bytes().to_vec()
-        } else if let Some(text) = item.get("text").and_then(Value::as_str) {
-            text.as_bytes().to_vec()
-        } else if let Some(array) = item.get("bytes").and_then(Value::as_array) {
-            array
-                .iter()
-                .map(|number| {
-                    number
-                        .as_u64()
-                        .and_then(|value| u8::try_from(value).ok())
-                        .ok_or_else(|| format!("paths[{index}].bytes must contain 0..255"))
-                })
-                .collect::<Result<Vec<u8>, String>>()?
-        } else {
-            return Err(format!("paths[{index}] needs content / text / bytes"));
-        };
-        parsed.push((path, bytes));
+        let content = item
+            .get("content")
+            .and_then(Value::as_str)
+            .or_else(|| item.get("text").and_then(Value::as_str))
+            .unwrap_or_default()
+            .as_bytes()
+            .to_vec();
+        parsed.push((path, content));
     }
     to_json_string(&corpus_fingerprint(&parsed))
 }
@@ -218,29 +302,24 @@ fn run_fingerprint(value: &Value) -> Result<String, String> {
 fn run_point_id(value: &Value) -> Result<String, String> {
     let source = require_str(value, "source")?;
     let index = require_usize(value, "chunk_index")?;
-    let chunk_index =
-        u64::try_from(index).map_err(|_| "chunk_index is too large for u64".to_string())?;
-    to_json_string(&point_id(source, chunk_index))
+    to_json_string(&point_id(source, u64::try_from(index).unwrap_or(u64::MAX)))
 }
 
-/// eval-results-*.json のパス一覧を受け取り、ゲート結果 JSON を返す。
-///
-/// ファイル名とキー名だけを diagnostics に含め、値は stdout にも出さない。
 fn run_check_eval_results(value: &Value) -> Result<String, String> {
     let paths = value
         .get("paths")
         .and_then(Value::as_array)
         .ok_or_else(|| "missing or invalid array field: paths".to_string())?;
     let mut files = Vec::with_capacity(paths.len());
-    for (index, item) in paths.iter().enumerate() {
+    for item in paths {
         let path = item
             .as_str()
-            .ok_or_else(|| format!("paths[{index}] must be a string"))?;
-        let content = std::fs::read_to_string(path)
-            .map_err(|_| format!("paths[{index}] could not be read"))?;
+            .ok_or_else(|| "paths must contain strings".to_string())?;
+        let content =
+            std::fs::read_to_string(path).map_err(|_| "path could not be read".to_string())?;
         let name = Path::new(path)
             .file_name()
-            .and_then(|value| value.to_str())
+            .and_then(|v| v.to_str())
             .unwrap_or(path)
             .to_string();
         files.push((name, content));
@@ -248,19 +327,19 @@ fn run_check_eval_results(value: &Value) -> Result<String, String> {
     to_json_string(&check_eval_results(&files))
 }
 
-/// 複数の順位付きリストを受け取り、RRF(k=60) で統合した配列を返す。
 fn run_rrf_fuse(value: &Value) -> Result<String, String> {
     let rankings_value = value
         .get("rankings")
         .and_then(Value::as_array)
         .ok_or_else(|| "missing or invalid array field: rankings".to_string())?;
-    let mut rankings: Vec<Vec<Value>> = Vec::with_capacity(rankings_value.len());
-    for (index, ranking) in rankings_value.iter().enumerate() {
-        let points = ranking
-            .as_array()
-            .ok_or_else(|| format!("rankings[{index}] must be an array"))?;
-        rankings.push(points.clone());
-    }
+    let rankings: Vec<Vec<Value>> = rankings_value
+        .iter()
+        .map(|item| {
+            item.as_array()
+                .cloned()
+                .ok_or_else(|| "rankings must contain arrays".to_string())
+        })
+        .collect::<Result<_, _>>()?;
     let top_k = require_usize(value, "top_k")?;
     to_json_string(&rrf_fuse(&rankings, top_k))
 }

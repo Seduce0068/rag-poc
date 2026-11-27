@@ -20,12 +20,10 @@ jobs:
       working_directory: ragcore
       clippy_args: -D clippy::undocumented_unsafe_blocks
       extra_gates: |
-        python3 ../test_rag.py
         cargo build --locked
-        RAG_REQUIRE_RUST=1 python3 ../test_rag.py
-        python3 ../rust_bridge.py check_eval_results
-        python3 ../compare_cloud_local.py --run-ab --output /tmp/cloud-local-comparison.json
-        python3 -c 'import json,sys,os; p="/tmp/cloud-local-comparison.json"; d=json.load(open(p,encoding="utf-8")) if os.path.isfile(p) else {}; m=[k for k in ("rows","notes","generated_at") if k not in d]; [print(p,k,file=sys.stderr) for k in m]; sys.exit(1 if m else 0)'
+        ./target/debug/ragcore --help
+        echo '{"op":"cosine","a":[1.0],"b":[1.0]}' | ./target/debug/ragcore
+        echo '{"op":"check_eval_results","paths":["../eval-results.json"]}' | ./target/debug/ragcore
 
   secret-scan:
     uses: Seduce0068/workflows/.github/workflows/secret-gates.yml@v1

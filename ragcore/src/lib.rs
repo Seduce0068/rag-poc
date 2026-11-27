@@ -7,6 +7,14 @@
 //!
 //! `unsafe` ブロック・関数・トレイトは一切使用しない。
 
+pub mod config;
+pub mod evaluate;
+pub mod ingest;
+pub mod ollama;
+pub mod qdrant;
+pub mod query;
+pub mod search;
+
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
