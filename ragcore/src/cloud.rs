@@ -5,7 +5,9 @@
 //!   キーに言及する文言では `api_key_name`（環境変数名）のみを参照する。
 //! - エラー文言に URL・レスポンス本文・入力テキストは含めない。
 //!   HTTP エラーはステータスコードの数値のみを含める（reason phrase は使わない）。
-//! - リトライは行わない。呼び出し側の構成をシンプルに保つ。
+//! - 429 / 500 / 502 / 503 / 504 のみ最大 3 回リトライ。
+//!   Retry-After は 60 秒で cap し、解釈不能値も 60 秒待つ（fail-safe）。
+//! - 接続先は https のみ。API キーを平文 HTTP へ送らない。
 
 use crate::config::Config;
 use serde::Serialize;
@@ -113,6 +115,31 @@ fn embeddings_endpoint(base_url: &str) -> String {
     format!("{}{EMBEDDINGS_PATH}", base_url.trim_end_matches('/'))
 }
 
+/// 再試行回数（総試行回数は 1 + この値）。
+const RETRY_TOTAL: usize = 3;
+/// backoff の基数（秒）。連続失敗 n 回目は `0.5 * 2^(n-1)` 秒。
+const RETRY_BACKOFF_SECS: f64 = 0.5;
+/// 再試行対象の HTTP ステータス。
+const RETRY_STATUSES: [u16; 5] = [429, 500, 502, 503, 504];
+/// Retry-After の上限（秒）。無限待ちを避ける。
+const MAX_RETRY_AFTER_SECS: u64 = 60;
+
+fn retry_backoff(failure_count: usize) -> Duration {
+    let exponent = failure_count.saturating_sub(1).min(16) as u32;
+    let secs = RETRY_BACKOFF_SECS * 2f64.powi(exponent as i32);
+    Duration::from_secs_f64(secs.min(MAX_RETRY_AFTER_SECS as f64))
+}
+
+/// Retry-After の秒数だけを解釈する（HTTP-date は無視して backoff を使う）。
+fn retry_after(value: &str) -> Option<Duration> {
+    value
+        .trim()
+        .parse::<u64>()
+        .ok()
+        .map(|secs| Duration::from_secs(secs.min(MAX_RETRY_AFTER_SECS)))
+        .or(Some(Duration::from_secs(MAX_RETRY_AFTER_SECS)))
+}
+
 /// opencodeGO の `/embeddings` クライアント。フィールドはすべて private。
 pub struct CloudClient {
     http: reqwest::blocking::Client,
@@ -148,6 +175,11 @@ impl CloudClient {
                 cloud.api_key_name.unwrap_or("cloud API key")
             )
         })?;
+        let parsed = url::Url::parse(&cloud.base_url)
+            .map_err(|_| "RAG_CLOUD_BASE_URL is invalid".to_string())?;
+        if parsed.scheme() != "https" {
+            return Err("RAG_CLOUD_BASE_URL must use https".to_string());
+        }
         if cloud.embed_model.is_empty() {
             return Err("RAG_CLOUD_EMBED_MODEL must be set explicitly".to_string());
         }
@@ -176,23 +208,49 @@ impl CloudClient {
         }
 
         let body = build_request_body(&self.model, texts, self.dimensions);
-        let response = self
-            .http
-            .post(&self.endpoint)
-            .bearer_auth(&self.api_key)
-            .json(&body)
-            .send()
-            .map_err(|_| "cloud embeddings request failed".to_string())?;
+        let mut failures = 0usize;
+        loop {
+            let response = self
+                .http
+                .post(&self.endpoint)
+                .bearer_auth(&self.api_key)
+                .json(&body)
+                .send()
+                .map_err(|_| "cloud embeddings request failed".to_string());
 
-        let status = response.status();
-        if !status.is_success() {
-            return Err(format!("cloud embeddings HTTP {}", status.as_u16()));
+            let response = match response {
+                Ok(response) => response,
+                Err(err) => {
+                    if failures >= RETRY_TOTAL {
+                        return Err(err);
+                    }
+                    failures += 1;
+                    std::thread::sleep(retry_backoff(failures));
+                    continue;
+                }
+            };
+
+            let status = response.status();
+            if status.is_success() {
+                let payload: Value = response
+                    .json()
+                    .map_err(|_| "invalid cloud embeddings response".to_string())?;
+                return parse_embeddings(&payload, texts.len(), self.dimensions);
+            }
+
+            let code = status.as_u16();
+            if !RETRY_STATUSES.contains(&code) || failures >= RETRY_TOTAL {
+                return Err(format!("cloud embeddings HTTP {code}"));
+            }
+            let delay = response
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|value| value.to_str().ok())
+                .and_then(retry_after)
+                .unwrap_or_else(|| retry_backoff(failures + 1));
+            failures += 1;
+            std::thread::sleep(delay);
         }
-
-        let payload: Value = response
-            .json()
-            .map_err(|_| "invalid cloud embeddings response".to_string())?;
-        parse_embeddings(&payload, texts.len(), self.dimensions)
     }
 }
 
@@ -209,6 +267,8 @@ mod tests {
             collection: "c".to_string(),
             llama_server_url: "http://127.0.0.1:8090".to_string(),
             qdrant_url: "http://127.0.0.1:6333".to_string(),
+            allow_remote_endpoints: false,
+            allowed_endpoint_hosts: Vec::new(),
             embed_model: "qwen2.5:3b".to_string(),
             chat_model: "qwen2.5:3b".to_string(),
             vector_size: 3,
@@ -356,6 +416,20 @@ mod tests {
         let error = parse_embeddings(&payload, 1, None).unwrap_err();
         assert!(!error.contains("SECRET_RESPONSE_BODY"));
         assert!(!error.contains("example.invalid"));
+    }
+
+    #[test]
+    fn retry_policy_matches_python_defaults() {
+        assert_eq!(RETRY_TOTAL, 3);
+        assert_eq!(RETRY_STATUSES, [429, 500, 502, 503, 504]);
+        assert_eq!(retry_backoff(1).as_secs_f64(), 0.5);
+        assert_eq!(retry_backoff(2).as_secs_f64(), 1.0);
+        assert_eq!(retry_backoff(3).as_secs_f64(), 2.0);
+        assert_eq!(retry_after("7"), Some(Duration::from_secs(7)));
+        assert_eq!(
+            retry_after("Wed, 21 Oct 2015 07:28:00 GMT"),
+            Some(Duration::from_secs(MAX_RETRY_AFTER_SECS))
+        );
     }
 
     #[test]

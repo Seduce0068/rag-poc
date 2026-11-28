@@ -47,12 +47,15 @@ Qdrant に保存し、質問に対して関連する文章を返す。Python は
 
 - `hybrid-rerank` は `hybrid` と同一で、LLM による再ランクは行わない
 - 回答生成（`answer` / `sources`）と `--with-answer`
-- 接続先のリモート制限（`RAG_ALLOW_REMOTE_ENDPOINTS` 等）と
-  コーパス範囲制限（`RAG_ALLOW_EXTERNAL_CORPUS`）
-- クラウド埋め込みのリトライ（429/5xx で即失敗）
+- コーパス範囲制限（`RAG_ALLOW_EXTERNAL_CORPUS`）
 - `RAG_CLOUD_CHAT_ENABLED` は受け付けるが no-op（chat クライアント未実装）
-- ハイブリッド検索で dense / keyword が失敗した場合は部分結果を返し、
-  その理由は stderr にも JSON にも残さない
+
+接続先は loopback のみ既定許可。リモートを使う場合は
+`RAG_ALLOW_REMOTE_ENDPOINTS=1` かつ `RAG_ALLOWED_ENDPOINT_HOSTS` に host または
+host:port を指定し、https であることが必須。
+ハイブリッド検索の部分失敗は `query --json` の `errors` 配列に
+`stage` / `mode` / `type` / `message` で記録される。
+クラウド埋め込みは 429 / 500 / 502 / 503 / 504 を最大 3 回リトライする。
 
 ## CLI
 
@@ -75,6 +78,8 @@ stdin JSON の op モード（`{"op":"cosine","a":[1.0],"b":[1.0]}`）も後方�
 | --- | --- |
 | `LLAMA_SERVER_URL` | `http://127.0.0.1:8090` |
 | `QDRANT_URL` | `http://127.0.0.1:6333` |
+| `RAG_ALLOW_REMOTE_ENDPOINTS` | `0`（`"1"` のみ有効） |
+| `RAG_ALLOWED_ENDPOINT_HOSTS` | 空（カンマ区切り） |
 | `EMBED_MODEL` | `qwen2.5:3b` |
 | `CHAT_MODEL` | `qwen2.5:3b` |
 | `RAG_COLLECTION` | `rag_poc_docs` |

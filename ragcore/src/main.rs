@@ -99,13 +99,15 @@ fn run_cli(cli: Cli) -> Result<(), String> {
                 return Err("question too long".to_string());
             }
             let k = top_k.filter(|&value| value > 0).unwrap_or(config.top_k);
-            let hits = ragcore::query::search(&config, &question, &mode, k)?;
+            let result = ragcore::query::search(&config, &question, &mode, k)?;
+            let hits = result.hits;
             if as_json {
                 println!(
                     "{}",
                     serde_json::to_string_pretty(&json!({
                         "mode": mode,
                         "hits": hits,
+                        "errors": result.errors,
                     }))
                     .map_err(|e| e.to_string())?
                 );

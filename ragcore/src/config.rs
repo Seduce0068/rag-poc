@@ -39,6 +39,8 @@ pub struct Config {
     pub collection: String,
     pub llama_server_url: String,
     pub qdrant_url: String,
+    pub allow_remote_endpoints: bool,
+    pub allowed_endpoint_hosts: Vec<String>,
     pub embed_model: String,
     pub chat_model: String,
     pub vector_size: usize,
@@ -144,6 +146,13 @@ impl Config {
             collection: env_str("RAG_COLLECTION", "rag_poc_docs"),
             llama_server_url: env_str("LLAMA_SERVER_URL", "http://127.0.0.1:8090"),
             qdrant_url: env_str("QDRANT_URL", "http://127.0.0.1:6333"),
+            allow_remote_endpoints: env_flag("RAG_ALLOW_REMOTE_ENDPOINTS"),
+            allowed_endpoint_hosts: env_str("RAG_ALLOWED_ENDPOINT_HOSTS", "")
+                .split(',')
+                .map(str::trim)
+                .filter(|host| !host.is_empty())
+                .map(str::to_lowercase)
+                .collect(),
             embed_model,
             chat_model: env_str("CHAT_MODEL", "qwen2.5:3b"),
             vector_size: env_usize("RAG_VECTOR_SIZE", 2048)?,
@@ -170,6 +179,43 @@ impl Config {
             .or_else(|| known_cloud_dimension(&self.cloud.embed_model))
     }
 
+    /// 接続先 URL を検証する。loopback は既定許可、リモートは opt-in ＋ https ＋ 許可ホストが必須。
+    fn validate_endpoint(&self, url: &str, name: &str) -> Result<(), String> {
+        let parsed = url::Url::parse(url).map_err(|_| format!("{name} is invalid"))?;
+        if !parsed.username().is_empty() || parsed.password().is_some() {
+            return Err(format!("{name} must not contain credentials"));
+        }
+        let scheme = parsed.scheme();
+        let host = parsed.host_str().unwrap_or_default().to_lowercase();
+        let loopback = matches!(host.as_str(), "localhost" | "127.0.0.1" | "::1" | "[::1]");
+        if loopback {
+            if scheme != "http" && scheme != "https" {
+                return Err(format!("{name} has invalid scheme"));
+            }
+            return Ok(());
+        }
+        if scheme != "https" {
+            return Err(format!("{name} must use https for remote hosts"));
+        }
+        if !self.allow_remote_endpoints {
+            return Err(format!(
+                "{name} remote host requires RAG_ALLOW_REMOTE_ENDPOINTS=1"
+            ));
+        }
+        let host_port = match parsed.port() {
+            Some(port) => format!("{host}:{port}"),
+            None => host.clone(),
+        };
+        if !self
+            .allowed_endpoint_hosts
+            .iter()
+            .any(|allowed| allowed == &host || allowed == &host_port)
+        {
+            return Err(format!("{name} host is not in RAG_ALLOWED_ENDPOINT_HOSTS"));
+        }
+        Ok(())
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         if self.chunk_size == 0 {
             return Err("CHUNK_SIZE must be positive".to_string());
@@ -191,6 +237,8 @@ impl Config {
                 return Err("Ruri requires CHUNK_SIZE<=512".to_string());
             }
         }
+        self.validate_endpoint(&self.llama_server_url, "LLAMA_SERVER_URL")?;
+        self.validate_endpoint(&self.qdrant_url, "QDRANT_URL")?;
         self.validate_cloud_settings()?;
         Ok(())
     }
@@ -251,6 +299,8 @@ mod tests {
             collection: "c".to_string(),
             llama_server_url: "http://127.0.0.1:8090".to_string(),
             qdrant_url: "http://127.0.0.1:6333".to_string(),
+            allow_remote_endpoints: false,
+            allowed_endpoint_hosts: Vec::new(),
             embed_model: "qwen2.5:3b".to_string(),
             chat_model: "qwen2.5:3b".to_string(),
             vector_size: 2048,
@@ -339,6 +389,22 @@ mod tests {
         let text = format!("{:?}", config);
         assert!(!text.contains("DUMMY_SECRET_VALUE"));
         assert!(text.contains("<redacted>"));
+    }
+
+    #[test]
+    fn remote_endpoint_requires_opt_in_https_and_allowlist() {
+        let mut config = base();
+        config.llama_server_url = "http://example.invalid:8090".to_string();
+        assert!(config.validate().is_err());
+
+        config.llama_server_url = "https://example.invalid:8090".to_string();
+        assert!(config.validate().is_err());
+
+        config.allow_remote_endpoints = true;
+        assert!(config.validate().is_err());
+
+        config.allowed_endpoint_hosts = vec!["example.invalid:8090".to_string()];
+        assert!(config.validate().is_ok());
     }
 
     #[test]

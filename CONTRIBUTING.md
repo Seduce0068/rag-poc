@@ -39,10 +39,10 @@ cargo clippy --manifest-path ragcore/Cargo.toml -- -D warnings -D clippy::undocu
 cargo build --manifest-path ragcore/Cargo.toml
 ragcore/target/debug/ragcore --help
 echo '{"op":"cosine","a":[1.0],"b":[1.0]}' | ragcore/target/debug/ragcore
-echo '{"op":"check_eval_results","paths":["eval-results.json"]}' | ragcore/target/debug/ragcore
+echo '{"op":"check_eval_results","paths":["eval-results-baseline.json","eval-results-ruri-subset.json"]}' | ragcore/target/debug/ragcore
 
 # 5. ドキュメント lint
-markdownlint-cli2 README.md CONTRIBUTING.md SECURITY.md docs/*.md
+markdownlint-cli2 README.md CONTRIBUTING.md SECURITY.md ragcore/README.md docs/*.md
 
 # 6. シークレットスキャン（コミット履歴全体）
 betterleaks git
@@ -54,6 +54,7 @@ betterleaks git
 ```bash
 unset RAG_CLOUD_ENABLED RAG_CLOUD_CHAT_ENABLED RAG_CLOUD_EMBED_MODEL
 unset RAG_CLOUD_EMBED_DIMENSION RAG_CLOUD_DIMENSIONS OPENCODE_GO_API_KEY OPENCODE_API_KEY
+unset RAG_ALLOW_REMOTE_ENDPOINTS RAG_ALLOWED_ENDPOINT_HOSTS
 ```
 
 文書のみの変更では 2〜4 を省略してよいが、markdownlint とシークレットスキャンは必ず実行する。

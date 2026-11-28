@@ -63,12 +63,7 @@ cargo check --manifest-path rag_poc/ragcore/Cargo.toml
 cargo test --manifest-path rag_poc/ragcore/Cargo.toml
 cargo clippy --manifest-path rag_poc/ragcore/Cargo.toml -- -D warnings -D clippy::undocumented_unsafe_blocks
 
-echo '--- 3. Python テスト（Rust 必須ゲート含む） ---'
-python3 rag_poc/test_rag.py
-RAG_REQUIRE_RUST=1 python3 rag_poc/test_rag.py
-
-echo '--- 4. 比較成果物の再生成と JSON ゲート ---'
-python3 rag_poc/compare_cloud_local.py --output rag_poc/cloud-local-comparison.json
+echo '--- 3. 検証ループの正本は CONTRIBUTING.md の「検証ループ」を参照（Python 手順は旧実装） ---'
 
 echo '--- 5. push 後の CI ゲート通過確認（GitHub CLI） ---'
 git diff --check

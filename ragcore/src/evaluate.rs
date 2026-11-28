@@ -12,6 +12,21 @@ use crate::{ndcg_at, recall_at};
 const RECALL_K: [usize; 4] = [1, 3, 5, 10];
 const NDCG_K: [usize; 2] = [3, 10];
 
+/// 検索中の部分失敗を旧 Python の record.error 相当の文字列へまとめる。
+fn merge_errors(errors: &[crate::query::SearchError]) -> Value {
+    if errors.is_empty() {
+        Value::Null
+    } else {
+        Value::String(
+            errors
+                .iter()
+                .map(|error| format!("{}: {}: {}", error.stage, error.error_type, error.message))
+                .collect::<Vec<_>>()
+                .join("; "),
+        )
+    }
+}
+
 fn string_array(value: Option<&Value>) -> Vec<String> {
     value
         .and_then(Value::as_array)
@@ -44,7 +59,9 @@ pub fn run(config: &Config, qrels_path: &Path, output: &Path) -> Result<(), Stri
         let question = query["query"].as_str().unwrap_or_default();
         let expected = string_array(query.get("expected"));
         for mode in SEARCH_MODES {
-            let hits = search(config, question, mode, retrieval_k)?;
+            let result = search(config, question, mode, retrieval_k)?;
+            let hits = result.hits;
+            let error = merge_errors(&result.errors);
             let sources: Vec<String> = hits
                 .iter()
                 .map(|hit| hit["source"].as_str().unwrap_or_default().to_string())
@@ -63,6 +80,7 @@ pub fn run(config: &Config, qrels_path: &Path, output: &Path) -> Result<(), Stri
                 "expected": expected,
                 "mode": mode,
                 "hits": hits.len(),
+                "error": error,
                 "recall": !matched.is_empty(),
                 "matched_sources": matched,
                 "sources": sources,
@@ -74,7 +92,9 @@ pub fn run(config: &Config, qrels_path: &Path, output: &Path) -> Result<(), Stri
         let question = query["query"].as_str().unwrap_or_default();
         let relevant = string_array(query.get("relevant_sources"));
         for mode in SEARCH_MODES {
-            let hits = search(config, question, mode, retrieval_k)?;
+            let result = search(config, question, mode, retrieval_k)?;
+            let hits = result.hits;
+            let error = merge_errors(&result.errors);
             let sources: Vec<String> = hits
                 .iter()
                 .map(|hit| hit["source"].as_str().unwrap_or_default().to_string())
@@ -101,6 +121,7 @@ pub fn run(config: &Config, qrels_path: &Path, output: &Path) -> Result<(), Stri
                 "mode": mode,
                 "retrieval_k": retrieval_k,
                 "hits": hits.len(),
+                "error": error,
                 "sources": sources,
                 "recall_at": Value::Object(recall),
                 "ndcg_at": Value::Object(ndcg),

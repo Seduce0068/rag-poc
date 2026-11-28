@@ -107,26 +107,88 @@ fn keyword_points(config: &Config, question: &str, top_k: usize) -> Result<Vec<V
     Ok(rank_keyword(&scored, &terms, top_k))
 }
 
+/// 検索中の部分失敗（旧 Python の last_search_errors 相当）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SearchError {
+    pub stage: String,
+    pub mode: String,
+    #[serde(rename = "type")]
+    pub error_type: String,
+    pub message: String,
+}
+
+impl SearchError {
+    fn new(stage: &str, mode: &str, message: &str) -> Self {
+        Self {
+            stage: stage.to_string(),
+            mode: mode.to_string(),
+            error_type: "Error".to_string(),
+            message: message.to_string(),
+        }
+    }
+}
+
+/// 同一 (stage, type, message) は一度だけ記録し、stderr にも警告を出す。
+fn push_error(errors: &mut Vec<SearchError>, stage: &str, mode: &str, message: &str) {
+    let error = SearchError::new(stage, mode, message);
+    let duplicate = errors.iter().any(|existing| {
+        existing.stage == error.stage
+            && existing.error_type == error.error_type
+            && existing.message == error.message
+    });
+    if duplicate {
+        return;
+    }
+    eprintln!(
+        "[warn] {} に失敗しました [{}]: {}",
+        stage, error.error_type, message
+    );
+    errors.push(error);
+}
+
+/// hits と検索中に記録したエラーの組。
+#[derive(Debug, Clone)]
+pub struct SearchResult {
+    pub hits: Vec<Value>,
+    pub errors: Vec<SearchError>,
+}
+
 pub fn search(
     config: &Config,
     question: &str,
     mode: &str,
     top_k: usize,
-) -> Result<Vec<Value>, String> {
+) -> Result<SearchResult, String> {
     if !SEARCH_MODES.contains(&mode) {
         return Err(format!("unknown search mode: {mode}"));
     }
+    let mut errors = Vec::new();
     let points = match mode {
         "dense" => dense_points(config, question, top_k)?,
         "keyword" => keyword_points(config, question, top_k)?,
         "hybrid" | "hybrid-rerank" => {
-            let dense = dense_points(config, question, top_k).unwrap_or_default();
-            let keyword = keyword_points(config, question, top_k).unwrap_or_default();
+            let dense = match dense_points(config, question, top_k) {
+                Ok(points) => points,
+                Err(message) => {
+                    push_error(&mut errors, "dense", mode, &message);
+                    Vec::new()
+                }
+            };
+            let keyword = match keyword_points(config, question, top_k) {
+                Ok(points) => points,
+                Err(message) => {
+                    push_error(&mut errors, "keyword", mode, &message);
+                    Vec::new()
+                }
+            };
             rank_hybrid(&dense, &keyword, top_k)
         }
         _ => unreachable!(),
     };
-    Ok(points.iter().map(to_hit).collect())
+    Ok(SearchResult {
+        hits: points.iter().map(to_hit).collect(),
+        errors,
+    })
 }
 
 #[cfg(test)]
@@ -140,6 +202,8 @@ mod tests {
             collection: "c".to_string(),
             llama_server_url: "http://127.0.0.1:8090".to_string(),
             qdrant_url: "http://127.0.0.1:6333".to_string(),
+            allow_remote_endpoints: false,
+            allowed_endpoint_hosts: Vec::new(),
             embed_model: "qwen2.5:3b".to_string(),
             chat_model: "qwen2.5:3b".to_string(),
             vector_size: 2048,
@@ -173,6 +237,25 @@ mod tests {
             SEARCH_MODES,
             ["dense", "keyword", "hybrid", "hybrid-rerank"]
         );
+    }
+
+    #[test]
+    fn push_error_deduplicates_ignoring_mode() {
+        let mut errors = Vec::new();
+        push_error(&mut errors, "dense", "hybrid", "failed");
+        push_error(&mut errors, "dense", "other-mode", "failed");
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].mode, "hybrid");
+    }
+
+    #[test]
+    fn search_error_has_python_compatible_shape() {
+        let error = SearchError::new("dense", "hybrid", "request failed");
+        let value = serde_json::to_value(&error).unwrap();
+        assert_eq!(value["stage"], "dense");
+        assert_eq!(value["mode"], "hybrid");
+        assert_eq!(value["type"], "Error");
+        assert_eq!(value["message"], "request failed");
     }
 
     #[test]

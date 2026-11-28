@@ -32,10 +32,11 @@ ragcore/target/debug/ragcore evaluate --qrels qrels.json --output eval-results.j
 stdin JSON の op モードも後方互換で残しています。
 
 `hybrid-rerank` は `hybrid` と同一動作（LLM 再ランク未実装）です。
-回答生成・リモート接続制限・コーパス範囲制限も未実装です。
-クラウド埋め込みは opt-in で利用可能ですが、リトライ、回答生成（chat）、
-ハイブリッド検索の部分失敗の構造化記録は未実装です。
-`RAG_CLOUD_CHAT_ENABLED` は設定を受け付けますが no-op です。
+回答生成・コーパス範囲制限も未実装です。
+クラウド埋め込みは opt-in で利用可能で、429 / 500 / 502 / 503 / 504 の
+リトライとハイブリッド検索の部分失敗の構造化記録（`query --json` のトップレベル `errors` 配列）を実装済みです。
+回答生成（chat）は未実装で、`RAG_CLOUD_CHAT_ENABLED` は no-op です。
+接続先は loopback のみ既定許可で、リモートは opt-in ＋ https ＋ 許可ホストが必須です。
 
 ```bash
 echo '{"op":"chunk","text":"あいうえおかきく","chunk_size":3,"overlap":1}' \
