@@ -21,7 +21,6 @@ status: draft
 
 ### 優先度: 高
 
-- [ ] **ingest の読み取り・チャンク化失敗を fail-close 化** — `ragcore/src/ingest.rs:30,52-55,213-246` / R3-TQ, R1-AR, R4-OB / 欠落ドキュメントを無視して成功する
 - [ ] **`--recreate` の破壊的順序を見直し（staging 切り替え）** — `ragcore/src/ingest.rs:206-210` / R2-ER / 削除後に失敗すると旧数据在失う
 - [ ] **検証済み Endpoint 型を全 HTTP アダプタへ適用** — `ragcore/src/config.rs:298-363`, `cloud.rs:515-535` / R1-AR, R3-IV / ライブラリ経路でリモート opt-in を迂回可能
 
@@ -67,6 +66,7 @@ status: draft
 
 ## 完了
 
+- [x] ingest の読み取り・チャンク化失敗を fail-close 化（112 tests）
 - [x] `chrono` を `time` へ置換し RUSTSEC-2026-0543 を解消（cargo audit 通過 / 109 tests）
 - [x] Qdrant レスポンスの構造検証と truncated 伝播（109 tests）
 - [x] 範囲外 citation を `answer_error` に記録（`c7bb68f` / 105 tests / CI success）

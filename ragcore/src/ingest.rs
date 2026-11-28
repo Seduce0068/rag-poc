@@ -14,6 +14,23 @@ const EMBED_BATCH_SIZE: usize = 16;
 const UPSERT_BATCH_SIZE: usize = 64;
 const HEADING_RE: &str = "#";
 
+/// 文件内容・パス・認証情報を出さずに、失敗件数だけを伝える固定文言。
+fn read_dir_error(count: usize) -> String {
+    format!("ディレクトリ走査に失敗しました（{count} 件）")
+}
+
+fn file_type_error(count: usize) -> String {
+    format!("ファイル種別の判定に失敗しました（{count} 件）")
+}
+
+fn read_file_error(count: usize) -> String {
+    format!("ファイルの読み取りに失敗しました（{count} 件）")
+}
+
+fn chunk_error(count: usize) -> String {
+    format!("チャンク化に失敗しました（{count} 件）")
+}
+
 fn is_heading(line: &str) -> bool {
     line.starts_with(HEADING_RE)
 }
@@ -25,16 +42,32 @@ fn heading_text(line: &str) -> &str {
 fn collect_markdown(root: &Path) -> Result<Vec<PathBuf>, String> {
     let mut files = Vec::new();
     let mut stack = vec![root.to_path_buf()];
+    let mut read_dir_errors = 0usize;
+    let mut file_type_errors = 0usize;
     while let Some(dir) = stack.pop() {
-        let entries = fs::read_dir(&dir).map_err(|e| format!("read_dir failed: {e}"))?;
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if entry
-                .file_type()
-                .map(|kind| kind.is_symlink())
-                .unwrap_or(false)
-            {
+        let entries = match fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(_) => {
+                read_dir_errors += 1;
                 continue;
+            }
+        };
+        for entry in entries {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(_) => {
+                    read_dir_errors += 1;
+                    continue;
+                }
+            };
+            let path = entry.path();
+            match entry.file_type() {
+                Ok(kind) if kind.is_symlink() => continue,
+                Ok(_) => {}
+                Err(_) => {
+                    file_type_errors += 1;
+                    continue;
+                }
             }
             if path.is_dir() {
                 stack.push(path);
@@ -43,16 +76,26 @@ fn collect_markdown(root: &Path) -> Result<Vec<PathBuf>, String> {
             }
         }
     }
+    // 一件でも失敗があれば、内容を返さず明示的に失敗を伝播させる。
+    if read_dir_errors > 0 {
+        return Err(read_dir_error(read_dir_errors));
+    }
+    if file_type_errors > 0 {
+        return Err(file_type_error(file_type_errors));
+    }
     files.sort();
     Ok(files)
 }
 
 /// 1 ファイルを見出し区切り＋文字ウィンドウで分割する。
-pub fn iter_chunks(path: &Path, root: &Path, chunk_size: usize, overlap: usize) -> Vec<Value> {
-    let text = match fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(_) => return Vec::new(),
-    };
+/// 読み取り・チャンク化の失敗は黙って空にせず `Err` で伝播する。
+pub fn iter_chunks(
+    path: &Path,
+    root: &Path,
+    chunk_size: usize,
+    overlap: usize,
+) -> Result<Vec<Value>, String> {
+    let text = fs::read_to_string(path).map_err(|_| read_file_error(1))?;
     let source = path
         .strip_prefix(root)
         .unwrap_or(path)
@@ -92,6 +135,7 @@ pub fn iter_chunks(path: &Path, root: &Path, chunk_size: usize, overlap: usize) 
 
     let mut points = Vec::new();
     let mut index = 0u64;
+    let mut chunk_errors = 0usize;
     for section in sections {
         let first_line = section.lines().next().unwrap_or("");
         let (prefix, body) = if is_heading(first_line) {
@@ -100,7 +144,14 @@ pub fn iter_chunks(path: &Path, root: &Path, chunk_size: usize, overlap: usize) 
         } else {
             (None, section)
         };
-        let mut pieces = chunk_text(&body, chunk_size, overlap).unwrap_or_default();
+        let mut pieces = match chunk_text(&body, chunk_size, overlap) {
+            Ok(pieces) => pieces,
+            Err(_) => {
+                chunk_errors += 1;
+                continue;
+            }
+        };
+        // 見出しのみのセクションで空チャンクを残す挙動は旧 Python 契約のため維持する。
         if pieces.is_empty() {
             pieces.push(String::new());
         }
@@ -122,7 +173,10 @@ pub fn iter_chunks(path: &Path, root: &Path, chunk_size: usize, overlap: usize) 
             index += 1;
         }
     }
-    points
+    if chunk_errors > 0 {
+        return Err(chunk_error(chunk_errors));
+    }
+    Ok(points)
 }
 
 /// 埋め込み器の経路。`cloud.enabled` で一度だけ選び、バッチ間で使い回す。
@@ -196,6 +250,20 @@ pub fn run(config: &Config, corpus_dir: &Path, recreate: bool, yes: bool) -> Res
         return Err("corpus dir not found".to_string());
     }
 
+    // 走査・読み取り・チャンク化は HTTP リクエストより前に完了させる。
+    // 失敗した場合は collection 変更も埋め込みも行わない。
+    let files = collect_markdown(&corpus_dir)?;
+    let mut points = Vec::new();
+    for path in &files {
+        points.extend(iter_chunks(
+            path,
+            &corpus_dir,
+            config.chunk_size,
+            config.chunk_overlap,
+        )?);
+    }
+    eprintln!("[ingest] files={} chunks={}", files.len(), points.len());
+
     let embedder = Embedder::from_config(config)?;
     let qdrant = QdrantClient::new(
         &config.qdrant_url,
@@ -209,18 +277,6 @@ pub fn run(config: &Config, corpus_dir: &Path, recreate: bool, yes: bool) -> Res
     if !qdrant.collection_exists()? {
         qdrant.create_collection(resolved_vector_size(config))?;
     }
-
-    let files = collect_markdown(&corpus_dir)?;
-    let mut points = Vec::new();
-    for path in &files {
-        points.extend(iter_chunks(
-            path,
-            &corpus_dir,
-            config.chunk_size,
-            config.chunk_overlap,
-        ));
-    }
-    eprintln!("[ingest] files={} chunks={}", files.len(), points.len());
 
     for batch in points.chunks_mut(EMBED_BATCH_SIZE) {
         let texts: Vec<String> = batch
@@ -324,12 +380,56 @@ mod tests {
         let _ = fs::create_dir_all(&dir);
         let path = dir.join("doc.md");
         fs::write(&path, "# Title\nあいうえおかきくけこ").unwrap();
-        let points = iter_chunks(&path, &dir, 4, 1);
+        let points = iter_chunks(&path, &dir, 4, 1).unwrap();
         assert!(!points.is_empty());
         assert!(points[0]["payload"]["text"]
             .as_str()
             .unwrap()
             .starts_with("# Title"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 読み取り失敗を模した純粋なヘルパー: 固定文言かつ件数以外の情報を出さない。
+    #[test]
+    fn read_failure_errors_report_only_fixed_text_and_count() {
+        let err = read_file_error(1);
+        assert_eq!(err, "ファイルの読み取りに失敗しました（1 件）");
+        // パス・内容・認証情報が混入しないこと。
+        assert!(!err.contains('/'));
+        assert!(!err.contains("secret"));
+        assert_eq!(chunk_error(2), "チャンク化に失敗しました（2 件）");
+        assert_eq!(read_dir_error(3), "ディレクトリ走査に失敗しました（3 件）");
+        assert_eq!(
+            file_type_error(4),
+            "ファイル種別の判定に失敗しました（4 件）"
+        );
+    }
+
+    /// 見出しのみのセクションは空チャンクを 1 件残す（旧 Python 契約・回帰維持）。
+    #[test]
+    fn iter_chunks_keeps_empty_body_as_one_empty_chunk() {
+        let dir = std::env::temp_dir().join("ragcore-ingest-empty-section-test");
+        let _ = fs::create_dir_all(&dir);
+        let path = dir.join("headings-only.md");
+        fs::write(&path, "# One\n## Two\n### Three\n").unwrap();
+        let points = iter_chunks(&path, &dir, 800, 100).unwrap();
+        // 3 つの見出しセクションそれぞれに空チャンクが 1 件残る。
+        assert_eq!(points.len(), 3);
+        assert!(points
+            .iter()
+            .all(|p| p["payload"]["text"].as_str().unwrap().is_empty()));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// オーバーラップ不正による chunk_text 失敗は Err として伝播する。
+    #[test]
+    fn iter_chunks_propagates_chunk_text_failure() {
+        let dir = std::env::temp_dir().join("ragcore-ingest-chunk-error-test");
+        let _ = fs::create_dir_all(&dir);
+        let path = dir.join("doc.md");
+        fs::write(&path, "# Title\n本文").unwrap();
+        let err = iter_chunks(&path, &dir, 4, 4).unwrap_err();
+        assert_eq!(err, "チャンク化に失敗しました（1 件）");
         let _ = fs::remove_dir_all(&dir);
     }
 
