@@ -101,6 +101,14 @@ fn run_cli(cli: Cli) -> Result<(), String> {
             let k = top_k.filter(|&value| value > 0).unwrap_or(config.top_k);
             let result = ragcore::query::search(&config, &question, &mode, k)?;
             let hits = result.hits;
+            let (answer, answer_error) = ragcore::query::generate_answer(&config, &question, &hits);
+            let mut seen = std::collections::HashSet::new();
+            let sources: Vec<Value> = hits
+                .iter()
+                .filter_map(|hit| hit["source"].as_str())
+                .filter(|source| seen.insert((*source).to_string()))
+                .map(|source| json!(source))
+                .collect();
             if as_json {
                 println!(
                     "{}",
@@ -108,6 +116,10 @@ fn run_cli(cli: Cli) -> Result<(), String> {
                         "mode": mode,
                         "hits": hits,
                         "errors": result.errors,
+                        "answer": answer,
+                        "sources": sources,
+                        "answer_error": answer_error,
+                        "rerank_unchanged": ragcore::search::rerank_unchanged_status(result.unchanged),
                     }))
                     .map_err(|e| e.to_string())?
                 );
@@ -115,6 +127,7 @@ fn run_cli(cli: Cli) -> Result<(), String> {
                 for hit in hits {
                     println!("{}\t{}\t{}", hit["score"], hit["source"], hit["text"]);
                 }
+                println!("\n{}", answer);
             }
             Ok(())
         }

@@ -49,6 +49,7 @@ pub struct Config {
     pub top_k: usize,
     pub question_max_chars: usize,
     pub rerank_max_docs: usize,
+    pub rerank_prompt_style: String,
     pub embed_prefix_query: String,
     pub embed_prefix_passage: String,
     pub llama_timeout_secs: f64,
@@ -161,6 +162,7 @@ impl Config {
             top_k: env_usize("RAG_TOP_K", 10)?,
             question_max_chars: env_usize("RAG_QUESTION_MAX_CHARS", 2000)?,
             rerank_max_docs: env_usize("RAG_RERANK_MAX_DOCS", 5)?,
+            rerank_prompt_style: env_str("RAG_RERANK_PROMPT_STYLE", "strict"),
             embed_prefix_query: env_str("RAG_EMBED_PREFIX_QUERY", default_query),
             embed_prefix_passage: env_str("RAG_EMBED_PREFIX_PASSAGE", default_passage),
             llama_timeout_secs: env_f64("LLAMA_TIMEOUT", 300.0),
@@ -170,6 +172,11 @@ impl Config {
         };
         config.validate()?;
         Ok(config)
+    }
+
+    /// 回答生成の実効タイムアウト（クラウド側の上限を超えない）。
+    pub fn effective_answer_timeout(&self) -> f64 {
+        self.answer_timeout_secs.min(self.cloud.timeout_secs)
     }
 
     /// クラウド埋め込みの期待次元を解決する（明示 > 既知モデル表）。
@@ -228,6 +235,9 @@ impl Config {
         }
         if self.vector_size == 0 {
             return Err("RAG_VECTOR_SIZE must be positive".to_string());
+        }
+        if !self.answer_timeout_secs.is_finite() || self.answer_timeout_secs <= 0.0 {
+            return Err("RAG_ANSWER_TIMEOUT must be positive".to_string());
         }
         if self.embed_model.to_lowercase().contains("ruri") {
             if self.vector_size != 768 {
@@ -309,6 +319,7 @@ mod tests {
             top_k: 10,
             question_max_chars: 2000,
             rerank_max_docs: 5,
+            rerank_prompt_style: "strict".to_string(),
             embed_prefix_query: String::new(),
             embed_prefix_passage: String::new(),
             llama_timeout_secs: 300.0,

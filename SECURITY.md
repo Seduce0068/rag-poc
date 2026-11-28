@@ -16,6 +16,9 @@ stale_after: "2026-12-26"
 ## 公開リポジトリについて
 
 本リポジトリは公開リポジトリである。秘密情報（API キー・トークン・パスワード）、内部パス、ホスト名、個人情報を Issue・PR・コミット・成果物へ記載しない。現行 Rust 実装は既定でローカルの llama-server / Qdrant のみに接続し、外部送信も課金も発生しない。`RAG_CLOUD_ENABLED=1` を明示した場合のみ opencodeGO の `/embeddings` へ質問文・チャンク本文・ベクトルが送信され、利用料金が発生し得る。接続先は https が必須で、API キーはログ・エラー・成果物へ出力しない。
+さらに `RAG_CLOUD_CHAT_ENABLED=1`（`RAG_CLOUD_ENABLED=1` が必須）では、全 query で
+質問文とチャンク本文が `/chat/completions` へ送信され、`x-opencode-session` ヘッダが
+付与される。これらのクラウド経路は既定では無効。
 
 ## 報告先
 

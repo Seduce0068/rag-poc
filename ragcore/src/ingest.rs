@@ -121,7 +121,7 @@ pub fn iter_chunks(path: &Path, root: &Path, chunk_size: usize, overlap: usize) 
 /// 埋め込み器の経路。`cloud.enabled` で一度だけ選び、バッチ間で使い回す。
 enum Embedder {
     Local(crate::llama::LlamaClient),
-    Cloud(crate::cloud::CloudClient),
+    Cloud(Box<crate::cloud::CloudClient>),
 }
 
 /// クラウド経路を選ぶかどうか（IO を伴わない純粋判定）。
@@ -141,7 +141,9 @@ fn resolved_vector_size(config: &Config) -> usize {
 impl Embedder {
     fn from_config(config: &Config) -> Result<Self, String> {
         if use_cloud_embedder(config) {
-            Ok(Self::Cloud(crate::cloud::CloudClient::from_config(config)?))
+            Ok(Self::Cloud(Box::new(
+                crate::cloud::CloudClient::from_config(config)?,
+            )))
         } else {
             Ok(Self::Local(crate::llama::LlamaClient::new(
                 &config.llama_server_url,
@@ -255,6 +257,7 @@ mod tests {
             top_k: 10,
             question_max_chars: 2000,
             rerank_max_docs: 5,
+            rerank_prompt_style: "strict".to_string(),
             embed_prefix_query: String::new(),
             embed_prefix_passage: String::new(),
             llama_timeout_secs: 300.0,

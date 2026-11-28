@@ -1,4 +1,4 @@
-//! opencodeGO の OpenAI 互換 `/embeddings` を呼ぶ blocking クライアント。
+//! opencodeGO の OpenAI 互換 `/embeddings` / `/chat/completions` を呼ぶ blocking クライアント。
 //!
 //! secrecy に関する約束:
 //! - API キー値は保持するが、エラー・ログ・`Debug` 出力には一切出さない。
@@ -8,14 +8,20 @@
 //! - 429 / 500 / 502 / 503 / 504 のみ最大 3 回リトライ。
 //!   Retry-After は 60 秒で cap し、解釈不能値も 60 秒待つ（fail-safe）。
 //! - 接続先は https のみ。API キーを平文 HTTP へ送らない。
+//! - chat リクエストだけに会話単位の `x-opencode-session` ヘッダを付与する。
+//!   embed リクエストには付与しない。
+//! - usage は有限数値と既知の billing_source 列挙値だけを保持し、
+//!   生 usage はホワイトリストのキーのみを直近 1 リクエスト分だけ保持する。
 
 use crate::config::Config;
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{json, Map, Value};
 use std::fmt;
+use std::sync::Mutex;
 use std::time::Duration;
 
 const EMBEDDINGS_PATH: &str = "/embeddings";
+const CHAT_PATH: &str = "/chat/completions";
 const DEFAULT_TIMEOUT_SECS: f64 = 60.0;
 const MIN_TIMEOUT_SECS: f64 = 1.0;
 const MAX_TIMEOUT_SECS: f64 = 86_400.0;
@@ -41,6 +47,40 @@ fn build_request_body<'a>(
         input: texts,
         dimensions,
     }
+}
+
+/// chat POST ボディ。`Debug` を実装しないのは message 本文を漏らさないため。
+#[derive(Serialize)]
+struct ChatRequest<'a> {
+    model: &'a str,
+    messages: &'a [Value],
+    temperature: f64,
+}
+
+fn build_chat_body<'a>(model: &'a str, messages: &'a [Value], temperature: f64) -> ChatRequest<'a> {
+    ChatRequest {
+        model,
+        messages,
+        temperature,
+    }
+}
+
+/// chat リクエストに付けるヘッダ名（埋め込みには付与しない）。
+pub fn chat_header_name() -> &'static str {
+    "x-opencode-session"
+}
+
+/// `choices[0].message.content` を取り出す。欠損時は本文をエコーしない固定文言。
+fn parse_chat_content(payload: &Value) -> Result<String, String> {
+    let content = payload
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("content"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| "chat response has no message content".to_string())?;
+    Ok(content.to_string())
 }
 
 /// 数値列を検証して `f64` ベクトルに確定させる（空・次元不一致・非有限数を拒否）。
@@ -109,10 +149,14 @@ fn request_timeout(secs: f64) -> Duration {
     Duration::from_secs_f64(secs)
 }
 
-/// ベース URL は `trim_end_matches('/')` 後に `/embeddings` を付与する。
+/// ベース URL は `trim_end_matches('/')` 後にパスを付与する。
 /// base_url 側に `/v1` が含まれるため、ここでは `/v1` を足さない。
 fn embeddings_endpoint(base_url: &str) -> String {
     format!("{}{EMBEDDINGS_PATH}", base_url.trim_end_matches('/'))
+}
+
+fn chat_endpoint(base_url: &str) -> String {
+    format!("{}{CHAT_PATH}", base_url.trim_end_matches('/'))
 }
 
 /// 再試行回数（総試行回数は 1 + この値）。
@@ -140,21 +184,261 @@ fn retry_after(value: &str) -> Option<Duration> {
         .or(Some(Duration::from_secs(MAX_RETRY_AFTER_SECS)))
 }
 
-/// opencodeGO の `/embeddings` クライアント。フィールドはすべて private。
+/// URL / `file://` / ホーム以下はじめの絶対パスを `<masked>` へ置換する。
+fn mask_urls_and_paths(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    loop {
+        let starts = [
+            rest.find("http://"),
+            rest.find("https://"),
+            rest.find("file://"),
+            rest.find("/home/"),
+        ];
+        let Some(start) = starts.into_iter().flatten().min() else {
+            out.push_str(rest);
+            break;
+        };
+        out.push_str(&rest[..start]);
+        out.push_str("<masked>");
+        let after = &rest[start..];
+        let end = after
+            .char_indices()
+            .take_while(|(_, ch)| !ch.is_whitespace() && *ch != ',' && *ch != ';' && *ch != '"')
+            .map(|(index, ch)| index + ch.len_utf8())
+            .last()
+            .unwrap_or(0);
+        rest = &after[end..];
+    }
+    out
+}
+
+/// エラー文言に埋め込まれうる Bearer トークン / `sk-` トークンを落とす簡易マスク。
+/// 実際の秘密情報はコードに置かない（テストもダミー文字列のみ）。
+pub fn mask_error_message(message: &str) -> String {
+    let message = mask_urls_and_paths(message);
+    let mut out = String::with_capacity(message.len());
+    let mut rest = &message[..];
+    while !rest.is_empty() {
+        let bearer = rest.find("Bearer ").map(|index| (index, "Bearer ".len()));
+        let sk = rest.find("sk-").map(|index| (index, "sk-".len()));
+        let hit = match (bearer, sk) {
+            (Some(left), Some(right)) => Some(if left.0 <= right.0 { left } else { right }),
+            (Some(left), None) => Some(left),
+            (None, Some(right)) => Some(right),
+            (None, None) => None,
+        };
+        let Some((start, prefix_len)) = hit else {
+            out.push_str(rest);
+            break;
+        };
+        out.push_str(&rest[..start]);
+        out.push_str("<masked>");
+        let after = &rest[start + prefix_len..];
+        let token_len = after
+            .char_indices()
+            .take_while(|(_, ch)| !ch.is_whitespace() && *ch != ',' && *ch != ';' && *ch != '"')
+            .map(|(index, ch)| index + ch.len_utf8())
+            .last()
+            .unwrap_or(0);
+        rest = &after[token_len..];
+    }
+    out
+}
+
+/// `billing_source` の既知列挙値。これ以外の文字列は破棄する。
+const BILLING_SOURCES: [&str; 5] = ["free", "balance", "go", "go-plus", "byok"];
+
+/// usage の蓄積状態。実レスポンスの値ではなく有限数値だけを保持する。
+#[derive(Debug, Default)]
+struct UsageSnapshot {
+    prompt_tokens: f64,
+    completion_tokens: f64,
+    total_tokens: f64,
+    cost: f64,
+    cost_usd: f64,
+    allowance: f64,
+    list_cost: f64,
+    billing_source: Option<String>,
+    last_raw: Option<Value>,
+}
+
+/// chat / embed の使用量。`&self` から更新できるよう内部を `Mutex` にしている
+/// （`CloudClient::usage()` が `&Usage` を返す契約を満たすため）。
+#[derive(Debug, Default)]
+pub struct Usage {
+    inner: Mutex<UsageSnapshot>,
+}
+
+impl Usage {
+    pub fn new() -> Self {
+        Self {
+            inner: Mutex::new(UsageSnapshot::default()),
+        }
+    }
+
+    fn snapshot(&self) -> std::sync::MutexGuard<'_, UsageSnapshot> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    pub fn reset(&mut self) {
+        *self.snapshot() = UsageSnapshot::default();
+    }
+
+    /// 呼び出し開始時に `&self` から状態をクリアする。
+    fn begin_request(&self) {
+        *self.snapshot() = UsageSnapshot::default();
+    }
+
+    /// 加算済み usage。`billing_source` は既知値があるときだけ現れる。
+    pub fn last(&self) -> Value {
+        let snapshot = self.snapshot();
+        let mut out = Map::new();
+        for (key, number) in [
+            ("prompt_tokens", snapshot.prompt_tokens),
+            ("completion_tokens", snapshot.completion_tokens),
+            ("total_tokens", snapshot.total_tokens),
+            ("cost", snapshot.cost),
+            ("cost_usd", snapshot.cost_usd),
+            ("allowance", snapshot.allowance),
+            ("list_cost", snapshot.list_cost),
+        ] {
+            out.insert(key.to_string(), json!(number));
+        }
+        if let Some(source) = &snapshot.billing_source {
+            out.insert("billing_source".to_string(), json!(source));
+        }
+        Value::Object(out)
+    }
+
+    /// 直近 1 リクエスト分のホワイトリスト済み生 usage。
+    pub fn last_raw(&self) -> Option<Value> {
+        self.snapshot().last_raw.clone()
+    }
+
+    fn accumulate(&self, value: &Value) {
+        let mut snapshot = self.snapshot();
+        if let Some(number) = top_number(value, "prompt_tokens") {
+            snapshot.prompt_tokens += number;
+        }
+        if let Some(number) = top_number(value, "completion_tokens") {
+            snapshot.completion_tokens += number;
+        }
+        if let Some(number) = top_number(value, "total_tokens") {
+            snapshot.total_tokens += number;
+        }
+        if let Some(number) = top_number(value, "cost") {
+            snapshot.cost += number;
+        }
+        if let Some(number) = top_number(value, "cost_usd") {
+            snapshot.cost_usd += number;
+        }
+        if let Some(number) = special_number(value, "allowance") {
+            snapshot.allowance += number;
+        }
+        if let Some(number) = special_number(value, "list_cost") {
+            snapshot.list_cost += number;
+        }
+        if let Some(source) = billing_source(value) {
+            snapshot.billing_source = Some(source.to_string());
+        }
+        snapshot.last_raw = Some(raw_usage(value));
+    }
+}
+
+/// 公開 API の加算エントリポイント。`&mut Usage` を受け取る。
+pub fn accumulate_usage(usage: &mut Usage, value: &Value) {
+    usage.accumulate(value);
+}
+
+/// レスポンスの `usage` ラッパー（無ければルート）を返す。
+fn usage_container(value: &Value) -> &Value {
+    match value.get("usage") {
+        Some(usage) if usage.is_object() => usage,
+        _ => value,
+    }
+}
+
+fn finite_number(value: Option<&Value>) -> Option<f64> {
+    value
+        .and_then(Value::as_f64)
+        .filter(|number| number.is_finite())
+}
+
+fn top_number(value: &Value, key: &str) -> Option<f64> {
+    finite_number(usage_container(value).get(key)).or_else(|| finite_number(value.get(key)))
+}
+
+fn opencode_field<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
+    usage_container(value)
+        .get("opencode")
+        .and_then(|opencode| opencode.get(key))
+        .or_else(|| value.get("opencode").and_then(|opencode| opencode.get(key)))
+}
+
+/// `opencode.allowance` / `opencode.list_cost` を優先し、平置きも許容する。
+fn special_number(value: &Value, key: &str) -> Option<f64> {
+    finite_number(opencode_field(value, key)).or_else(|| top_number(value, key))
+}
+
+fn billing_source(value: &Value) -> Option<&str> {
+    let candidate = opencode_field(value, "billing_source")
+        .or_else(|| usage_container(value).get("billing_source"))
+        .or_else(|| value.get("billing_source"))
+        .and_then(Value::as_str)?;
+    BILLING_SOURCES.contains(&candidate).then_some(candidate)
+}
+
+/// 直近リクエストの生 usage をホワイトリストだけに絞る。
+fn raw_usage(value: &Value) -> Value {
+    let mut raw = Map::new();
+    for key in [
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "cost",
+        "cost_usd",
+    ] {
+        if let Some(number) = top_number(value, key) {
+            raw.insert(key.to_string(), json!(number));
+        }
+    }
+    for key in ["allowance", "list_cost"] {
+        if let Some(number) = special_number(value, key) {
+            raw.insert(key.to_string(), json!(number));
+        }
+    }
+    if let Some(source) = billing_source(value) {
+        raw.insert("billing_source".to_string(), json!(source));
+    }
+    Value::Object(raw)
+}
+
+/// opencodeGO の `/embeddings` と `/chat/completions` クライアント。フィールドはすべて private。
 pub struct CloudClient {
     http: reqwest::blocking::Client,
     endpoint: String,
+    chat_endpoint: String,
     model: String,
+    chat_model: String,
     dimensions: Option<usize>,
+    chat_enabled: bool,
+    chat_timeout: Duration,
     api_key: String,
+    usage: Usage,
 }
 
-/// API キー値を出力しないカスタム `Debug`。
+/// API キー値と接続先 URL を出力しないカスタム `Debug`。
 impl fmt::Debug for CloudClient {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("CloudClient")
             .field("model", &self.model)
+            .field("chat_model", &self.chat_model)
             .field("dimensions", &self.dimensions)
+            .field("chat_enabled", &self.chat_enabled)
+            .field("usage", &self.usage)
             .field("api_key", &"<redacted>")
             .finish()
     }
@@ -192,9 +476,14 @@ impl CloudClient {
         Ok(Self {
             http,
             endpoint: embeddings_endpoint(&cloud.base_url),
+            chat_endpoint: chat_endpoint(&cloud.base_url),
             model: cloud.embed_model.clone(),
+            chat_model: cloud.model.clone(),
             dimensions: config.cloud_embed_dimension(),
+            chat_enabled: cloud.chat_enabled,
+            chat_timeout: request_timeout(config.effective_answer_timeout()),
             api_key: api_key.to_string(),
+            usage: Usage::new(),
         })
     }
 
@@ -203,6 +492,7 @@ impl CloudClient {
     /// `reqwest::Error` の `Display` は URL を含む可能性があるため、そのまま
     /// エラー文言にせず固定文言へ変換する。レスポンス本文も一切保持しない。
     pub fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f64>>, String> {
+        self.usage.begin_request();
         if texts.is_empty() {
             return Ok(Vec::new());
         }
@@ -235,7 +525,9 @@ impl CloudClient {
                 let payload: Value = response
                     .json()
                     .map_err(|_| "invalid cloud embeddings response".to_string())?;
-                return parse_embeddings(&payload, texts.len(), self.dimensions);
+                let vectors = parse_embeddings(&payload, texts.len(), self.dimensions)?;
+                self.usage.accumulate(&payload);
+                return Ok(vectors);
             }
 
             let code = status.as_u16();
@@ -252,6 +544,81 @@ impl CloudClient {
             std::thread::sleep(delay);
         }
     }
+
+    /// chat 補完を呼び、先頭 choice の message.content を返す。
+    ///
+    /// `chat_enabled=false` なら HTTP を一切送らず即座にエラーを返す。
+    /// ヘッダは bearer_auth / Content-Type: application/json /
+    /// `x-opencode-session: session_id` の 3 つだけ。
+    pub fn chat(
+        &self,
+        messages: &[serde_json::Value],
+        temperature: f64,
+        session_id: &str,
+    ) -> Result<String, String> {
+        self.usage.begin_request();
+        if !self.chat_enabled {
+            return Err("cloud chat is disabled".to_string());
+        }
+
+        let body = build_chat_body(&self.chat_model, messages, temperature);
+        let mut failures = 0usize;
+        loop {
+            let response = self
+                .http
+                .post(&self.chat_endpoint)
+                .timeout(self.chat_timeout)
+                .bearer_auth(&self.api_key)
+                .header(
+                    reqwest::header::CONTENT_TYPE,
+                    reqwest::header::HeaderValue::from_static("application/json"),
+                )
+                .header(chat_header_name(), session_id)
+                .json(&body)
+                .send()
+                .map_err(|_| mask_error_message("cloud chat request failed"));
+
+            let response = match response {
+                Ok(response) => response,
+                Err(err) => {
+                    if failures >= RETRY_TOTAL {
+                        return Err(err);
+                    }
+                    failures += 1;
+                    std::thread::sleep(retry_backoff(failures));
+                    continue;
+                }
+            };
+
+            let status = response.status();
+            if status.is_success() {
+                let payload: Value = response
+                    .json()
+                    .map_err(|_| "invalid cloud chat response".to_string())?;
+                let content = parse_chat_content(&payload)?;
+                self.usage.accumulate(&payload);
+                return Ok(content);
+            }
+
+            let code = status.as_u16();
+            if !RETRY_STATUSES.contains(&code) || failures >= RETRY_TOTAL {
+                return Err(mask_error_message(&format!("cloud chat HTTP {code}")));
+            }
+            let delay = response
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|value| value.to_str().ok())
+                .and_then(retry_after)
+                .unwrap_or_else(|| retry_backoff(failures + 1));
+            failures += 1;
+            std::thread::sleep(delay);
+        }
+    }
+
+    /// 直近の chat / embed で蓄積した usage。
+    pub fn usage(&self) -> &Usage {
+        &self.usage
+    }
 }
 
 #[cfg(test)]
@@ -260,7 +627,7 @@ mod tests {
     use crate::config::{CloudConfig, Config};
     use std::path::PathBuf;
 
-    /// ダミーキー文字列のみを使うテスト用設定。
+    /// ダミーキー文字列のみを使うテスト用設定（HTTP は一切送らない）。
     fn test_config() -> Config {
         Config {
             corpus_dir: PathBuf::from("docs"),
@@ -277,6 +644,7 @@ mod tests {
             top_k: 10,
             question_max_chars: 2000,
             rerank_max_docs: 5,
+            rerank_prompt_style: "strict".to_string(),
             embed_prefix_query: String::new(),
             embed_prefix_passage: String::new(),
             llama_timeout_secs: 300.0,
@@ -337,6 +705,198 @@ mod tests {
             embeddings_endpoint("https://example.invalid/v1"),
             "https://example.invalid/v1/embeddings"
         );
+    }
+
+    #[test]
+    fn chat_header_name_is_x_opencode_session() {
+        assert_eq!(chat_header_name(), "x-opencode-session");
+    }
+
+    #[test]
+    fn chat_endpoint_trims_trailing_slashes_without_adding_v1() {
+        assert_eq!(
+            chat_endpoint("https://example.invalid/v1///"),
+            "https://example.invalid/v1/chat/completions"
+        );
+        assert_eq!(
+            chat_endpoint("https://example.invalid/v1"),
+            "https://example.invalid/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn chat_request_body_has_model_messages_and_temperature() {
+        let messages = vec![json!({"role": "user", "content": "DUMMY_INPUT"})];
+        let body = serde_json::to_value(build_chat_body("chat-model", &messages, 0.25))
+            .expect("serializable chat request");
+        let object = body.as_object().expect("chat request is an object");
+        assert_eq!(object.len(), 3);
+        assert_eq!(
+            object.get("model").and_then(Value::as_str),
+            Some("chat-model")
+        );
+        assert_eq!(
+            object["messages"][0]["content"].as_str(),
+            Some("DUMMY_INPUT")
+        );
+        assert_eq!(
+            object.get("temperature").and_then(Value::as_f64),
+            Some(0.25)
+        );
+        assert!(!object.contains_key(chat_header_name()));
+    }
+
+    #[test]
+    fn chat_content_parse_uses_first_choice_and_fixed_error() {
+        let payload = json!({
+            "choices": [
+                {"message": {"content": "DUMMY_ANSWER"}},
+                {"message": {"content": "SECOND_ANSWER"}}
+            ]
+        });
+        assert_eq!(
+            parse_chat_content(&payload).expect("first content"),
+            "DUMMY_ANSWER"
+        );
+
+        let missing = json!({"choices": [{"message": {}}], "note": "SECRET_BODY"});
+        let error = parse_chat_content(&missing).unwrap_err();
+        assert_eq!(error, "chat response has no message content");
+        assert!(!error.contains("SECRET_BODY"));
+    }
+
+    #[test]
+    fn disabled_chat_fails_immediately_without_secrets() {
+        let config = test_config();
+        let client = CloudClient::from_config(&config).expect("enabled cloud config");
+        let messages = vec![json!({"role": "user", "content": "SECRET_INPUT"})];
+        let error = client
+            .chat(&messages, 0.0, "dummy-session")
+            .expect_err("chat disabled");
+        assert_eq!(error, "cloud chat is disabled");
+        assert!(!error.contains("SECRET_INPUT"));
+        assert!(!error.contains("example.invalid"));
+        assert!(!error.contains("dummy-test-key"));
+        assert_eq!(client.usage().last()["prompt_tokens"].as_f64(), Some(0.0));
+        assert!(client.usage().last_raw().is_none());
+    }
+
+    #[test]
+    fn usage_accumulates_finite_numbers_and_rejects_non_finite() {
+        let mut usage = Usage::new();
+        let first = json!({
+            "usage": {
+                "prompt_tokens": 2.0,
+                "completion_tokens": 1.0,
+                "total_tokens": 3.0,
+                "cost": 0.0,
+                "cost_usd": f64::INFINITY,
+                "opencode": {"allowance": 0.25, "list_cost": 1.5},
+                "secret_field": "SECRET_VALUE"
+            }
+        });
+        accumulate_usage(&mut usage, &first);
+
+        let second = json!({
+            "usage": {
+                "prompt_tokens": 4.0,
+                "cost_usd": f64::NAN,
+                "opencode": {"allowance": f64::NEG_INFINITY}
+            }
+        });
+        accumulate_usage(&mut usage, &second);
+
+        let last = usage.last();
+        assert_eq!(last["prompt_tokens"].as_f64(), Some(6.0));
+        assert_eq!(last["completion_tokens"].as_f64(), Some(1.0));
+        assert_eq!(last["total_tokens"].as_f64(), Some(3.0));
+        assert_eq!(last["cost"].as_f64(), Some(0.0));
+        assert_eq!(last["cost_usd"].as_f64(), Some(0.0));
+        assert_eq!(last["allowance"].as_f64(), Some(0.25));
+        assert_eq!(last["list_cost"].as_f64(), Some(1.5));
+
+        let raw = usage.last_raw().expect("last raw usage");
+        let raw_text = raw.to_string();
+        assert_eq!(raw["prompt_tokens"].as_f64(), Some(4.0));
+        assert!(!raw_text.contains("secret_field"));
+        assert!(!raw_text.contains("SECRET_VALUE"));
+        assert!(!raw_text.contains("cost_usd"));
+        let keys = raw.as_object().expect("raw is object");
+        assert!(keys.keys().all(|key| [
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+            "cost",
+            "cost_usd",
+            "allowance",
+            "list_cost",
+            "billing_source"
+        ]
+        .contains(&key.as_str())));
+    }
+
+    #[test]
+    fn billing_source_unknown_values_are_discarded() {
+        let mut usage = Usage::new();
+        accumulate_usage(
+            &mut usage,
+            &json!({"usage": {"opencode": {"billing_source": "unknown-source"}}}),
+        );
+        assert!(usage.last().get("billing_source").is_none());
+        assert!(!usage
+            .last_raw()
+            .expect("raw")
+            .to_string()
+            .contains("unknown-source"));
+
+        accumulate_usage(
+            &mut usage,
+            &json!({"usage": {"opencode": {"billing_source": "go"}}}),
+        );
+        assert_eq!(usage.last()["billing_source"].as_str(), Some("go"));
+        assert_eq!(
+            usage.last_raw().expect("raw")["billing_source"].as_str(),
+            Some("go")
+        );
+
+        // 未知値は既知の最後の値を上書きしない。
+        accumulate_usage(
+            &mut usage,
+            &json!({"opencode": {"billing_source": "mystery"}}),
+        );
+        assert_eq!(usage.last()["billing_source"].as_str(), Some("go"));
+        assert!(!usage
+            .last_raw()
+            .expect("raw")
+            .to_string()
+            .contains("mystery"));
+    }
+
+    #[test]
+    fn usage_reset_clears_accumulated_state() {
+        let mut usage = Usage::new();
+        accumulate_usage(
+            &mut usage,
+            &json!({"usage": {"prompt_tokens": 7.0, "opencode": {"billing_source": "byok"}}}),
+        );
+        assert_eq!(usage.last()["prompt_tokens"].as_f64(), Some(7.0));
+        usage.reset();
+        assert_eq!(usage.last()["prompt_tokens"].as_f64(), Some(0.0));
+        assert!(usage.last().get("billing_source").is_none());
+        assert!(usage.last_raw().is_none());
+    }
+
+    #[test]
+    fn mask_error_message_redacts_bearer_and_sk_tokens() {
+        assert_eq!(
+            mask_error_message("request failed: Bearer DUMMY_TOKEN"),
+            "request failed: <masked>"
+        );
+        assert_eq!(
+            mask_error_message("prefix sk-DUMMY and sk-OTHER"),
+            "prefix <masked> and <masked>"
+        );
+        assert_eq!(mask_error_message("plain error"), "plain error");
     }
 
     #[test]
@@ -434,10 +994,12 @@ mod tests {
 
     #[test]
     fn debug_output_redacts_api_key() {
-        let config = test_config();
+        let mut config = test_config();
+        config.cloud.chat_enabled = true;
         let client = CloudClient::from_config(&config).expect("enabled config");
         let rendered = format!("{client:?}");
         assert!(rendered.contains("CloudClient"));
+        assert!(rendered.contains("chat_enabled"));
         assert!(!rendered.contains("dummy-test-key"));
         assert!(!rendered.contains("example.invalid"));
     }

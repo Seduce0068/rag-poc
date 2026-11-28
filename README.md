@@ -35,20 +35,24 @@ ragcore/target/debug/ragcore query 'Pin<&mut Self> が必要な理由は？' \
 ## 目的
 
 Markdown の知識源を llama-server（既定）または opencodeGO（opt-in）でベクトル化して
-Qdrant に保存し、質問に対して関連する文章を返す。Python は使わない。検索モードは
-`dense` / `keyword` / `hybrid` の 3 種が実装済み。
+Qdrant に保存し、質問に対して関連する文章と回答を返す。Python は使わない。検索モードは
+`dense` / `keyword` / `hybrid` / `hybrid-rerank` の 4 種が実装済み。
 
 埋め込みの切り替えは `RAG_CLOUD_ENABLED=1` で行う。既定 `0` では外部送信・課金は
 一切発生しない。クラウドを使う場合は `RAG_CLOUD_EMBED_MODEL` と
 `OPENCODE_GO_API_KEY` が必須で、埋め込み次元と `RAG_VECTOR_SIZE` が一致しないと
 起動前に拒否される。API キー値はログ・エラー・成果物へ出力しない。
 
+`hybrid-rerank` では opencodeGO の chat で上位 `RAG_RERANK_MAX_DOCS` 件を再スコアし、
+`query --json` の `answer` / `sources` に回答と出典を返す。
+chat / 回答生成は `RAG_CLOUD_CHAT_ENABLED=1` の opt-in のみ対応（ローカル llama.cpp の
+chat は未実装）。LLM 失敗時は元順・元スコアへフォールバックし、
+検索 `errors` を汚さず `answer_error` に分離する。
+
 未実装（旧 Python 実装にあった機能）:
 
-- `hybrid-rerank` は `hybrid` と同一で、LLM による再ランクは行わない
-- 回答生成（`answer` / `sources`）と `--with-answer`
 - コーパス範囲制限（`RAG_ALLOW_EXTERNAL_CORPUS`）
-- `RAG_CLOUD_CHAT_ENABLED` は受け付けるが no-op（chat クライアント未実装）
+- ローカル llama.cpp 経由の chat / 回答生成（`RAG_CLOUD_CHAT_ENABLED=0` では回答なし）
 
 接続先は loopback のみ既定許可。リモートを使う場合は
 `RAG_ALLOW_REMOTE_ENDPOINTS=1` かつ `RAG_ALLOWED_ENDPOINT_HOSTS` に host または
@@ -87,11 +91,15 @@ stdin JSON の op モード（`{"op":"cosine","a":[1.0],"b":[1.0]}`）も後方�
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | `800` / `100` |
 | `RAG_TOP_K` | `10` |
 | `RAG_RERANK_MAX_DOCS` | `5` |
+| `RAG_RERANK_PROMPT_STYLE` | `strict`（`legacy` も可） |
 | `RAG_EMBED_PREFIX_QUERY` / `PASSAGE` | 空 |
 | `RAG_CLOUD_ENABLED` | `0`（`"1"` のみ有効） |
 | `RAG_CLOUD_EMBED_MODEL` | 空（有効時は必須） |
 | `RAG_CLOUD_EMBED_DIMENSION` | 未設定（モデル表から解決） |
 | `RAG_CLOUD_BASE_URL` | `https://opencode.ai/inference/go/openai/v1` |
+| `RAG_CLOUD_CHAT_ENABLED` | `0`（`RAG_CLOUD_ENABLED=1` が必須） |
+| `RAG_CLOUD_MODEL` | `deepseek-v4.1-flash` |
+| `RAG_ANSWER_TIMEOUT` | `60` |
 | `OPENCODE_GO_API_KEY` | 未設定（クラウド時に必須） |
 
 Ruri 系モデルを使う場合は `RAG_VECTOR_SIZE=768` かつ `CHUNK_SIZE<=512` が必須。

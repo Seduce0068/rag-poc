@@ -31,11 +31,13 @@ ragcore/target/debug/ragcore evaluate --qrels qrels.json --output eval-results.j
 
 stdin JSON の op モードも後方互換で残しています。
 
-`hybrid-rerank` は `hybrid` と同一動作（LLM 再ランク未実装）です。
-回答生成・コーパス範囲制限も未実装です。
+`hybrid-rerank` は opencodeGO の chat で上位 `RAG_RERANK_MAX_DOCS` 件を再スコアします
+（`RAG_CLOUD_CHAT_ENABLED=1` 必須、样式は `RAG_RERANK_PROMPT_STYLE=strict|legacy`）。
+LLM 失敗時は元順・元スコアへフォールバックし、全件に 5 層スコアを付与します。
+回答生成は `query --json` の `answer` / `sources` / `answer_error` で返します（cloud chat のみ）。
 クラウド埋め込みは opt-in で利用可能で、429 / 500 / 502 / 503 / 504 の
 リトライとハイブリッド検索の部分失敗の構造化記録（`query --json` のトップレベル `errors` 配列）を実装済みです。
-回答生成（chat）は未実装で、`RAG_CLOUD_CHAT_ENABLED` は no-op です。
+未実装: コーパス範囲制限（`RAG_ALLOW_EXTERNAL_CORPUS`）、ローカル llama.cpp の chat。
 接続先は loopback のみ既定許可で、リモートは opt-in ＋ https ＋ 許可ホストが必須です。
 
 ```bash

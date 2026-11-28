@@ -62,6 +62,7 @@ pub fn run(config: &Config, qrels_path: &Path, output: &Path) -> Result<(), Stri
             let result = search(config, question, mode, retrieval_k)?;
             let hits = result.hits;
             let error = merge_errors(&result.errors);
+            let rerank_unchanged = crate::search::rerank_unchanged_status(result.unchanged);
             let sources: Vec<String> = hits
                 .iter()
                 .map(|hit| hit["source"].as_str().unwrap_or_default().to_string())
@@ -81,6 +82,7 @@ pub fn run(config: &Config, qrels_path: &Path, output: &Path) -> Result<(), Stri
                 "mode": mode,
                 "hits": hits.len(),
                 "error": error,
+                "rerank_unchanged": rerank_unchanged,
                 "recall": !matched.is_empty(),
                 "matched_sources": matched,
                 "sources": sources,
@@ -95,6 +97,7 @@ pub fn run(config: &Config, qrels_path: &Path, output: &Path) -> Result<(), Stri
             let result = search(config, question, mode, retrieval_k)?;
             let hits = result.hits;
             let error = merge_errors(&result.errors);
+            let rerank_unchanged = crate::search::rerank_unchanged_status(result.unchanged);
             let sources: Vec<String> = hits
                 .iter()
                 .map(|hit| hit["source"].as_str().unwrap_or_default().to_string())
@@ -122,6 +125,7 @@ pub fn run(config: &Config, qrels_path: &Path, output: &Path) -> Result<(), Stri
                 "retrieval_k": retrieval_k,
                 "hits": hits.len(),
                 "error": error,
+                "rerank_unchanged": rerank_unchanged,
                 "sources": sources,
                 "recall_at": Value::Object(recall),
                 "ndcg_at": Value::Object(ndcg),
