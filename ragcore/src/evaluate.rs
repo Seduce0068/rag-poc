@@ -144,7 +144,9 @@ pub fn run(config: &Config, qrels_path: &Path, output: &Path) -> Result<(), Stri
     }
 
     let artifact = json!({
-        "generated_at": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        "generated_at": time::OffsetDateTime::now_utc()
+            .format(&time::format_description::well_known::Rfc3339)
+            .map_err(|error| format!("RFC3339 formatting failed: {error}"))?,
         "schema_version": 2,
         "qrels_schema_version": qrels["schema_version"].as_u64().unwrap_or(1),
         "qrels_label": qrels_path.file_name().and_then(|v| v.to_str()).unwrap_or("qrels.json"),
