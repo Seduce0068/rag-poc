@@ -51,8 +51,12 @@ chat は未実装）。LLM 失敗時は元順・元スコアへフォールバ�
 
 未実装（旧 Python 実装にあった機能）:
 
-- コーパス範囲制限（`RAG_ALLOW_EXTERNAL_CORPUS`）
 - ローカル llama.cpp 経由の chat / 回答生成（`RAG_CLOUD_CHAT_ENABLED=0` では回答なし）
+
+コーパスは既定でリポジトリ配下のみ。外部ディレクトリを投入する場合は
+`RAG_ALLOW_EXTERNAL_CORPUS=1` を明示する。`RAG_REPO_ROOT` は信頼境界の基準を
+変更するため、信頼できる運用者が明示したときだけ設定する。
+`check_eval_results` は走査上限（深さ 8 / 配列 1000）到達時に fail-close する。
 
 接続先は loopback のみ既定許可。リモートを使う場合は
 `RAG_ALLOW_REMOTE_ENDPOINTS=1` かつ `RAG_ALLOWED_ENDPOINT_HOSTS` に host または
@@ -84,6 +88,8 @@ stdin JSON の op モード（`{"op":"cosine","a":[1.0],"b":[1.0]}`）も後方�
 | `QDRANT_URL` | `http://127.0.0.1:6333` |
 | `RAG_ALLOW_REMOTE_ENDPOINTS` | `0`（`"1"` のみ有効） |
 | `RAG_ALLOWED_ENDPOINT_HOSTS` | 空（カンマ区切り） |
+| `RAG_ALLOW_EXTERNAL_CORPUS` | `0`（`"1"` のみ有効） |
+| `RAG_REPO_ROOT` | 未設定（ビルド時のリポジトリルート） |
 | `EMBED_MODEL` | `qwen2.5:3b` |
 | `CHAT_MODEL` | `qwen2.5:3b` |
 | `RAG_COLLECTION` | `rag_poc_docs` |

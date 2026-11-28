@@ -291,6 +291,7 @@ mod tests {
             llama_server_url: "http://127.0.0.1:8090".to_string(),
             qdrant_url: "http://127.0.0.1:6333".to_string(),
             allow_remote_endpoints: false,
+            allow_external_corpus: false,
             allowed_endpoint_hosts: Vec::new(),
             embed_model: "qwen2.5:3b".to_string(),
             chat_model: "qwen2.5:3b".to_string(),

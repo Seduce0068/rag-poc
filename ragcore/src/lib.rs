@@ -375,9 +375,16 @@ const MAX_SCAN_ARRAY_ITEMS: usize = 1000;
 /// `serde_json::Value` を再帰走査し、見つかった禁止キー名だけを `present` に追加する。
 ///
 /// 値は一切収集しない（diagnostics へ漏らさないため）。深さ・配列要素数の
-/// 上限により、過大な入力でも走査量が抑えられる。
-fn collect_forbidden_keys(value: &serde_json::Value, depth: u32, present: &mut Vec<&'static str>) {
+/// 上限により、過大な入力でも走査量が抑えられる。上限で走査を打ち切った
+/// 場合は `truncated` を true にし、呼び出し側で fail-close できるようにする。
+fn collect_forbidden_keys(
+    value: &serde_json::Value,
+    depth: u32,
+    present: &mut Vec<&'static str>,
+    truncated: &mut bool,
+) {
     if depth >= MAX_SCAN_DEPTH {
+        *truncated = true;
         return;
     }
     match value {
@@ -388,12 +395,15 @@ fn collect_forbidden_keys(value: &serde_json::Value, depth: u32, present: &mut V
                 }
             }
             for child in map.values() {
-                collect_forbidden_keys(child, depth + 1, present);
+                collect_forbidden_keys(child, depth + 1, present, truncated);
             }
         }
         serde_json::Value::Array(items) => {
+            if items.len() > MAX_SCAN_ARRAY_ITEMS {
+                *truncated = true;
+            }
             for item in items.iter().take(MAX_SCAN_ARRAY_ITEMS) {
-                collect_forbidden_keys(item, depth + 1, present);
+                collect_forbidden_keys(item, depth + 1, present, truncated);
             }
         }
         _ => {}
@@ -538,7 +548,8 @@ pub fn check_eval_results(files: &[(String, String)]) -> GateReport {
 
         // トップレベルと results 直下に限らず、JSON 全体を再帰走査する。
         let mut present: Vec<&'static str> = Vec::new();
-        collect_forbidden_keys(&data, 0, &mut present);
+        let mut truncated = false;
+        collect_forbidden_keys(&data, 0, &mut present, &mut truncated);
         present.sort_unstable();
         if !present.is_empty() {
             diagnostics.push(format!(
@@ -546,6 +557,12 @@ pub fn check_eval_results(files: &[(String, String)]) -> GateReport {
                 name,
                 present.join(", ")
             ));
+            file_failed = true;
+        }
+        // 上限到達で走査を打ち切った場合は全走査が完了していないため fail-close。
+        // diagnostics にはファイル名と理由のみを残し、値は一切含めない。
+        if truncated {
+            diagnostics.push(format!("{name}: scan truncated (depth or array limit)"));
             file_failed = true;
         }
 
@@ -809,16 +826,26 @@ mod tests {
             "eval-results-baseline.json".to_string(),
             artifact_with_nested_answer(6),
         )];
-        assert!(!check_eval_results(&within).ok);
+        let within_report = check_eval_results(&within);
+        assert!(!within_report.ok);
+        assert!(within_report
+            .diagnostics
+            .iter()
+            .any(|line| line.contains("answer")));
 
         // 7 段では深さ8 となり上限に達するため走査されない。
+        // 黙って完了せず fail-close し、打ち切り理由のみを diagnostics に残す。
         let beyond = vec![(
             "eval-results-baseline.json".to_string(),
             artifact_with_nested_answer(7),
         )];
         let report = check_eval_results(&beyond);
-        assert!(report.ok);
-        assert!(report.diagnostics.is_empty());
+        assert!(!report.ok);
+        assert_eq!(report.failed, 1);
+        let joined = report.diagnostics.join("\n");
+        assert!(joined.contains("eval-results-baseline.json"));
+        assert!(joined.contains("scan truncated"));
+        assert!(!joined.contains("SECRET_VALUE"));
     }
 
     #[test]
@@ -828,7 +855,12 @@ mod tests {
             "eval-results.json".to_string(),
             artifact_with_results_answer(999),
         )];
-        assert!(!check_eval_results(&within).ok);
+        let within_report = check_eval_results(&within);
+        assert!(!within_report.ok);
+        assert!(within_report
+            .diagnostics
+            .iter()
+            .any(|line| line.contains("answer")));
 
         // 1001 要素目（index 1000）は上限を超えるため走査されない。
         let beyond = vec![(
@@ -836,8 +868,38 @@ mod tests {
             artifact_with_results_answer(1000),
         )];
         let report = check_eval_results(&beyond);
+        assert!(!report.ok);
+        assert_eq!(report.failed, 1);
+        let joined = report.diagnostics.join("\n");
+        assert!(joined.contains("eval-results.json"));
+        assert!(joined.contains("scan truncated"));
+        assert!(!joined.contains("SECRET_VALUE"));
+    }
+
+    #[test]
+    fn eval_results_gate_accepts_artifact_within_scan_limits() {
+        // 最内の葉は深さ7（上限未満）、results はちょうど 1000 要素（上限内）。
+        let mut nested = r#"{"leaf":"ok"}"#.to_string();
+        for _ in 0..5 {
+            nested = format!("{{\"n\":{nested}}}");
+        }
+        let entries: Vec<String> = (0..1000)
+            .map(|index| format!(r#"{{"id":"q{index}"}}"#))
+            .collect();
+        let json = format!(
+            r#"{{"generated_at":"2026-11-26T00:00:00Z","schema_version":1,"qrels_schema_version":1,"qrels_label":"q","collection":"c","embed_model":"m","summary":{nested},"results":[{}]}}"#,
+            entries.join(",")
+        );
+        let files = vec![("eval-results.json".to_string(), json)];
+        let report = check_eval_results(&files);
         assert!(report.ok);
+        assert_eq!(report.checked, 1);
+        assert_eq!(report.failed, 0);
         assert!(report.diagnostics.is_empty());
+        assert!(!report
+            .diagnostics
+            .iter()
+            .any(|line| line.contains("scan truncated")));
     }
 
     #[test]

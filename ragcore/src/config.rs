@@ -1,7 +1,8 @@
 //! 環境変数からの設定読み込みと検証（Python config.py の代替）。
 
 use std::env;
-use std::path::PathBuf;
+use std::ffi::OsStr;
+use std::path::{Component, Path, PathBuf};
 
 /// opencodeGO（クラウド）の設定。既定では一切有効化されない。
 #[derive(Clone)]
@@ -36,6 +37,8 @@ impl std::fmt::Debug for CloudConfig {
 #[derive(Debug, Clone)]
 pub struct Config {
     pub corpus_dir: PathBuf,
+    /// コーパスディレクトリがリポジトリ外の場合だけ許可する（既定は拒否）。
+    pub allow_external_corpus: bool,
     pub collection: String,
     pub llama_server_url: String,
     pub qdrant_url: String,
@@ -109,6 +112,84 @@ fn known_cloud_dimension(model: &str) -> Option<usize> {
     }
 }
 
+/// コンパイル時に埋め込まれた CARGO_MANIFEST_DIR（ragcore/）の親 = rag_poc ルート。
+fn compile_time_repo_root() -> PathBuf {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    manifest.parent().unwrap_or(manifest).to_path_buf()
+}
+
+/// Python の `Path.expanduser()` 相当（先頭の `~` を HOME に置換する）。
+/// `~user` 形式は pwd 参照を避けるため未対応。
+fn expand_tilde(path: &Path, home: Option<&OsStr>) -> PathBuf {
+    let mut components = path.components();
+    match (components.next(), home) {
+        (Some(Component::Normal(first)), Some(home)) if first.to_str() == Some("~") => {
+            let rest: PathBuf = components.collect();
+            PathBuf::from(home).join(rest)
+        }
+        _ => path.to_path_buf(),
+    }
+}
+
+/// ファイルシステムに触れずに `.` / `..` を解決する。
+/// Python の `Path.resolve(strict=False)` 相当（シンボリックリンクは展開しない）。
+fn normalize_lexically(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
+/// リポジトリルート。CLI の CWD に依存しないよう、環境変数 `RAG_REPO_ROOT` を
+/// 優先し、無ければコンパイル時の CARGO_MANIFEST_DIR の親を使う。
+pub fn repo_root() -> PathBuf {
+    let home = env::var_os("HOME").or_else(|| env::var_os("USERPROFILE"));
+    match env::var_os("RAG_REPO_ROOT") {
+        Some(value) if !value.is_empty() => {
+            let expanded = expand_tilde(&PathBuf::from(value), home.as_deref());
+            if expanded.is_absolute() {
+                normalize_lexically(&expanded)
+            } else {
+                normalize_lexically(&env::current_dir().unwrap_or_default().join(expanded))
+            }
+        }
+        _ => normalize_lexically(&compile_time_repo_root()),
+    }
+}
+
+/// 旧 Python `resolve_corpus_dir()` 相当の純粋パス判定。
+/// 相対パスは `root` 基準で絶対化し、`root` 配下でなければ
+/// `allow_external` が true のときだけ許可する。エラーにはパスを出さない。
+fn resolve_corpus_dir_inner(
+    raw: &Path,
+    root: &Path,
+    allow_external: bool,
+    home: Option<&OsStr>,
+) -> Result<PathBuf, String> {
+    let expanded = expand_tilde(raw, home);
+    let absolute = if expanded.is_absolute() {
+        expanded
+    } else {
+        root.join(expanded)
+    };
+    let resolved = normalize_lexically(&absolute);
+    let root = normalize_lexically(root);
+    if !resolved.starts_with(&root) && !allow_external {
+        return Err(
+            "RAG_CORPUS_DIR must be under the repository; set RAG_ALLOW_EXTERNAL_CORPUS=1"
+                .to_string(),
+        );
+    }
+    Ok(resolved)
+}
+
 impl Config {
     pub fn from_env() -> Result<Self, String> {
         let embed_model = env_str("EMBED_MODEL", "qwen2.5:3b");
@@ -144,6 +225,7 @@ impl Config {
 
         let config = Self {
             corpus_dir: PathBuf::from(env_str("RAG_CORPUS_DIR", "passkey-gateway/docs")),
+            allow_external_corpus: env_flag("RAG_ALLOW_EXTERNAL_CORPUS"),
             collection: env_str("RAG_COLLECTION", "rag_poc_docs"),
             llama_server_url: env_str("LLAMA_SERVER_URL", "http://127.0.0.1:8090"),
             qdrant_url: env_str("QDRANT_URL", "http://127.0.0.1:6333"),
@@ -184,6 +266,29 @@ impl Config {
         self.cloud
             .embed_dimension
             .or_else(|| known_cloud_dimension(&self.cloud.embed_model))
+    }
+
+    /// ingest 経路専用: コーパス dir を解決し、リポジトリ外を既定で拒否する。
+    /// `validate()` は query/evaluate も通るため、ここには含めない。
+    pub fn resolve_corpus_dir(&self, raw: &Path) -> Result<PathBuf, String> {
+        let home = env::var_os("HOME").or_else(|| env::var_os("USERPROFILE"));
+        let root = repo_root();
+        let resolved =
+            resolve_corpus_dir_inner(raw, &root, self.allow_external_corpus, home.as_deref())?;
+        // 実体が存在するなら symlink を解決して範囲を再確認する。
+        if let (Ok(real_path), Ok(real_root)) = (
+            std::fs::canonicalize(&resolved),
+            std::fs::canonicalize(&root),
+        ) {
+            if !real_path.starts_with(&real_root) && !self.allow_external_corpus {
+                return Err(
+                    "RAG_CORPUS_DIR must be under the repository; set RAG_ALLOW_EXTERNAL_CORPUS=1"
+                        .to_string(),
+                );
+            }
+            return Ok(real_path);
+        }
+        Ok(resolved)
     }
 
     /// 接続先 URL を検証する。loopback は既定許可、リモートは opt-in ＋ https ＋ 許可ホストが必須。
@@ -306,6 +411,7 @@ mod tests {
     fn base() -> Config {
         Config {
             corpus_dir: PathBuf::from("docs"),
+            allow_external_corpus: false,
             collection: "c".to_string(),
             llama_server_url: "http://127.0.0.1:8090".to_string(),
             qdrant_url: "http://127.0.0.1:6333".to_string(),
@@ -427,5 +533,84 @@ mod tests {
         config.vector_size = 1536;
         config.cloud.api_key = Some("dummy".to_string());
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn resolve_corpus_dir_anchors_relative_paths_to_repo_root() {
+        let resolved =
+            resolve_corpus_dir_inner(Path::new("docs"), Path::new("/repo"), false, None).unwrap();
+        assert_eq!(resolved, PathBuf::from("/repo/docs"));
+    }
+
+    #[test]
+    fn resolve_corpus_dir_normalizes_dot_and_parent_components() {
+        let resolved = resolve_corpus_dir_inner(
+            Path::new("/repo/a/../docs/./x"),
+            Path::new("/repo"),
+            false,
+            None,
+        )
+        .unwrap();
+        assert_eq!(resolved, PathBuf::from("/repo/docs/x"));
+    }
+
+    #[test]
+    fn resolve_corpus_dir_rejects_external_path_without_opt_in() {
+        let err = resolve_corpus_dir_inner(
+            Path::new("/outside/corpus"),
+            Path::new("/repo"),
+            false,
+            None,
+        )
+        .unwrap_err();
+        assert!(err.contains("RAG_ALLOW_EXTERNAL_CORPUS=1"));
+        assert!(!err.contains("/outside/corpus"));
+    }
+
+    #[test]
+    fn resolve_corpus_dir_allows_external_path_with_opt_in() {
+        let resolved =
+            resolve_corpus_dir_inner(Path::new("/outside/corpus"), Path::new("/repo"), true, None)
+                .unwrap();
+        assert_eq!(resolved, PathBuf::from("/outside/corpus"));
+    }
+
+    #[test]
+    fn resolve_corpus_dir_does_not_treat_sibling_prefix_as_inside() {
+        let err = resolve_corpus_dir_inner(
+            Path::new("/repo-evil/docs"),
+            Path::new("/repo"),
+            false,
+            None,
+        )
+        .unwrap_err();
+        assert!(err.contains("RAG_ALLOW_EXTERNAL_CORPUS"));
+    }
+
+    #[test]
+    fn resolve_corpus_dir_expands_user_home() {
+        let home = std::ffi::OsStr::new("/home/test-user");
+        let resolved = resolve_corpus_dir_inner(
+            Path::new("~/corpus"),
+            Path::new("/home/test-user"),
+            false,
+            Some(home),
+        )
+        .unwrap();
+        assert_eq!(resolved, PathBuf::from("/home/test-user/corpus"));
+    }
+
+    #[test]
+    fn config_method_uses_env_backed_repo_root() {
+        let config = base();
+        let resolved = config.resolve_corpus_dir(Path::new("docs")).unwrap();
+        assert_eq!(resolved, repo_root().join("docs"));
+    }
+
+    #[test]
+    fn validate_does_not_apply_corpus_scope() {
+        let mut config = base();
+        config.corpus_dir = PathBuf::from("/outside/corpus");
+        assert!(config.validate().is_ok());
     }
 }

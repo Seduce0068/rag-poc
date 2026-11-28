@@ -19,6 +19,10 @@ stale_after: "2026-12-26"
 さらに `RAG_CLOUD_CHAT_ENABLED=1`（`RAG_CLOUD_ENABLED=1` が必須）では、全 query で
 質問文とチャンク本文が `/chat/completions` へ送信され、`x-opencode-session` ヘッダが
 付与される。これらのクラウド経路は既定では無効。
+投入コーパスは既定でリポジトリ配下のみで、`RAG_ALLOW_EXTERNAL_CORPUS=1` を
+明示したときだけ外部ディレクトリを読む。`RAG_REPO_ROOT` はこの信頼境界の基準を
+変更するため、信頼できる運用者が明示したときだけ設定する。
+公開成果物のゲートは走査上限到達時に fail-close する。
 
 ## 報告先
 

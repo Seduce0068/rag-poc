@@ -29,6 +29,13 @@ fn collect_markdown(root: &Path) -> Result<Vec<PathBuf>, String> {
         let entries = fs::read_dir(&dir).map_err(|e| format!("read_dir failed: {e}"))?;
         for entry in entries.flatten() {
             let path = entry.path();
+            if entry
+                .file_type()
+                .map(|kind| kind.is_symlink())
+                .unwrap_or(false)
+            {
+                continue;
+            }
             if path.is_dir() {
                 stack.push(path);
             } else if path.extension().and_then(|v| v.to_str()) == Some("md") {
@@ -178,6 +185,10 @@ impl Embedder {
 }
 
 pub fn run(config: &Config, corpus_dir: &Path, recreate: bool, yes: bool) -> Result<(), String> {
+    // 旧 Python resolve_corpus_dir() 相当の範囲制限。main.rs は --corpus-dir の
+    // 上書き値を config.corpus_dir へ反映してから渡すため、実効パスをここで検証
+    // すれば環境変数由来・CLI 上書き由来の両方をカバーできる。
+    let corpus_dir = config.resolve_corpus_dir(corpus_dir)?;
     if recreate && !yes {
         return Err("--recreate には --yes が必要です".to_string());
     }
@@ -199,12 +210,12 @@ pub fn run(config: &Config, corpus_dir: &Path, recreate: bool, yes: bool) -> Res
         qdrant.create_collection(resolved_vector_size(config))?;
     }
 
-    let files = collect_markdown(corpus_dir)?;
+    let files = collect_markdown(&corpus_dir)?;
     let mut points = Vec::new();
     for path in &files {
         points.extend(iter_chunks(
             path,
-            corpus_dir,
+            &corpus_dir,
             config.chunk_size,
             config.chunk_overlap,
         ));
@@ -244,6 +255,7 @@ mod tests {
     fn test_config() -> Config {
         Config {
             corpus_dir: PathBuf::from("docs"),
+            allow_external_corpus: false,
             collection: "c".to_string(),
             llama_server_url: "http://127.0.0.1:8090".to_string(),
             qdrant_url: "http://127.0.0.1:6333".to_string(),
@@ -318,5 +330,36 @@ mod tests {
             .unwrap()
             .starts_with("# Title"));
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// リポジトリ外のディレクトリを構築する（実在しなくてよい）。
+    fn outside_repo_dir() -> PathBuf {
+        let root = crate::config::repo_root();
+        root.parent().unwrap_or(&root).join("outside-corpus-dir")
+    }
+
+    #[test]
+    fn run_rejects_external_corpus_dir_before_any_io() {
+        let config = test_config();
+        let outside = outside_repo_dir();
+        let err = run(&config, &outside, false, false).unwrap_err();
+        assert!(err.contains("RAG_ALLOW_EXTERNAL_CORPUS=1"));
+        assert!(!err.contains(outside.to_string_lossy().as_ref()));
+    }
+
+    #[test]
+    fn run_allows_external_corpus_dir_only_with_opt_in() {
+        let mut config = test_config();
+        config.allow_external_corpus = true;
+        // 存在しないパスなので、HTTP に進む前の is_dir チェックで止まる。
+        let err = run(&config, &outside_repo_dir(), false, false).unwrap_err();
+        assert_eq!(err, "corpus dir not found");
+    }
+
+    #[test]
+    fn run_accepts_relative_corpus_dir_under_repo_root() {
+        let config = test_config();
+        let err = run(&config, Path::new("missing-in-repo-corpus"), false, false).unwrap_err();
+        assert_eq!(err, "corpus dir not found");
     }
 }

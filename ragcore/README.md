@@ -37,7 +37,9 @@ LLM 失敗時は元順・元スコアへフォールバックし、全件に 5 �
 回答生成は `query --json` の `answer` / `sources` / `answer_error` で返します（cloud chat のみ）。
 クラウド埋め込みは opt-in で利用可能で、429 / 500 / 502 / 503 / 504 の
 リトライとハイブリッド検索の部分失敗の構造化記録（`query --json` のトップレベル `errors` 配列）を実装済みです。
-未実装: コーパス範囲制限（`RAG_ALLOW_EXTERNAL_CORPUS`）、ローカル llama.cpp の chat。
+コーパスは既定でリポジトリ配下のみ（`RAG_ALLOW_EXTERNAL_CORPUS=1` で外部許可、
+`RAG_REPO_ROOT` で基準を上書き）。公開ゲートは走査上限到達時に fail-close する。
+未実装: ローカル llama.cpp の chat。
 接続先は loopback のみ既定許可で、リモートは opt-in ＋ https ＋ 許可ホストが必須です。
 
 ```bash
