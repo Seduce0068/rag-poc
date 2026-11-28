@@ -5,6 +5,9 @@
 //! - エラーは `Result<_, String>` とし、ステータス >=400 は短文のマスク済み
 //!   メッセージのみ（レスポンス本文・URL・キー値は含めない）。
 //!
+//! - scroll は最大 100 ページで打ち切り、未取得分が残る場合は `ScrollResult`
+//!   の `truncated` を true にして部分結果を成功として返す（旧 Python 契約）。
+//!
 //! `unsafe` は使用しない。
 
 use std::time::Duration;
@@ -29,6 +32,13 @@ fn request_timeout(secs: f64) -> Duration {
     } else {
         Duration::from_secs_f64(DEFAULT_TIMEOUT_SECS)
     }
+}
+
+/// scroll の結果。上限到達で未取得分が残る場合は `truncated = true`。
+#[derive(Debug, Clone)]
+pub struct ScrollResult {
+    pub points: Vec<serde_json::Value>,
+    pub truncated: bool,
 }
 
 /// Qdrant コレクションを操作するクライアント。
@@ -131,32 +141,38 @@ impl QdrantClient {
     }
 
     /// scroll API をページングして全 point を返す（最大 100 ページ）。
-    pub fn scroll_all(&self) -> Result<Vec<Value>, String> {
+    ///
+    /// 不正なページ形状はエラーとする。上限ページ取得後も offset が残る場合は
+    /// 部分結果を成功として返し、`truncated` を true にする（旧 Python 契約）。
+    pub fn scroll_all(&self) -> Result<ScrollResult, String> {
         let url = format!("{}/points/scroll", self.collection_url());
         let mut offset: Option<Value> = None;
         let mut points = Vec::new();
+        // ループ最後の offset 状態だけが truncated 判定に使う値。
+        let mut final_offset: Option<Value> = None;
         for _ in 0..MAX_SCROLL_PAGES {
             let body = scroll_body(offset.as_ref());
             let data = self
                 .send(Method::POST, &url, Some(&body), "points scroll")?
-                .unwrap_or(Value::Null);
+                .ok_or_else(points_parse_error)?;
             let result = data.get("result").unwrap_or(&data);
-            let Some(batch) = result.get("points").and_then(Value::as_array) else {
-                break;
-            };
+            let batch = scroll_points(result)?;
             if batch.is_empty() {
+                // 旧 Python 契約: 空ページで即終端（offset が残っても続行しない）。
+                final_offset = None;
                 break;
             }
-            points.extend(batch.iter().cloned());
-            offset = result
-                .get("next_page_offset")
-                .cloned()
-                .filter(|value| !value.is_null());
-            if offset.is_none() {
+            points.extend(batch);
+            final_offset = next_offset(result);
+            if final_offset.is_none() {
                 break;
             }
+            offset = final_offset.clone();
         }
-        Ok(points)
+        Ok(ScrollResult {
+            points,
+            truncated: scroll_truncated(&final_offset),
+        })
     }
 
     /// 密ベクトルで points/query を呼び、point の配列を返す。
@@ -165,8 +181,8 @@ impl QdrantClient {
         let body = query_body(vector, limit);
         let data = self
             .send(Method::POST, &url, Some(&body), "points query")?
-            .unwrap_or(Value::Null);
-        Ok(points_from_response(&data))
+            .ok_or_else(points_parse_error)?;
+        points_from_response(&data)
     }
 
     /// exact count を返す。
@@ -268,19 +284,55 @@ fn count_body() -> Value {
     json!({ "exact": true })
 }
 
+/// points 抽出失敗時の固定文言エラー（URL・本文は含まない）。
+fn points_parse_error() -> String {
+    "Qdrant points 応答を解析できませんでした".to_string()
+}
+
 /// Qdrant レスポンスから point 配列を取り出す。
-fn points_from_response(data: &Value) -> Vec<Value> {
+///
+/// 受理するのは `result` 配列 / `result.points` 配列 / トップレベル `points`
+/// 配列 / bare 配列（旧 Python 契約）。正規の空配列は `Ok(vec![])`、
+/// 欠落・型不正は固定文言の `Err`。
+fn points_from_response(data: &Value) -> Result<Vec<Value>, String> {
     let result = data.get("result").unwrap_or(data);
     if let Some(array) = result.as_array() {
-        return array.clone();
+        return Ok(array.clone());
     }
     if let Some(array) = result.get("points").and_then(Value::as_array) {
-        return array.clone();
+        return Ok(array.clone());
     }
     if let Some(array) = data.get("points").and_then(Value::as_array) {
-        return array.clone();
+        return Ok(array.clone());
     }
-    Vec::new()
+    Err(points_parse_error())
+}
+
+/// scroll 1 ページの `result.points` を配列として取り出す。
+/// scroll では `result.points` のみを受理し、それ以外はエラーとする。
+fn scroll_points(result: &Value) -> Result<Vec<Value>, String> {
+    result
+        .get("points")
+        .and_then(Value::as_array)
+        .cloned()
+        .ok_or_else(points_parse_error)
+}
+
+/// `next_page_offset` を取得する（null は終端）。
+fn next_offset(result: &Value) -> Option<Value> {
+    result
+        .get("next_page_offset")
+        .cloned()
+        .filter(|value| !value.is_null())
+}
+
+/// ループ最後の offset 状態だけから truncated を判定する純粋関数。
+/// offset が残っていれば上限到達による部分結果とみなす。
+fn scroll_truncated(final_offset: &Option<Value>) -> bool {
+    final_offset
+        .as_ref()
+        .map(|value| !value.is_null())
+        .unwrap_or(false)
 }
 
 /// count レスポンスから件数を取り出す。
@@ -368,13 +420,125 @@ mod tests {
     #[test]
     fn points_and_count_are_extracted_from_nested_results() {
         let query = json!({ "result": { "points": [{ "id": 1 }] } });
-        assert_eq!(points_from_response(&query), vec![json!({ "id": 1 })]);
+        assert_eq!(
+            points_from_response(&query).unwrap(),
+            vec![json!({ "id": 1 })]
+        );
         let scroll = json!({ "result": { "points": [{ "id": 2 }], "next_page_offset": null } });
-        assert_eq!(points_from_response(&scroll), vec![json!({ "id": 2 })]);
-        assert!(points_from_response(&json!({})).is_empty());
+        assert_eq!(
+            points_from_response(&scroll).unwrap(),
+            vec![json!({ "id": 2 })]
+        );
+        // `{}` は正規の空配列ではないため Err。
+        assert!(points_from_response(&json!({})).is_err());
 
         let count = json!({ "result": { "count": 12 } });
         assert_eq!(count_from_response(&count).unwrap(), 12);
         assert!(count_from_response(&json!({ "result": {} })).is_err());
+    }
+
+    #[test]
+    fn points_from_response_accepts_empty_array_and_rejects_malformed_shapes() {
+        // 正規の空配列は Ok(empty)。
+        assert_eq!(
+            points_from_response(&json!({ "result": [] })).unwrap(),
+            Vec::<Value>::new()
+        );
+        assert_eq!(
+            points_from_response(&json!({ "result": { "points": [] } })).unwrap(),
+            Vec::<Value>::new()
+        );
+        assert_eq!(
+            points_from_response(&json!({ "points": [] })).unwrap(),
+            Vec::<Value>::new()
+        );
+        // result 配列形式。
+        assert_eq!(
+            points_from_response(&json!({ "result": [{ "id": 7 }] })).unwrap(),
+            vec![json!({ "id": 7 })]
+        );
+        // トップレベル points 配列形式。
+        assert_eq!(
+            points_from_response(&json!({ "points": [{ "id": 8 }] })).unwrap(),
+            vec![json!({ "id": 8 })]
+        );
+
+        // 欠落・型不正・{}・null・プリミティブは固定文言の Err。
+        for bad in [
+            json!({}),
+            json!(null),
+            json!(42),
+            json!("points"),
+            json!({ "result": {} }),
+            json!({ "result": null }),
+            json!({ "result": 7 }),
+            json!({ "result": { "points": null } }),
+            json!({ "result": { "points": "oops" } }),
+            json!({ "points": {} }),
+            json!({ "points": 1 }),
+        ] {
+            let err = points_from_response(&bad).unwrap_err();
+            assert_eq!(err, points_parse_error());
+            assert!(!err.contains("http://"));
+        }
+    }
+
+    #[test]
+    fn scroll_truncated_depends_only_on_final_offset() {
+        // 100 ページ目に offset が残る → truncated。
+        let last_offset = Some(json!(123));
+        assert!(scroll_truncated(&last_offset));
+        // offset が null / 無し → 正常終端。
+        assert!(!scroll_truncated(&None));
+        assert!(!scroll_truncated(&Some(Value::Null)));
+        // 途中で offset が無くなった場合（final が None）は truncated にならない。
+        let final_offset = next_offset(&json!({
+            "points": [],
+            "next_page_offset": null
+        }));
+        assert!(!scroll_truncated(&final_offset));
+
+        // null 以外の JSON はそのまま次の offset として扱われる。
+        let final_offset = next_offset(&json!({
+            "points": [{ "id": 3 }],
+            "next_page_offset": { "id": 3 }
+        }));
+        assert!(scroll_truncated(&final_offset));
+    }
+
+    #[test]
+    fn scroll_points_rejects_missing_or_non_array_points() {
+        assert_eq!(
+            scroll_points(&json!({ "points": [{ "id": 1 }] })).unwrap(),
+            vec![json!({ "id": 1 })]
+        );
+        assert_eq!(
+            scroll_points(&json!({ "points": [] })).unwrap(),
+            Vec::<Value>::new()
+        );
+        for bad in [
+            json!({}),
+            json!(null),
+            json!({ "points": null }),
+            json!({ "points": {} }),
+            json!({ "points": 3 }),
+        ] {
+            assert_eq!(scroll_points(&bad).unwrap_err(), points_parse_error());
+        }
+    }
+
+    #[test]
+    fn query_dense_malformed_shape_is_error_via_pure_parser() {
+        // query_dense と同じ経路（points_from_response の ? 伝播）を検証。
+        // HTTP を使わず pure パーサの Err を確認する。
+        let malformed = json!({ "result": { "points": "not-an-array" } });
+        let propagated = points_from_response(&malformed).map(|_| ());
+        assert_eq!(propagated.unwrap_err(), points_parse_error());
+
+        let valid = json!({ "result": { "points": [{ "id": 9 }] } });
+        assert_eq!(
+            points_from_response(&valid).unwrap(),
+            vec![json!({ "id": 9 })]
+        );
     }
 }

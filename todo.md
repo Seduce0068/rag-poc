@@ -22,7 +22,6 @@ status: draft
 ### 優先度: 高
 
 - [ ] **`chrono` の unmaintained アドバイザリ（RUSTSEC-2026-0543）を解消** — `Cargo.toml:15`, `evaluate.rs:137` / R4-DP / 子報告（cargo audit 未実行のため親で要確認）。`time` / `jiff` / `SystemTime` へ置換
-- [ ] **Qdrant レスポンスの構造検証と部分結果の明示化** — `ragcore/src/qdrant.rs:134-159,272-284` / R2-ER, R1-AR, R4-OB / 破損応答や 100 ページ打ち切りが空結果として成功する
 - [ ] **ingest の読み取り・チャンク化失敗を fail-close 化** — `ragcore/src/ingest.rs:30,52-55,213-246` / R3-TQ, R1-AR, R4-OB / 欠落ドキュメントを無視して成功する
 - [ ] **`--recreate` の破壊的順序を見直し（staging 切り替え）** — `ragcore/src/ingest.rs:206-210` / R2-ER / 削除後に失敗すると旧数据在失う
 - [ ] **検証済み Endpoint 型を全 HTTP アダプタへ適用** — `ragcore/src/config.rs:298-363`, `cloud.rs:515-535` / R1-AR, R3-IV / ライブラリ経路でリモート opt-in を迂回可能
@@ -69,6 +68,7 @@ status: draft
 
 ## 完了
 
+- [x] Qdrant レスポンスの構造検証と truncated 伝播（109 tests）
 - [x] 範囲外 citation を `answer_error` に記録（`c7bb68f` / 105 tests / CI success）
 - [x] ローカル llama.cpp chat と回答検証を追加（`50c2646`）
 - [x] コーパス範囲制限と公開ゲート fail-close を追加（`a65f2f6`）

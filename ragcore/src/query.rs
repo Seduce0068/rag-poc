@@ -92,15 +92,20 @@ fn dense_points(config: &Config, question: &str, top_k: usize) -> Result<Vec<Val
     qdrant.query_dense(&vector, top_k)
 }
 
-fn keyword_points(config: &Config, question: &str, top_k: usize) -> Result<Vec<Value>, String> {
+fn keyword_points(
+    config: &Config,
+    question: &str,
+    top_k: usize,
+) -> Result<(Vec<Value>, bool), String> {
     let qdrant = QdrantClient::new(
         &config.qdrant_url,
         &config.collection,
         config.qdrant_timeout_secs,
     );
-    let points = qdrant.scroll_all()?;
+    let scroll = qdrant.scroll_all()?;
     let terms = query_terms(question);
-    let scored: Vec<Value> = points
+    let scored: Vec<Value> = scroll
+        .points
         .into_iter()
         .map(|mut point| {
             let score = keyword_score(&payload_text(&point), &terms);
@@ -108,7 +113,7 @@ fn keyword_points(config: &Config, question: &str, top_k: usize) -> Result<Vec<V
             point
         })
         .collect();
-    Ok(rank_keyword(&scored, &terms, top_k))
+    Ok((rank_keyword(&scored, &terms, top_k), scroll.truncated))
 }
 
 /// 検索中の部分失敗（旧 Python の last_search_errors 相当）。
@@ -156,6 +161,7 @@ pub struct SearchResult {
     pub hits: Vec<Value>,
     pub errors: Vec<SearchError>,
     pub unchanged: Option<bool>,
+    pub truncated: bool,
 }
 
 fn llm_messages(system: &str, user: &str) -> Vec<Value> {
@@ -270,8 +276,8 @@ pub fn search(
     }
     let mut errors = Vec::new();
     let mut unchanged = None;
-    let points = match mode {
-        "dense" => dense_points(config, question, top_k)?,
+    let (points, truncated) = match mode {
+        "dense" => (dense_points(config, question, top_k)?, false),
         "keyword" => keyword_points(config, question, top_k)?,
         "hybrid" | "hybrid-rerank" => {
             let dense = match dense_points(config, question, top_k) {
@@ -281,11 +287,11 @@ pub fn search(
                     Vec::new()
                 }
             };
-            let keyword = match keyword_points(config, question, top_k) {
-                Ok(points) => points,
+            let (keyword, keyword_truncated) = match keyword_points(config, question, top_k) {
+                Ok(result) => result,
                 Err(message) => {
                     push_error(&mut errors, "keyword", mode, &message);
-                    Vec::new()
+                    (Vec::new(), false)
                 }
             };
             let mut ranked = rank_hybrid(&dense, &keyword, top_k);
@@ -315,14 +321,21 @@ pub fn search(
                     }
                 }
             }
-            ranked
+            (ranked, keyword_truncated)
         }
         _ => unreachable!(),
     };
+    let mut hits: Vec<Value> = points.iter().map(to_hit).collect();
+    if truncated {
+        for hit in &mut hits {
+            hit["truncated"] = json!(true);
+        }
+    }
     Ok(SearchResult {
-        hits: points.iter().map(to_hit).collect(),
+        hits,
         errors,
         unchanged,
+        truncated,
     })
 }
 

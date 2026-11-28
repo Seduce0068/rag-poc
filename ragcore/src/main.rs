@@ -120,6 +120,7 @@ fn run_cli(cli: Cli) -> Result<(), String> {
                         "sources": sources,
                         "answer_error": answer_error,
                         "rerank_unchanged": ragcore::search::rerank_unchanged_status(result.unchanged),
+                        "truncated": result.truncated,
                     }))
                     .map_err(|e| e.to_string())?
                 );

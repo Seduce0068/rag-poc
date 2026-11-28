@@ -63,6 +63,10 @@ pub fn run(config: &Config, qrels_path: &Path, output: &Path) -> Result<(), Stri
             let hits = result.hits;
             let error = merge_errors(&result.errors);
             let rerank_unchanged = crate::search::rerank_unchanged_status(result.unchanged);
+            let truncated = result.truncated
+                || hits
+                    .iter()
+                    .any(|hit| hit["truncated"].as_bool() == Some(true));
             let sources: Vec<String> = hits
                 .iter()
                 .map(|hit| hit["source"].as_str().unwrap_or_default().to_string())
@@ -83,6 +87,7 @@ pub fn run(config: &Config, qrels_path: &Path, output: &Path) -> Result<(), Stri
                 "hits": hits.len(),
                 "error": error,
                 "rerank_unchanged": rerank_unchanged,
+                "truncated": truncated,
                 "recall": !matched.is_empty(),
                 "matched_sources": matched,
                 "sources": sources,
@@ -98,6 +103,10 @@ pub fn run(config: &Config, qrels_path: &Path, output: &Path) -> Result<(), Stri
             let hits = result.hits;
             let error = merge_errors(&result.errors);
             let rerank_unchanged = crate::search::rerank_unchanged_status(result.unchanged);
+            let truncated = result.truncated
+                || hits
+                    .iter()
+                    .any(|hit| hit["truncated"].as_bool() == Some(true));
             let sources: Vec<String> = hits
                 .iter()
                 .map(|hit| hit["source"].as_str().unwrap_or_default().to_string())
@@ -126,6 +135,7 @@ pub fn run(config: &Config, qrels_path: &Path, output: &Path) -> Result<(), Stri
                 "hits": hits.len(),
                 "error": error,
                 "rerank_unchanged": rerank_unchanged,
+                "truncated": truncated,
                 "sources": sources,
                 "recall_at": Value::Object(recall),
                 "ndcg_at": Value::Object(ndcg),
