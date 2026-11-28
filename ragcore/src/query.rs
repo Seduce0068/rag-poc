@@ -245,7 +245,13 @@ pub fn generate_answer(
         Ok(answer) if !answer.trim().is_empty() && citations_in_range(&answer, hits.len()) => {
             (mask_error_message(answer.trim()), None)
         }
-        Ok(_) => ("回答を生成できませんでした。".to_string(), None),
+        Ok(answer) if answer.trim().is_empty() => {
+            ("回答を生成できませんでした。".to_string(), None)
+        }
+        Ok(_) => (
+            "回答を生成できませんでした。".to_string(),
+            Some("out-of-range citation in generated answer".to_string()),
+        ),
         Err(message) => (
             "回答を生成できませんでした。".to_string(),
             Some(mask_error_message(&message)),
