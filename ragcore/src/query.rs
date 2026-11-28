@@ -165,13 +165,25 @@ fn llm_messages(system: &str, user: &str) -> Vec<Value> {
     ]
 }
 
-/// chat を呼ぶ（現在は opt-in の opencodeGO のみ対応）。
+/// chat を呼ぶ。クラウド opt-in 時は opencodeGO、既定はローカル llama.cpp。
 fn chat(config: &Config, system: &str, user: &str, temperature: f64) -> Result<String, String> {
-    if !config.cloud.chat_enabled {
-        return Err("local chat is not implemented; set RAG_CLOUD_CHAT_ENABLED=1".to_string());
+    let messages = llm_messages(system, user);
+    if config.cloud.chat_enabled {
+        let client = CloudClient::from_config(config)?;
+        client.chat(&messages, temperature, "ragcore-session")
+    } else {
+        let client = LlamaClient::new(
+            &config.llama_chat_url,
+            &config.chat_model,
+            config.answer_timeout_secs,
+        );
+        client.chat(
+            &config.chat_model,
+            &messages,
+            temperature,
+            config.answer_timeout_secs,
+        )
     }
-    let client = CloudClient::from_config(config)?;
-    client.chat(&llm_messages(system, user), temperature, "ragcore-session")
 }
 
 fn escape_xml(text: &str) -> String {
@@ -179,6 +191,33 @@ fn escape_xml(text: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
+}
+
+/// 回答中の `[n]` が hits の範囲内かを確認する（範囲外はインジェクション疑い）。
+fn citations_in_range(answer: &str, hit_count: usize) -> bool {
+    let bytes = answer.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'[' {
+            if let Some(close) = answer[index + 1..].find(']') {
+                let token = &answer[index + 1..index + 1 + close];
+                if token.contains('[') {
+                    // 入れ子の内側から再走査して迂回を防ぐ。
+                    index += 1;
+                    continue;
+                }
+                if let Ok(number) = token.parse::<usize>() {
+                    if number == 0 || number > hit_count {
+                        return false;
+                    }
+                }
+                index += close + 2;
+                continue;
+            }
+        }
+        index += 1;
+    }
+    true
 }
 
 /// 回答を生成する。失敗は固定文と answer_error へ分離する。
@@ -203,7 +242,9 @@ pub fn generate_answer(
     user.push_str("</chunks>\n");
 
     match chat(config, system, &user, 0.2) {
-        Ok(answer) if !answer.trim().is_empty() => (mask_error_message(answer.trim()), None),
+        Ok(answer) if !answer.trim().is_empty() && citations_in_range(&answer, hits.len()) => {
+            (mask_error_message(answer.trim()), None)
+        }
         Ok(_) => ("回答を生成できませんでした。".to_string(), None),
         Err(message) => (
             "回答を生成できませんでした。".to_string(),
@@ -289,6 +330,7 @@ mod tests {
             corpus_dir: std::path::PathBuf::from("docs"),
             collection: "c".to_string(),
             llama_server_url: "http://127.0.0.1:8090".to_string(),
+            llama_chat_url: "http://127.0.0.1:8090".to_string(),
             qdrant_url: "http://127.0.0.1:6333".to_string(),
             allow_remote_endpoints: false,
             allow_external_corpus: false,
@@ -327,6 +369,15 @@ mod tests {
             SEARCH_MODES,
             ["dense", "keyword", "hybrid", "hybrid-rerank"]
         );
+    }
+
+    #[test]
+    fn citations_in_range_rejects_out_of_range() {
+        assert!(citations_in_range("根拠 [1] と [3]", 3));
+        assert!(!citations_in_range("根拠 [0]", 3));
+        assert!(!citations_in_range("根拠 [4]", 3));
+        assert!(!citations_in_range("根拠 [[4]]", 3));
+        assert!(citations_in_range("箇条書き [a] は無視", 3));
     }
 
     #[test]

@@ -43,15 +43,12 @@ Qdrant に保存し、質問に対して関連する文章と回答を返す。P
 `OPENCODE_GO_API_KEY` が必須で、埋め込み次元と `RAG_VECTOR_SIZE` が一致しないと
 起動前に拒否される。API キー値はログ・エラー・成果物へ出力しない。
 
-`hybrid-rerank` では opencodeGO の chat で上位 `RAG_RERANK_MAX_DOCS` 件を再スコアし、
+`hybrid-rerank` では chat で上位 `RAG_RERANK_MAX_DOCS` 件を再スコアし、
 `query --json` の `answer` / `sources` に回答と出典を返す。
-chat / 回答生成は `RAG_CLOUD_CHAT_ENABLED=1` の opt-in のみ対応（ローカル llama.cpp の
-chat は未実装）。LLM 失敗時は元順・元スコアへフォールバックし、
-検索 `errors` を汚さず `answer_error` に分離する。
-
-未実装（旧 Python 実装にあった機能）:
-
-- ローカル llama.cpp 経由の chat / 回答生成（`RAG_CLOUD_CHAT_ENABLED=0` では回答なし）
+chat / 回答生成は既定ではローカル llama.cpp（`LLAMA_CHAT_URL`、既定
+`http://127.0.0.1:8090`）、`RAG_CLOUD_CHAT_ENABLED=1` のときだけ opencodeGO を使う。
+LLM 失敗時は元順・元スコアへフォールバックし、検索 `errors` を汚さず
+`answer_error` に分離する。回答中の出典番号 `[n]` が hits 範囲外なら生成失敗扱い。
 
 コーパスは既定でリポジトリ配下のみ。外部ディレクトリを投入する場合は
 `RAG_ALLOW_EXTERNAL_CORPUS=1` を明示する。`RAG_REPO_ROOT` は信頼境界の基準を
@@ -84,7 +81,8 @@ stdin JSON の op モード（`{"op":"cosine","a":[1.0],"b":[1.0]}`）も後方�
 
 | 変数 | 既定値 |
 | --- | --- |
-| `LLAMA_SERVER_URL` | `http://127.0.0.1:8090` |
+| `LLAMA_SERVER_URL` | `http://127.0.0.1:8090`（埋め込み専用） |
+| `LLAMA_CHAT_URL` | 未設定時は `LLAMA_SERVER_URL` と同値 |
 | `QDRANT_URL` | `http://127.0.0.1:6333` |
 | `RAG_ALLOW_REMOTE_ENDPOINTS` | `0`（`"1"` のみ有効） |
 | `RAG_ALLOWED_ENDPOINT_HOSTS` | 空（カンマ区切り） |

@@ -213,6 +213,80 @@ fn mask_urls_and_paths(text: &str) -> String {
     out
 }
 
+/// `bearer` の ASCII 大小文字を区別せず一致させ、続く半角スペース/タブを消費する。
+/// 改行は別行として扱うため、ここでは行頭から行末までのスライスだけを見る。
+fn bearer_prefix_len(line: &str) -> Option<usize> {
+    const SCHEME: &[u8; 6] = b"bearer";
+    let bytes = line.as_bytes();
+    if bytes.len() < SCHEME.len() {
+        return None;
+    }
+    if !bytes[..SCHEME.len()]
+        .iter()
+        .zip(SCHEME)
+        .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
+    {
+        return None;
+    }
+    let mut end = SCHEME.len();
+    while end < bytes.len() && (bytes[end] == b' ' || bytes[end] == b'\t') {
+        end += 1;
+    }
+    // 区切りが 1 個も無ければトークンが存在しない。
+    (end > SCHEME.len()).then_some(end)
+}
+
+/// `sk-` がトークン境界にあり、直後にトークン文字が続くときだけ成立する。
+fn sk_prefix_len(text: &str, start: usize) -> Option<usize> {
+    let bytes = text.as_bytes();
+    if start > 0 {
+        let previous = bytes[start - 1];
+        if previous.is_ascii_alphanumeric() || previous == b'_' || previous == b'-' {
+            return None;
+        }
+    }
+    let after = &text[start + 3..];
+    let has_token_char = after.bytes().next().is_some_and(|byte| {
+        byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_' || byte == b'.'
+    });
+    has_token_char.then_some(3)
+}
+
+/// 行内で最初に一致したマスク対象の開始位置と、消費すべき prefix 長を返す。
+fn next_mask_hit(text: &str) -> Option<(usize, usize)> {
+    let mut line_start = 0usize;
+    while line_start <= text.len() {
+        let line_end = text[line_start..]
+            .find('\n')
+            .map(|offset| line_start + offset)
+            .unwrap_or(text.len());
+        let line = &text[line_start..line_end];
+
+        let mut best: Option<(usize, usize)> = None;
+        for (offset, _) in line.char_indices() {
+            let absolute = line_start + offset;
+            let hit = bearer_prefix_len(&line[offset..]).map(|len| (absolute, len));
+            let hit = hit.or_else(|| {
+                line[offset..]
+                    .strip_prefix("sk-")
+                    .and_then(|_| sk_prefix_len(text, absolute).map(|len| (absolute, len)))
+            });
+            if let Some((start, len)) = hit {
+                best = Some((start, len));
+                break;
+            }
+        }
+        if best.is_some() {
+            return best;
+        }
+        if line_end == text.len() {
+            break;
+        }
+        line_start = line_end + 1;
+    }
+    None
+}
+
 /// エラー文言に埋め込まれうる Bearer トークン / `sk-` トークンを落とす簡易マスク。
 /// 実際の秘密情報はコードに置かない（テストもダミー文字列のみ）。
 pub fn mask_error_message(message: &str) -> String {
@@ -220,15 +294,7 @@ pub fn mask_error_message(message: &str) -> String {
     let mut out = String::with_capacity(message.len());
     let mut rest = &message[..];
     while !rest.is_empty() {
-        let bearer = rest.find("Bearer ").map(|index| (index, "Bearer ".len()));
-        let sk = rest.find("sk-").map(|index| (index, "sk-".len()));
-        let hit = match (bearer, sk) {
-            (Some(left), Some(right)) => Some(if left.0 <= right.0 { left } else { right }),
-            (Some(left), None) => Some(left),
-            (None, Some(right)) => Some(right),
-            (None, None) => None,
-        };
-        let Some((start, prefix_len)) = hit else {
+        let Some((start, prefix_len)) = next_mask_hit(rest) else {
             out.push_str(rest);
             break;
         };
@@ -560,6 +626,14 @@ impl CloudClient {
         if !self.chat_enabled {
             return Err("cloud chat is disabled".to_string());
         }
+        if session_id.is_empty()
+            || session_id.len() > 128
+            || !session_id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+        {
+            return Err("invalid chat session id".to_string());
+        }
 
         let body = build_chat_body(&self.chat_model, messages, temperature);
         let mut failures = 0usize;
@@ -633,6 +707,7 @@ mod tests {
             corpus_dir: PathBuf::from("docs"),
             collection: "c".to_string(),
             llama_server_url: "http://127.0.0.1:8090".to_string(),
+            llama_chat_url: "http://127.0.0.1:8090".to_string(),
             qdrant_url: "http://127.0.0.1:6333".to_string(),
             allow_remote_endpoints: false,
             allow_external_corpus: false,
@@ -901,6 +976,47 @@ mod tests {
     }
 
     #[test]
+    fn mask_error_message_handles_bearer_case_tab_and_sk_word_boundary() {
+        // 小文字 / 大文字 / 混在の bearer と、スペース・タブの複数区切り。
+        assert_eq!(mask_error_message("low bearer DUMMY_TOKEN"), "low <masked>");
+        assert_eq!(
+            mask_error_message("loud BEARER DUMMY_TOKEN"),
+            "loud <masked>"
+        );
+        assert_eq!(
+            mask_error_message("mixed Bearer\t\tDUMMY_TOKEN"),
+            "mixed <masked>"
+        );
+        assert_eq!(
+            mask_error_message("tab bearer\tDUMMY_TOKEN"),
+            "tab <masked>"
+        );
+
+        // 一般語の "task-force" / "ask-force" はマスクしない。
+        assert_eq!(
+            mask_error_message("task-force and ask-force are ordinary words"),
+            "task-force and ask-force are ordinary words"
+        );
+
+        // 改行は跨がない: 区切りが無い行の Bearer はマスクしない。
+        assert_eq!(
+            mask_error_message("header Bearer\nDUMMY_TOKEN"),
+            "header Bearer\nDUMMY_TOKEN"
+        );
+        assert_eq!(
+            mask_error_message("first bearer X\nsecond sk-DUMMY"),
+            "first <masked>\nsecond <masked>"
+        );
+
+        // 既存の sk- トークンは維持。
+        assert_eq!(
+            mask_error_message("prefix sk-DUMMY and sk-OTHER"),
+            "prefix <masked> and <masked>"
+        );
+        assert_eq!(mask_error_message("plain error"), "plain error");
+    }
+
+    #[test]
     fn response_embeddings_follow_input_order() {
         let payload = serde_json::json!({
             "data": [
@@ -991,6 +1107,13 @@ mod tests {
             retry_after("Wed, 21 Oct 2015 07:28:00 GMT"),
             Some(Duration::from_secs(MAX_RETRY_AFTER_SECS))
         );
+    }
+
+    #[test]
+    fn mask_error_message_handles_multibyte_input() {
+        let masked = mask_error_message("日本語のエラー Bearer DUMMY_TOKEN と sk-DUMMY を含みます");
+        assert!(masked.contains("<masked>"));
+        assert!(!masked.contains("DUMMY_TOKEN"));
     }
 
     #[test]

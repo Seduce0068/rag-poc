@@ -41,6 +41,7 @@ pub struct Config {
     pub allow_external_corpus: bool,
     pub collection: String,
     pub llama_server_url: String,
+    pub llama_chat_url: String,
     pub qdrant_url: String,
     pub allow_remote_endpoints: bool,
     pub allowed_endpoint_hosts: Vec<String>,
@@ -192,6 +193,8 @@ fn resolve_corpus_dir_inner(
 
 impl Config {
     pub fn from_env() -> Result<Self, String> {
+        let llama_server_url = env_str("LLAMA_SERVER_URL", "http://127.0.0.1:8090");
+        let llama_chat_url = env_str("LLAMA_CHAT_URL", &llama_server_url);
         let embed_model = env_str("EMBED_MODEL", "qwen2.5:3b");
         let (default_query, default_passage) = if embed_model.to_lowercase().contains("ruri") {
             ("クエリ: ", "文章: ")
@@ -227,7 +230,8 @@ impl Config {
             corpus_dir: PathBuf::from(env_str("RAG_CORPUS_DIR", "passkey-gateway/docs")),
             allow_external_corpus: env_flag("RAG_ALLOW_EXTERNAL_CORPUS"),
             collection: env_str("RAG_COLLECTION", "rag_poc_docs"),
-            llama_server_url: env_str("LLAMA_SERVER_URL", "http://127.0.0.1:8090"),
+            llama_server_url,
+            llama_chat_url,
             qdrant_url: env_str("QDRANT_URL", "http://127.0.0.1:6333"),
             allow_remote_endpoints: env_flag("RAG_ALLOW_REMOTE_ENDPOINTS"),
             allowed_endpoint_hosts: env_str("RAG_ALLOWED_ENDPOINT_HOSTS", "")
@@ -353,6 +357,7 @@ impl Config {
             }
         }
         self.validate_endpoint(&self.llama_server_url, "LLAMA_SERVER_URL")?;
+        self.validate_endpoint(&self.llama_chat_url, "LLAMA_CHAT_URL")?;
         self.validate_endpoint(&self.qdrant_url, "QDRANT_URL")?;
         self.validate_cloud_settings()?;
         Ok(())
@@ -414,6 +419,7 @@ mod tests {
             allow_external_corpus: false,
             collection: "c".to_string(),
             llama_server_url: "http://127.0.0.1:8090".to_string(),
+            llama_chat_url: "http://127.0.0.1:8090".to_string(),
             qdrant_url: "http://127.0.0.1:6333".to_string(),
             allow_remote_endpoints: false,
             allowed_endpoint_hosts: Vec::new(),

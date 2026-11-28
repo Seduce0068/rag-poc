@@ -381,10 +381,11 @@ fn collect_forbidden_keys(
     value: &serde_json::Value,
     depth: u32,
     present: &mut Vec<&'static str>,
-    truncated: &mut bool,
+    truncated_depth: &mut bool,
+    truncated_array: &mut bool,
 ) {
     if depth >= MAX_SCAN_DEPTH {
-        *truncated = true;
+        *truncated_depth = true;
         return;
     }
     match value {
@@ -395,15 +396,15 @@ fn collect_forbidden_keys(
                 }
             }
             for child in map.values() {
-                collect_forbidden_keys(child, depth + 1, present, truncated);
+                collect_forbidden_keys(child, depth + 1, present, truncated_depth, truncated_array);
             }
         }
         serde_json::Value::Array(items) => {
             if items.len() > MAX_SCAN_ARRAY_ITEMS {
-                *truncated = true;
+                *truncated_array = true;
             }
             for item in items.iter().take(MAX_SCAN_ARRAY_ITEMS) {
-                collect_forbidden_keys(item, depth + 1, present, truncated);
+                collect_forbidden_keys(item, depth + 1, present, truncated_depth, truncated_array);
             }
         }
         _ => {}
@@ -548,8 +549,15 @@ pub fn check_eval_results(files: &[(String, String)]) -> GateReport {
 
         // トップレベルと results 直下に限らず、JSON 全体を再帰走査する。
         let mut present: Vec<&'static str> = Vec::new();
-        let mut truncated = false;
-        collect_forbidden_keys(&data, 0, &mut present, &mut truncated);
+        let mut truncated_depth = false;
+        let mut truncated_array = false;
+        collect_forbidden_keys(
+            &data,
+            0,
+            &mut present,
+            &mut truncated_depth,
+            &mut truncated_array,
+        );
         present.sort_unstable();
         if !present.is_empty() {
             diagnostics.push(format!(
@@ -561,8 +569,12 @@ pub fn check_eval_results(files: &[(String, String)]) -> GateReport {
         }
         // 上限到達で走査を打ち切った場合は全走査が完了していないため fail-close。
         // diagnostics にはファイル名と理由のみを残し、値は一切含めない。
-        if truncated {
-            diagnostics.push(format!("{name}: scan truncated (depth or array limit)"));
+        if truncated_depth {
+            diagnostics.push(format!("{name}: scan truncated (depth limit)"));
+            file_failed = true;
+        }
+        if truncated_array {
+            diagnostics.push(format!("{name}: scan truncated (array limit)"));
             file_failed = true;
         }
 

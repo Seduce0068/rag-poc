@@ -10,6 +10,7 @@
 
 use std::time::Duration;
 
+use serde::Serialize;
 use serde_json::{json, Value};
 
 /// タイムアウト未指定／不正値時の既定（秒）。
@@ -47,11 +48,18 @@ impl LlamaClient {
     }
 
     /// JSON を POST し、ステータス確認済みの JSON 値を返す。
-    fn post_json(&self, url: &str, body: &Value) -> Result<Value, String> {
-        let response = self
-            .client
-            .post(url)
-            .json(body)
+    /// `timeout` を指定した場合はリクエストごとのタイムアウトを上書きする。
+    fn post_json(
+        &self,
+        url: &str,
+        body: &Value,
+        timeout: Option<Duration>,
+    ) -> Result<Value, String> {
+        let mut request = self.client.post(url).json(body);
+        if let Some(timeout) = timeout {
+            request = request.timeout(timeout);
+        }
+        let response = request
             .send()
             .map_err(|_| "llama-server への接続に失敗しました".to_string())?;
         if !response.status().is_success() {
@@ -78,8 +86,25 @@ impl LlamaClient {
         let inputs = prefixed_inputs(texts, prefix);
         let url = format!("{}/v1/embeddings", self.base_url.trim_end_matches('/'));
         let body = embed_body(&self.model, &inputs);
-        let data = self.post_json(&url, &body)?;
+        let data = self.post_json(&url, &body, None)?;
         parse_embed_response(&data, inputs.len(), validate_dim)
+    }
+
+    /// OpenAI 互換 `/v1/chat/completions` を呼び、先頭 choice の content を返す。
+    pub fn chat(
+        &self,
+        model: &str,
+        messages: &[serde_json::Value],
+        temperature: f64,
+        timeout_secs: f64,
+    ) -> Result<String, String> {
+        let url = format!(
+            "{}/v1/chat/completions",
+            self.base_url.trim_end_matches('/')
+        );
+        let body = chat_body(model, messages, temperature);
+        let data = self.post_json(&url, &body, Some(request_timeout(timeout_secs)))?;
+        parse_chat_response(&data)
     }
 }
 
@@ -154,6 +179,48 @@ fn parse_embed_response(
     Ok(result)
 }
 
+#[derive(Serialize)]
+struct ChatRequestBody<'a> {
+    model: &'a str,
+    messages: &'a [Value],
+    temperature: f64,
+    stream: bool,
+}
+
+/// OpenAI 互換の chat リクエストボディを組み立てる。
+fn chat_body(model: &str, messages: &[Value], temperature: f64) -> Value {
+    let body = ChatRequestBody {
+        model,
+        messages,
+        temperature,
+        stream: false,
+    };
+    serde_json::to_value(body).unwrap_or_else(|_| {
+        json!({
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            "stream": false
+        })
+    })
+}
+
+/// OpenAI 互換の chat レスポンスから先頭 choice の content を取り出す。
+fn parse_chat_response(data: &Value) -> Result<String, String> {
+    let content = data
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("content"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| "chat 応答の content を取得できませんでした".to_string())?;
+    if content.is_empty() {
+        return Err("chat 応答の content を取得できませんでした".to_string());
+    }
+    Ok(content.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -211,5 +278,56 @@ mod tests {
         assert!(err.contains("次元"));
         assert!(!err.contains("3.0"));
         assert!(!err.contains("SECRET_MODEL"));
+    }
+
+    #[test]
+    fn chat_body_has_expected_shape() {
+        let messages = vec![
+            json!({"role": "system", "content": "you are helpful"}),
+            json!({"role": "user", "content": "hello"}),
+        ];
+        let body = chat_body("test-model", &messages, 0.7);
+        assert_eq!(
+            body,
+            json!({
+                "model": "test-model",
+                "messages": [
+                    {"role": "system", "content": "you are helpful"},
+                    {"role": "user", "content": "hello"}
+                ],
+                "temperature": 0.7,
+                "stream": false
+            })
+        );
+    }
+
+    #[test]
+    fn parse_chat_response_extracts_first_choice_content_in_order() {
+        let data = json!({
+            "choices": [
+                {"message": {"role": "assistant", "content": "first"}},
+                {"message": {"role": "assistant", "content": "second"}}
+            ]
+        });
+        assert_eq!(parse_chat_response(&data).unwrap(), "first");
+    }
+
+    #[test]
+    fn parse_chat_response_rejects_invalid_responses_with_fixed_error() {
+        let fixed = "chat 応答の content を取得できませんでした";
+        let cases = vec![
+            json!({}),
+            json!({"choices": []}),
+            json!({"choices": [{"message": {}}]}),
+            json!({"choices": [{"message": {"content": ""}}]}),
+            json!({"choices": [{"message": {"content": 123}}]}),
+            json!({"choices": [{"message": {"content": null}}]}),
+        ];
+        for data in cases {
+            let err = parse_chat_response(&data).unwrap_err();
+            assert_eq!(err, fixed);
+            assert!(!err.contains("http"));
+            assert!(!err.contains("SECRET"));
+        }
     }
 }

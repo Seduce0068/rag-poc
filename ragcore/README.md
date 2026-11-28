@@ -39,7 +39,8 @@ LLM 失敗時は元順・元スコアへフォールバックし、全件に 5 �
 リトライとハイブリッド検索の部分失敗の構造化記録（`query --json` のトップレベル `errors` 配列）を実装済みです。
 コーパスは既定でリポジトリ配下のみ（`RAG_ALLOW_EXTERNAL_CORPUS=1` で外部許可、
 `RAG_REPO_ROOT` で基準を上書き）。公開ゲートは走査上限到達時に fail-close する。
-未実装: ローカル llama.cpp の chat。
+chat / 回答生成は既定でローカル llama.cpp の `/v1/chat/completions`
+（`LLAMA_CHAT_URL`）、`RAG_CLOUD_CHAT_ENABLED=1` のときだけ opencodeGO を使う。
 接続先は loopback のみ既定許可で、リモートは opt-in ＋ https ＋ 許可ホストが必須です。
 
 ```bash
