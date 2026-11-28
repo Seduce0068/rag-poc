@@ -8,6 +8,7 @@
 //! エラー文言にはキー値・生レスポンス本文・URL を一切含めない。
 //! `unsafe` は使用しない。
 
+use crate::config::ValidatedEndpoint;
 use std::time::Duration;
 
 use serde::Serialize;
@@ -35,13 +36,14 @@ pub struct LlamaClient {
 
 impl LlamaClient {
     /// 共有のブロッキング HTTP クライアントをタイムアウト付きで生成する。
-    pub fn new(base_url: &str, model: &str, timeout_secs: f64) -> Self {
+    pub fn new(endpoint: &ValidatedEndpoint, model: &str, timeout_secs: f64) -> Self {
         let client = reqwest::blocking::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
             .timeout(request_timeout(timeout_secs))
             .build()
             .expect("llama-server HTTP client must be buildable");
         Self {
-            base_url: base_url.to_string(),
+            base_url: endpoint.url().to_string(),
             model: model.to_string(),
             client,
         }

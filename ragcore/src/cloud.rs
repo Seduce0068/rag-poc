@@ -525,24 +525,22 @@ impl CloudClient {
                 cloud.api_key_name.unwrap_or("cloud API key")
             )
         })?;
-        let parsed = url::Url::parse(&cloud.base_url)
-            .map_err(|_| "RAG_CLOUD_BASE_URL is invalid".to_string())?;
-        if parsed.scheme() != "https" {
-            return Err("RAG_CLOUD_BASE_URL must use https".to_string());
-        }
+        // endpoint は Config が検証済みで返す（URL の再検証は不要）。
+        let endpoint = config.cloud_endpoint()?;
         if cloud.embed_model.is_empty() {
             return Err("RAG_CLOUD_EMBED_MODEL must be set explicitly".to_string());
         }
 
         let http = reqwest::blocking::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
             .timeout(request_timeout(cloud.timeout_secs))
             .build()
             .map_err(|_| "failed to build cloud HTTP client".to_string())?;
 
         Ok(Self {
             http,
-            endpoint: embeddings_endpoint(&cloud.base_url),
-            chat_endpoint: chat_endpoint(&cloud.base_url),
+            endpoint: embeddings_endpoint(endpoint.url()),
+            chat_endpoint: chat_endpoint(endpoint.url()),
             model: cloud.embed_model.clone(),
             chat_model: cloud.model.clone(),
             dimensions: config.cloud_embed_dimension(),
@@ -709,9 +707,9 @@ mod tests {
             llama_server_url: "http://127.0.0.1:8090".to_string(),
             llama_chat_url: "http://127.0.0.1:8090".to_string(),
             qdrant_url: "http://127.0.0.1:6333".to_string(),
-            allow_remote_endpoints: false,
+            allow_remote_endpoints: true,
             allow_external_corpus: false,
-            allowed_endpoint_hosts: Vec::new(),
+            allowed_endpoint_hosts: vec!["example.invalid".to_string()],
             embed_model: "qwen2.5:3b".to_string(),
             chat_model: "qwen2.5:3b".to_string(),
             vector_size: 3,

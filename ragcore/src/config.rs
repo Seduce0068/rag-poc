@@ -34,6 +34,27 @@ impl std::fmt::Debug for CloudConfig {
     }
 }
 
+/// 検証済みの接続先 URL。
+///
+/// 生成時点で `Config::validate_endpoint()` を通過していることが保証される。
+#[derive(Debug, Clone)]
+pub struct ValidatedEndpoint {
+    url: String,
+}
+
+impl ValidatedEndpoint {
+    /// 検証済み URL 文字列への参照を返す。
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+}
+
+impl From<ValidatedEndpoint> for String {
+    fn from(endpoint: ValidatedEndpoint) -> Self {
+        endpoint.url
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub corpus_dir: PathBuf,
@@ -332,6 +353,40 @@ impl Config {
         Ok(())
     }
 
+    /// 共通検証を通過した `ValidatedEndpoint` を構築する。
+    fn validated(&self, url: &str, name: &str) -> Result<ValidatedEndpoint, String> {
+        self.validate_endpoint(url, name)?;
+        Ok(ValidatedEndpoint {
+            url: url.to_string(),
+        })
+    }
+
+    /// Llama 埋め込み用 endpoint を検証して返す。
+    pub fn llama_endpoint(&self) -> Result<ValidatedEndpoint, String> {
+        self.validated(&self.llama_server_url, "LLAMA_SERVER_URL")
+    }
+
+    /// Llama チャット用 endpoint を検証して返す。
+    pub fn llama_chat_endpoint(&self) -> Result<ValidatedEndpoint, String> {
+        self.validated(&self.llama_chat_url, "LLAMA_CHAT_URL")
+    }
+
+    /// Qdrant endpoint を検証して返す。
+    pub fn qdrant_endpoint(&self) -> Result<ValidatedEndpoint, String> {
+        self.validated(&self.qdrant_url, "QDRANT_URL")
+    }
+
+    /// クラウド endpoint を検証して返す。
+    ///
+    /// 共通検証に加え、loopback であっても https を必須とする。
+    pub fn cloud_endpoint(&self) -> Result<ValidatedEndpoint, String> {
+        let endpoint = self.validated(&self.cloud.base_url, "RAG_CLOUD_BASE_URL")?;
+        if !endpoint.url.starts_with("https://") {
+            return Err("RAG_CLOUD_BASE_URL must use https".to_string());
+        }
+        Ok(endpoint)
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         if self.chunk_size == 0 {
             return Err("CHUNK_SIZE must be positive".to_string());
@@ -356,9 +411,10 @@ impl Config {
                 return Err("Ruri requires CHUNK_SIZE<=512".to_string());
             }
         }
-        self.validate_endpoint(&self.llama_server_url, "LLAMA_SERVER_URL")?;
-        self.validate_endpoint(&self.llama_chat_url, "LLAMA_CHAT_URL")?;
-        self.validate_endpoint(&self.qdrant_url, "QDRANT_URL")?;
+        // 既存の直接検証に加えて新しいアクセサも通す（二重検証だが副作用はない）。
+        self.llama_endpoint()?;
+        self.llama_chat_endpoint()?;
+        self.qdrant_endpoint()?;
         self.validate_cloud_settings()?;
         Ok(())
     }
@@ -371,6 +427,7 @@ impl Config {
         if self.cloud.chat_enabled && !self.cloud.enabled {
             return Err("RAG_CLOUD_CHAT_ENABLED=1 requires RAG_CLOUD_ENABLED=1".to_string());
         }
+        // cloud の https 必須は loopback にも適用する（既存の fail-closed 条件を維持）。
         let endpoint = url::Url::parse(&self.cloud.base_url)
             .map_err(|_| "RAG_CLOUD_BASE_URL is invalid".to_string())?;
         if endpoint.scheme() != "https" {
@@ -618,5 +675,63 @@ mod tests {
         let mut config = base();
         config.corpus_dir = PathBuf::from("/outside/corpus");
         assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn endpoint_accessors_accept_loopback() {
+        let mut config = base();
+        assert_eq!(
+            config.llama_endpoint().unwrap().url(),
+            "http://127.0.0.1:8090"
+        );
+        assert_eq!(
+            config.llama_chat_endpoint().unwrap().url(),
+            "http://127.0.0.1:8090"
+        );
+        assert_eq!(
+            config.qdrant_endpoint().unwrap().url(),
+            "http://127.0.0.1:6333"
+        );
+        config.cloud.base_url = "https://127.0.0.1:8443/v1".to_string();
+        assert_eq!(
+            config.cloud_endpoint().unwrap().url(),
+            "https://127.0.0.1:8443/v1"
+        );
+    }
+
+    #[test]
+    fn endpoint_accessors_reject_remote_without_opt_in() {
+        let mut config = base();
+        config.llama_server_url = "https://example.invalid:8090".to_string();
+        config.llama_chat_url = "https://example.invalid:8090".to_string();
+        config.qdrant_url = "https://example.invalid:6333".to_string();
+        assert!(config.llama_endpoint().is_err());
+        assert!(config.llama_chat_endpoint().is_err());
+        assert!(config.qdrant_endpoint().is_err());
+
+        config.allow_remote_endpoints = true;
+        config.allowed_endpoint_hosts = vec![
+            "example.invalid:8090".to_string(),
+            "example.invalid:6333".to_string(),
+        ];
+        assert!(config.llama_endpoint().is_ok());
+        assert!(config.llama_chat_endpoint().is_ok());
+        assert!(config.qdrant_endpoint().is_ok());
+    }
+
+    #[test]
+    fn cloud_endpoint_rejects_loopback_http() {
+        let mut config = base();
+        config.cloud.base_url = "http://127.0.0.1:8080/v1".to_string();
+        let err = config.cloud_endpoint().unwrap_err();
+        assert!(err.contains("https"));
+    }
+
+    #[test]
+    fn validated_endpoint_converts_to_string() {
+        let config = base();
+        let endpoint = config.llama_endpoint().unwrap();
+        let owned: String = endpoint.into();
+        assert_eq!(owned, "http://127.0.0.1:8090");
     }
 }

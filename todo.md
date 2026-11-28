@@ -21,7 +21,6 @@ status: draft
 
 ### 優先度: 高
 
-- [ ] **検証済み Endpoint 型を全 HTTP アダプタへ適用** — `ragcore/src/config.rs:298-363`, `cloud.rs:515-535` / R1-AR, R3-IV / ライブラリ経路でリモート opt-in を迂回可能
 
 ### 優先度: 中
 
@@ -66,6 +65,7 @@ status: draft
 
 ## 完了
 
+- [x] 検証済み Endpoint 型を全 HTTP アダプタへ適用（redirect 無効化含む / 120 tests）
 - [x] `--recreate` を staging コレクション方式へ変更（116 tests）
 - [x] ingest の読み取り・チャンク化失敗を fail-close 化（112 tests）
 - [x] `chrono` を `time` へ置換し RUSTSEC-2026-0543 を解消（cargo audit 通過 / 109 tests）

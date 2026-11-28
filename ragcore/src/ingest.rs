@@ -256,7 +256,7 @@ impl Embedder {
             )))
         } else {
             Ok(Self::Local(crate::llama::LlamaClient::new(
-                &config.llama_server_url,
+                &config.llama_endpoint()?,
                 &config.embed_model,
                 config.llama_timeout_secs,
             )))
@@ -316,7 +316,7 @@ pub fn run(config: &Config, corpus_dir: &Path, recreate: bool, yes: bool) -> Res
     let embedder = Embedder::from_config(config)?;
     let vector_size = resolved_vector_size(config);
     let original = QdrantClient::new(
-        &config.qdrant_url,
+        &config.qdrant_endpoint()?,
         &config.collection,
         config.qdrant_timeout_secs,
     );
@@ -356,7 +356,7 @@ pub fn run(config: &Config, corpus_dir: &Path, recreate: bool, yes: bool) -> Res
     // 元コレクションを差し替える。失敗時は staging を残して回収可能にする。
     let staging_name = staging_collection_name(&config.collection);
     let staging = QdrantClient::new(
-        &config.qdrant_url,
+        &config.qdrant_endpoint()?,
         &staging_name,
         config.qdrant_timeout_secs,
     );

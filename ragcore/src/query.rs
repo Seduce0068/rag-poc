@@ -72,7 +72,7 @@ fn dense_points(config: &Config, question: &str, top_k: usize) -> Result<Vec<Val
     let vectors = match embedder_kind(config) {
         EmbedderKind::Local => {
             let client = LlamaClient::new(
-                &config.llama_server_url,
+                &config.llama_endpoint()?,
                 &config.embed_model,
                 config.llama_timeout_secs,
             );
@@ -85,7 +85,7 @@ fn dense_points(config: &Config, question: &str, top_k: usize) -> Result<Vec<Val
     };
     let vector = vectors.into_iter().next().ok_or("no embedding returned")?;
     let qdrant = QdrantClient::new(
-        &config.qdrant_url,
+        &config.qdrant_endpoint()?,
         &config.collection,
         config.qdrant_timeout_secs,
     );
@@ -98,7 +98,7 @@ fn keyword_points(
     top_k: usize,
 ) -> Result<(Vec<Value>, bool), String> {
     let qdrant = QdrantClient::new(
-        &config.qdrant_url,
+        &config.qdrant_endpoint()?,
         &config.collection,
         config.qdrant_timeout_secs,
     );
@@ -179,7 +179,7 @@ fn chat(config: &Config, system: &str, user: &str, temperature: f64) -> Result<S
         client.chat(&messages, temperature, "ragcore-session")
     } else {
         let client = LlamaClient::new(
-            &config.llama_chat_url,
+            &config.llama_chat_endpoint()?,
             &config.chat_model,
             config.answer_timeout_secs,
         );

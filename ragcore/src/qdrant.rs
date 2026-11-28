@@ -10,6 +10,7 @@
 //!
 //! `unsafe` は使用しない。
 
+use crate::config::ValidatedEndpoint;
 use std::time::Duration;
 
 use reqwest::blocking::Response;
@@ -51,13 +52,14 @@ pub struct QdrantClient {
 
 impl QdrantClient {
     /// 共有のブロッキング HTTP クライアントをタイムアウト付きで生成する。
-    pub fn new(base_url: &str, collection: &str, timeout_secs: f64) -> Self {
+    pub fn new(endpoint: &ValidatedEndpoint, collection: &str, timeout_secs: f64) -> Self {
         let client = reqwest::blocking::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
             .timeout(request_timeout(timeout_secs))
             .build()
             .expect("Qdrant HTTP client must be buildable");
         Self {
-            base_url: base_url.to_string(),
+            base_url: endpoint.url().to_string(),
             collection: collection.to_string(),
             timeout_secs,
             client,
