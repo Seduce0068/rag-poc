@@ -31,6 +31,55 @@ fn chunk_error(count: usize) -> String {
     format!("チャンク化に失敗しました（{count} 件）")
 }
 
+/// `--recreate` の中間コレクション名。固定ルールで生成する（HTTP 不要）。
+fn staging_collection_name(collection: &str) -> String {
+    format!("{collection}__staging")
+}
+
+/// 失敗時に残した staging を回収するための固定文言。
+/// パス・URL・レスポンス本文・認証情報は一切含めない。
+fn staging_failure_error() -> String {
+    "再作成中に失敗しました。元コレクションは変更していません（staging を保持しています）"
+        .to_string()
+}
+
+/// 元コレクションを削除してよい判定（純粋関数・HTTP 不要）。
+///
+/// staging への全件 upsert 成功・scroll 完了・全 point のベクトル照合が
+/// 揃ったときだけ `true`。いずれかが欠けたら元コレクションは触らない。
+fn may_delete_original(
+    staging_upserted: bool,
+    scroll_complete: bool,
+    vectors_matched: bool,
+) -> bool {
+    staging_upserted && scroll_complete && vectors_matched
+}
+
+/// scroll で読んだ point に、メモリ上の埋め込みベクトルを id で付与する。
+/// scroll は `with_vector: false` なので、再埋め込みせずベクトルを再利用する。
+/// 1 件でも id が見つからない／ベクトルが空なら `None` を返し、昇格しない。
+fn attach_vectors(scrolled: &[Value], embedded: &[Value]) -> Option<Vec<Value>> {
+    let mut by_id: std::collections::HashMap<u64, &Value> = std::collections::HashMap::new();
+    for point in embedded {
+        let id = point.get("id")?.as_u64()?;
+        let vector = point.get("vector")?;
+        if vector.as_array().is_none_or(|v| v.is_empty()) {
+            return None;
+        }
+        by_id.insert(id, vector);
+    }
+    scrolled
+        .iter()
+        .map(|point| {
+            let id = point.get("id")?.as_u64()?;
+            let vector = (*by_id.get(&id)?).clone();
+            let mut merged = point.clone();
+            merged["vector"] = vector.clone();
+            Some(merged)
+        })
+        .collect()
+}
+
 fn is_heading(line: &str) -> bool {
     line.starts_with(HEADING_RE)
 }
@@ -265,18 +314,12 @@ pub fn run(config: &Config, corpus_dir: &Path, recreate: bool, yes: bool) -> Res
     eprintln!("[ingest] files={} chunks={}", files.len(), points.len());
 
     let embedder = Embedder::from_config(config)?;
-    let qdrant = QdrantClient::new(
+    let vector_size = resolved_vector_size(config);
+    let original = QdrantClient::new(
         &config.qdrant_url,
         &config.collection,
         config.qdrant_timeout_secs,
     );
-
-    if recreate {
-        qdrant.delete_collection()?;
-    }
-    if !qdrant.collection_exists()? {
-        qdrant.create_collection(resolved_vector_size(config))?;
-    }
 
     for batch in points.chunks_mut(EMBED_BATCH_SIZE) {
         let texts: Vec<String> = batch
@@ -296,10 +339,71 @@ pub fn run(config: &Config, corpus_dir: &Path, recreate: bool, yes: bool) -> Res
             point["vector"] = json!(vector);
         }
     }
-    for batch in points.chunks(UPSERT_BATCH_SIZE) {
-        qdrant.upsert(batch)?;
+
+    if !recreate {
+        if !original.collection_exists()? {
+            original.create_collection(vector_size)?;
+        }
+        for batch in points.chunks(UPSERT_BATCH_SIZE) {
+            original.upsert(batch)?;
+        }
+        eprintln!("[ingest] done: {} points", points.len());
+        return Ok(());
     }
-    eprintln!("[ingest] done: {} points", points.len());
+
+    // --recreate: 旧データを守るため、元コレクションは最後まで触らない。
+    // まず staging に全件投入し、読戻しとベクトル照合が成功した時だけ
+    // 元コレクションを差し替える。失敗時は staging を残して回収可能にする。
+    let staging_name = staging_collection_name(&config.collection);
+    let staging = QdrantClient::new(
+        &config.qdrant_url,
+        &staging_name,
+        config.qdrant_timeout_secs,
+    );
+
+    // 前回失敗の残骸を消してから作り直す（元コレクションには触れない）。
+    staging
+        .delete_collection()
+        .map_err(|_| staging_failure_error())?;
+    staging
+        .create_collection(vector_size)
+        .map_err(|_| staging_failure_error())?;
+
+    let mut staging_upserted = true;
+    for batch in points.chunks(UPSERT_BATCH_SIZE) {
+        if staging.upsert(batch).is_err() {
+            staging_upserted = false;
+            break;
+        }
+    }
+    if !staging_upserted {
+        return Err(staging_failure_error());
+    }
+
+    let scrolled = staging.scroll_all().map_err(|_| staging_failure_error())?;
+    // ページ上限で打ち切られた場合は全件揃っていないので昇格しない。
+    let scroll_complete = !scrolled.truncated;
+    let promoted = attach_vectors(&scrolled.points, &points)
+        .filter(|merged| merged.len() == scrolled.points.len() && merged.len() == points.len());
+    let vectors_matched = promoted.is_some();
+    // 3 条件が揃ったときだけ元への昇格を実行する（純粋判定をゲートに使う）。
+    if !may_delete_original(staging_upserted, scroll_complete, vectors_matched) {
+        return Err(staging_failure_error());
+    }
+    let promoted = promoted.ok_or_else(staging_failure_error)?;
+
+    // 元は削除せず上書きする。DELETE 後の create/upsert 失敗で旧データが
+    // 完全に失われる経路を無くす（部分更新には留まるが復旧可能）。
+    if !original.collection_exists()? {
+        original.create_collection(vector_size)?;
+    }
+    for batch in promoted.chunks(UPSERT_BATCH_SIZE) {
+        original.upsert(batch)?;
+    }
+    // 昇格が完了した後にのみ staging を片付ける。
+    staging.delete_collection()?;
+
+    eprintln!("[ingest] done: {} points (recreated)", points.len());
     Ok(())
 }
 
@@ -462,5 +566,70 @@ mod tests {
         let config = test_config();
         let err = run(&config, Path::new("missing-in-repo-corpus"), false, false).unwrap_err();
         assert_eq!(err, "corpus dir not found");
+    }
+
+    /// staging 名は `collection + "__staging"` の固定ルール（HTTP なし）。
+    #[test]
+    fn staging_collection_name_is_fixed() {
+        assert_eq!(staging_collection_name("docs"), "docs__staging");
+        assert_eq!(staging_collection_name(""), "__staging");
+        assert_eq!(
+            staging_collection_name("my-collection"),
+            "my-collection__staging"
+        );
+        // 元コレクション名と衝突しないこと。
+        assert_ne!(staging_collection_name("docs"), "docs");
+    }
+
+    /// 元コレクション削除判定は 3 条件すべてが揃ったときだけ真。
+    #[test]
+    fn original_is_deleted_only_after_full_staging_success() {
+        assert!(may_delete_original(true, true, true));
+        // いずれか 1 つでも欠けたら元コレクションを削除しない。
+        assert!(!may_delete_original(false, true, true));
+        assert!(!may_delete_original(true, false, true));
+        assert!(!may_delete_original(true, true, false));
+        assert!(!may_delete_original(false, false, false));
+    }
+
+    /// 失敗文言は固定で、パス・URL・本文・認証情報を含まない。
+    #[test]
+    fn staging_failure_error_is_fixed_and_sanitized() {
+        let err = staging_failure_error();
+        assert_eq!(
+            err,
+            "再作成中に失敗しました。元コレクションは変更していません（staging を保持しています）"
+        );
+        assert!(!err.contains('/'));
+        assert!(!err.contains("http"));
+        assert!(!err.contains("secret"));
+    }
+
+    /// scroll 結果にメモリ上のベクトルを id で付与する（再埋め込みなし・HTTP なし）。
+    #[test]
+    fn attach_vectors_merges_by_id_and_rejects_missing_vectors() {
+        let embedded = vec![
+            json!({ "id": 1, "vector": [0.1, 0.2], "payload": { "text": "a" } }),
+            json!({ "id": 2, "vector": [0.3, 0.4], "payload": { "text": "b" } }),
+        ];
+        let scrolled = vec![
+            json!({ "id": 2, "payload": { "text": "b" } }),
+            json!({ "id": 1, "payload": { "text": "a" } }),
+        ];
+        let merged = attach_vectors(&scrolled, &embedded).unwrap();
+        assert_eq!(merged.len(), 2);
+        // scroll 順を維持しつつ、ベクトルは id 対応で復元される。
+        assert_eq!(merged[0]["id"], json!(2));
+        assert_eq!(merged[0]["vector"], json!([0.3, 0.4]));
+        assert_eq!(merged[1]["id"], json!(1));
+        assert_eq!(merged[1]["vector"], json!([0.1, 0.2]));
+
+        // id が存在しない場合は None（昇格しない）。
+        let unknown = vec![json!({ "id": 99, "payload": {} })];
+        assert!(attach_vectors(&unknown, &embedded).is_none());
+        // ベクトルが空の point が混ざっても昇格しない。
+        let mut broken = embedded.clone();
+        broken[0]["vector"] = json!([]);
+        assert!(attach_vectors(&scrolled, &broken).is_none());
     }
 }

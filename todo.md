@@ -21,11 +21,11 @@ status: draft
 
 ### 優先度: 高
 
-- [ ] **`--recreate` の破壊的順序を見直し（staging 切り替え）** — `ragcore/src/ingest.rs:206-210` / R2-ER / 削除後に失敗すると旧数据在失う
 - [ ] **検証済み Endpoint 型を全 HTTP アダプタへ適用** — `ragcore/src/config.rs:298-363`, `cloud.rs:515-535` / R1-AR, R3-IV / ライブラリ経路でリモート opt-in を迂回可能
 
 ### 優先度: 中
 
+- [ ] **staging 昇格時の重複 ID を拒否** — `ingest.rs:61-80` / R4 レビュー / 欠落と重複が相殺されると別 ID 欠落が通過し得る
 - [ ] **埋め込みレスポンスの `data[].index` 検証（cloud / llama）** — `cloud.rs:103-139`, `llama.rs:157-179` / R2-ER / out-of-order で文書とベクトルが入れ替わる
 - [ ] **LLM スコア不全時の黙った 0 点化を廃止** — `search.rs:341-346,493-496` / R3-IV, R4-OB / 一部スコアで順序が変わる
 - [ ] **時限・件数の入力検証を `Config::validate` と `search()` へ集約** — `config.rs:254-256`, `query.rs:262-300` / R3-IV, R2-FG / 負 timeout・空質問・rerank_max_docs=0 が通る
@@ -66,6 +66,7 @@ status: draft
 
 ## 完了
 
+- [x] `--recreate` を staging コレクション方式へ変更（116 tests）
 - [x] ingest の読み取り・チャンク化失敗を fail-close 化（112 tests）
 - [x] `chrono` を `time` へ置換し RUSTSEC-2026-0543 を解消（cargo audit 通過 / 109 tests）
 - [x] Qdrant レスポンスの構造検証と truncated 伝播（109 tests）
